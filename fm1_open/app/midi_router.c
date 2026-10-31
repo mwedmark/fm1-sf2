@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "instrument.h"
 #include "fm1_engine_control.h"
+#include "fm1b.h"
+#include "fm1b_config.h"
 #include <string.h>
 #ifdef FM1_HOST_TEST
 #include <stdatomic.h>
@@ -95,6 +97,9 @@ void groove_midi_init(void)
     memset(events, 0, sizeof events); memset(output, 0, sizeof output);
     groove_midi_defaults(&config);
     ready_seen = dropped = clock_seen = 0; groove_midi_clock_reset();
+#if FM1B_IN_FIRMWARE
+    fm1b_device_init();
+#endif
 }
 unsigned groove_midi_setting(unsigned track, unsigned parameter)
 {
@@ -286,6 +291,13 @@ int groove_midi_local(const uint8_t *m, size_t n)
     /* An Off/unmapped channel is intentionally silent, not a queue failure.
      * The panel interprets failure as a lost key and performs a global reset. */
     if (!targets) return 0;
+    /* A sampler track plays the FM1B bank, when there is one, from the panel's keys. */
+#if FM1B_IN_FIRMWARE
+    if (fm1b_ready() && (m[0] & 0xe0U) == 0x80U && n == 3)
+        for (unsigned t=0;t<GROOVE_TRACKS;++t)
+            if ((targets & (1U<<t)) && groove_source_type(t) == GROOVE_SAMPLE)
+                fm1b_note(NULL, m[1], (m[0] & 0xf0U) == 0x90U ? m[2] : 0, 100);
+#endif
     int result = (config.flags & LOCAL_OFF) ? 0 : fm1_midi_post(m, n);
     if (result) { groove_midi_panic(); return result; }
     if (!(config.flags & LIVE_OUT)) return 0;

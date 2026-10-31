@@ -26,9 +26,9 @@ static struct {
 } bank;
 static struct voice voices[FM1B_VOICES];
 
-static uint32_t rd16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
-static uint32_t rd32(const uint8_t *p) { return rd16(p) | rd16(p + 2) << 16; }
-static int region_ok(uint32_t offset, uint64_t size)
+static inline __attribute__((always_inline)) uint32_t rd16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
+static inline __attribute__((always_inline)) uint32_t rd32(const uint8_t *p) { return rd16(p) | rd16(p + 2) << 16; }
+static inline __attribute__((always_inline)) int region_ok(uint32_t offset, uint64_t size)
 {
     return offset <= bank.bytes && size <= bank.bytes - offset;
 }
@@ -87,7 +87,7 @@ void fm1b_panic(void)
         voices[i].active = 0;
 }
 
-FM1_DSP_CODE void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level)
+static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned velocity, unsigned level)
 {
     if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127)
         return;
@@ -140,6 +140,24 @@ FM1_DSP_CODE void fm1b_note(const void *owner, unsigned note, unsigned velocity,
     v->gain = (int32_t)((int64_t)velocity * level * 1073741824LL / (127 * 127 * 4));
 }
 
+/* Notes arrive from the panel or MIDI and are played from the audio interrupt, so they go through a small
+ * single-producer, single-consumer ring: fm1b_note() only writes an event and fm1b_render() applies it. */
+enum { QUEUE_SIZE = 32 };
+static struct { const void *owner; uint8_t note, velocity, level; } queue[QUEUE_SIZE];
+static volatile uint32_t queue_head, queue_tail;
+void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level)
+{
+    uint32_t head = queue_head;
+    if (head - queue_tail >= QUEUE_SIZE || note > 127 || velocity > 127 || level > 127)
+        return; /* full: the note is lost, like a dropped MIDI byte */
+    queue[head % QUEUE_SIZE].owner = owner;
+    queue[head % QUEUE_SIZE].note = (uint8_t)note;
+    queue[head % QUEUE_SIZE].velocity = (uint8_t)velocity;
+    queue[head % QUEUE_SIZE].level = (uint8_t)level;
+    __asm__ volatile("" ::: "memory");
+    queue_head = head + 1U;
+}
+
 /* Decode SEA5 group g (20 frames) of voice v. The LMS state carries from one group to the next inside a chunk, so
  * a forward step costs one group; anything else (the first read, a loop jump, a chunk change) starts from the
  * chunk's own seed and costs up to one chunk. */
@@ -173,6 +191,12 @@ static FM1_DSP_CODE int sample_at(struct voice *v, const uint8_t *pcm, uint32_t 
 
 FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
 {
+    while (queue_tail != queue_head) {
+        uint32_t at = queue_tail % QUEUE_SIZE;
+        note_apply(queue[at].owner, queue[at].note, queue[at].velocity, queue[at].level);
+        __asm__ volatile("" ::: "memory");
+        queue_tail = queue_tail + 1U;
+    }
     if (!bank.image)
         return;
     for (unsigned n = 0; n < FM1B_VOICES; ++n) {

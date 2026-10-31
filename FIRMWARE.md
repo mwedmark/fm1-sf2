@@ -15,6 +15,17 @@ cd fm1_open
 ./sdk/Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'
 ```
 
+## The hook is written, but the image is full
+
+The hook (`board/audio.c`), the key route (`groove_midi_local` in `midi_router.c`: a key on a track whose source is the sampler plays the bank),
+the built-in bank (`fm1b_bank.c`, from `make_bank_c.js`) and the note queue between the panel and the audio interrupt are all in the tree,
+behind `FM1B_IN_FIRMWARE` in `fm1_open/app/fm1b_config.h`, which is 0. With 1 the code compiles and links ("SRAM/BLE/USB checks passed") but
+packaging stops with "Application does not fit the FM1 layout.": `sdk/Package.cs` allows an application of
+`0xff000 - 536576 - 4096 - 32768 - 16384 - 288 - 383 - 64 = 453 921` bytes and the stock one is 453 576, so 345 bytes are free. The player is about
+3.6 KB (460 968 bytes with a 3.7 KB bank), and the one-preset bank for the first test is another few KB. To get there something has to shrink
+by about 3.5 KB (a UI or factory-voice feature, or a smaller flash area for the user data, which changes the layout), or M-VAVE has to make room.
+The bank itself belongs in the user sample region, not in the image, once an upload path exists.
+
 ## What the device gives us
 
 - The instrument is `libfm1_engine.a`, a binary with a pinned hash (`sdk/synth.json`, checked by `sdk/Build.ps1`). Its sampler is the

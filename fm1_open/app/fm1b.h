@@ -9,7 +9,12 @@
 #define FM1B_H
 #include <stdint.h>
 
+/* The browser has CPU to spare; the device does not (measure fm1_audio_irq's peak before raising this). */
+#ifdef FM1_HOST_TEST
 #define FM1B_VOICES 16U
+#else
+#define FM1B_VOICES 6U
+#endif
 
 /* Validate and bind a bank image, which must stay in place while bound. image NULL unbinds. dqt is the SEA5
  * quantizer table (512 entries). Returns 0, or -1 for a bank that is not FM1B version 1 or does not fit its size. */
@@ -24,4 +29,6 @@ void fm1b_panic(void);
 /* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several
  * sampler instances, each rendered once per block, and a voice must advance exactly once per block. */
 void fm1b_render(const void *owner, int32_t *out, unsigned frames);
+/* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
+void fm1b_device_init(void);
 #endif
