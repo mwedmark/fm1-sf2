@@ -1,7 +1,19 @@
 # From the simulator to a firmware
 
-Status: the player (`fm1_open/app/fm1b.c`) is built and tested in the browser simulator. Nothing here has been built for the
-device, because the JieLi toolchain (`C:\JL\pi32`, version 2.5.3, see `fm1_open/README.md`) is not installed on the development machine.
+Status: the player (`fm1_open/app/fm1b.c`) is tested in the browser simulator, and it compiles with the device toolchain. The stock
+firmware builds here with JieLi 2.5.3 (`pi32v2` clang 4.0.1) into `fm1_open/build/dx7/sdk.elf`, 453 576 bytes, "SRAM/BLE/USB checks passed". The player is
+compiled in but not called, and nothing has been flashed or run on a device.
+
+## The toolchain on this machine
+
+`D:\JL\pi32` (152 MB). JieLi's installer (`2.5.3.exe`, 52 860 672 bytes, signed by ZhuHai JieLi Technology) refuses to run without CodeBlocks in the
+registry, so only the `pi32` folder was unpacked from it with `innoextract` (in an `ubuntu:22.04` container). `bin/clang.exe` has the SHA-256 the SDK expects
+(`d4bc97cf...3bce`), so the build's manifest check passes. Build:
+
+```powershell
+cd fm1_open
+./sdk/Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'
+```
 
 ## What the device gives us
 
@@ -36,8 +48,8 @@ Use the same note owner for `fm1b_note()` as for `fm1b_render()`.
 
 ## What is still missing
 
-1. **A toolchain and a device to test on.** Install JieLi 2.5.3, set `FM1_PI32_TOOLCHAIN`, then
-   `./sdk/Build.ps1 -FirmwareOnly -Toolchain 'C:\JL\pi32'` builds a firmware; the web workbench flashes it.
+1. **Flashing and a device to test on.** `-FirmwareOnly` stops at `sdk.elf`; the packaged firmware that the web workbench flashes comes from
+   the full `build.bat --package` (needs `FM1_SOURCE_URL`, see `fm1_open/README.md`). Not tried.
 2. **Notes into the player.** The keyboard and MIDI input go into the engine inside the library. `fm1b_note()` must be called with the same
    notes, from wherever the app sees them (the track/key code in `app/`; `midi_router.c` only handles MIDI *output*). Not investigated yet.
 3. **The bank in flash.** `app/samples.c` and `app/project.c` both treat the sample region as the 8-slot SEA bank
