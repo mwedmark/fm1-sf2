@@ -381,7 +381,8 @@ function seaDecode(data, frames) {
 function buildBank(sf, presetIdx, opt) {
   const rate = opt.rate, sea = !!opt.sea, bits = sea ? 16 : opt.bits;
   // presetIdx: >= 0 one preset, -1 every sample without key mapping, -2 every preset with its key mapping
-  const groups = presetIdx === -1 ? [{ p: null, zones: allSampleZones(sf) }]
+  const groups = Array.isArray(presetIdx) ? presetIdx.map(i => ({ p: sf.presets[i], zones: presetZones(sf, i) })) :   // a chosen list of presets
+    presetIdx === -1 ? [{ p: null, zones: allSampleZones(sf) }]
     : presetIdx === -2 ? sf.presets.map((p, i) => ({ p, zones: presetZones(sf, i) }))
     : [{ p: sf.presets[presetIdx], zones: presetZones(sf, presetIdx) }];
   const cache = new Map(), samples = [], out = [], presets = [];
