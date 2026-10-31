@@ -4,5 +4,5 @@
 /* 1: the firmware plays an FM1B bank (the hooks in board/audio.c and midi_router.c, the bank in fm1b_bank.c).
  * It is 0 because the stock image has 345 bytes to spare in the FM1 layout (sdk/Package.cs) and the player needs about
  * 3.6 KB plus a bank, so a build with 1 stops at "Application does not fit the FM1 layout." until something else shrinks. */
-#define FM1B_IN_FIRMWARE 0
+#define FM1B_IN_FIRMWARE 1
 #endif

@@ -15,7 +15,22 @@ cd fm1_open
 ./sdk/Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'
 ```
 
-## The hook is written, but the image is full
+## The SF2-player firmware (branch `sf2-player`)
+
+The device is meant to be only an SF2 player, so the branch removes the stock application (panel UI, projects, presets, factory voices, sample
+transfer, MIDI router: `screen.c`, `project.c`, `presets.c`, `fm_factory.c`, `fm_library.c`, `samples.c`, `midi_router.c`) and keeps what the library
+and the build need. `libfm1_engine.a` (engine, Bluetooth, USB) stays; it calls 20 `groove_*` hooks the stock code provided, which
+`app/sf2player.c` now stubs. The 27 keys play the bank (F3..G5, first encoder = program), MIDI input from DIN, USB and BLE plays it too
+(`app/transfer.c`: `fm1_app_midi_received`), and `board/audio.c` mixes the player into the engine's output. `app/keep_linked.c`
+references every library global, because `sdk/Build.ps1` insists that the engine's SRAM code is linked and the linker otherwise drops it.
+
+Result with the stock `Build.ps1` and `manifest.json` untouched: app image **394 972 bytes** (stock 453 576), "SRAM/BLE/USB checks passed", and
+`build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc` is written. That leaves about 59 KB for a bank in the image. The user flash region and the
+layout are unchanged. Not flashed and not run on a device. Whether the web workbench accepts a custom `.fwsc`, and what the screen,
+keys, LEDs and volume knob do under this firmware, is unknown. Flashing something untested to the only device can leave it needing a recovery with M-VAVE's
+tools; keep the original firmware (`sdk/firmware/FM-1_015.fwsc`) at hand.
+
+## The hook is written, but the stock image is full
 
 The hook (`board/audio.c`), the key route (`groove_midi_local` in `midi_router.c`: a key on a track whose source is the sampler plays the bank),
 the built-in bank (`fm1b_bank.c`, from `make_bank_c.js`) and the note queue between the panel and the audio interrupt are all in the tree,
