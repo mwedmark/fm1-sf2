@@ -4,8 +4,7 @@
 #include "engine.h"
 #include "fm1_param.h"
 
-enum { SAMPLE_DRUM_PADS = 8, SAMPLE_DRUM_VOICES = 24, SAMPLE_DRUM_PARAMS = 6,
-       SAMPLE_DRUM_MELODIC_VOICES = 16 };
+enum { SAMPLE_DRUM_PADS = 8, SAMPLE_DRUM_VOICES = 24, SAMPLE_DRUM_PARAMS = 6 };
 /* All eight pads share this bank. A single sample may use every available
  * complete SEA5 block; there is no separate per-pad duration allocation. */
 enum { SAMPLE_DRUM_BANK_BYTES = 466944, SAMPLE_DRUM_BANK_HEADER = 512,

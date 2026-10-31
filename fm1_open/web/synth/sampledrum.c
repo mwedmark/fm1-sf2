@@ -2,6 +2,7 @@
 #include "voices.h"
 #include "fixed.h"
 #include "fm1_sea.h"
+#include "fm1b.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -106,179 +107,28 @@ FM1_DSP_ENTRY void sampledrum_panic(sampledrum_t *s)
 {
     for (unsigned i = 0; i < SAMPLE_DRUM_VOICES; ++i)
         s->voice[i].active = 0;
-    for (unsigned i = 0; i < SAMPLE_DRUM_MELODIC_VOICES; ++i)
-        s->mvoice[i].active = 0;
+    fm1b_panic();
 }
 
-/* ---- Melodic FM1B bank (fm1-sf2/FORMAT.md) -------------------------------------------------
- * A lookup is four indexed loads: bank map -> preset -> key map -> zone. Zones hold raw signed
- * PCM at the bank's own rate, played with linear interpolation, looped until note-off. */
-enum { MELODIC_RELEASE = 1500, MELODIC_ENGINE_RATE = 44100 };
-static struct {
-    const uint8_t *image;
-    uint32_t bytes, rate, bits16, sea;
-    uint32_t pitch, bankmap, presets, keymaps, zones, preset_count, zone_count;
-    int32_t preset; /* -1: none selected */
-} fm1b;
-static uint32_t rd16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
-static uint32_t rd32(const uint8_t *p) { return rd16(p) | rd16(p + 2) << 16; }
-static int region_ok(uint32_t offset, uint64_t size)
-{
-    return offset <= fm1b.bytes && size <= fm1b.bytes - offset;
-}
+/* ---- Melodic FM1B bank ---------------------------------------------------------------------
+ * The player itself is app/fm1b.c, shared with the firmware. This track only hands it notes and
+ * adds its output to the sampler's mix. */
 int sampledrum_melodic_bind(const uint8_t *image, unsigned bytes)
 {
-    fm1b.image = NULL;
-    fm1b.preset = -1;
-    if (!image)
-        return 0;
-    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (rd16(image + 6) & ~3U) ||
-        rd32(image + 40) != bytes)
-        return -1;
-    fm1b.bytes = bytes;
-    fm1b.bits16 = rd16(image + 6) & 1U;
-    fm1b.sea = (rd16(image + 6) >> 1) & 1U; /* flag bit 1: zones are SEA5 chunks */
-    fm1b.rate = rd32(image + 8);
-    fm1b.preset_count = rd16(image + 12);
-    fm1b.zone_count = rd16(image + 14);
-    fm1b.pitch = rd32(image + 16);
-    fm1b.bankmap = rd32(image + 20);
-    fm1b.presets = rd32(image + 24);
-    fm1b.keymaps = rd32(image + 28);
-    fm1b.zones = rd32(image + 32);
-    if (fm1b.rate < 4000 || fm1b.rate > 96000 || !region_ok(fm1b.pitch, 512) || !region_ok(fm1b.bankmap, 512) ||
-        !region_ok(fm1b.presets, 24ULL * fm1b.preset_count) || !region_ok(fm1b.keymaps, 128ULL * fm1b.preset_count) ||
-        !region_ok(fm1b.zones, 20ULL * fm1b.zone_count))
-        return -1;
-    fm1b.image = image;
-    for (unsigned slot = 0; slot < 256 && fm1b.preset < 0; ++slot) {
-        uint32_t p = rd16(image + fm1b.bankmap + slot * 2U);
-        if (p < fm1b.preset_count)
-            fm1b.preset = (int32_t)p;
-    }
-    return 0;
+    return fm1b_bind(image, bytes, sample_dqt);
 }
 int sampledrum_melodic_program(unsigned bank, unsigned program)
 {
-    if (!fm1b.image || program > 127 || (bank != 0 && bank != 128))
-        return -1;
-    uint32_t p = rd16(fm1b.image + fm1b.bankmap + ((bank ? 128U : 0U) + program) * 2U);
-    if (p >= fm1b.preset_count)
-        return -1;
-    fm1b.preset = (int32_t)p;
-    return 0;
+    return fm1b_program(bank, program);
 }
 FM1_DSP_CODE unsigned sampledrum_melodic_ready(void)
 {
-    return fm1b.image && fm1b.preset >= 0;
+    return fm1b_ready();
 }
 FM1_DSP_CODE void sampledrum_play(sampledrum_t *s, unsigned note, unsigned velocity)
 {
-    if (!s || !sampledrum_melodic_ready() || note > 127 || velocity > 127)
-        return;
-    if (!velocity) {
-        /* Only looped zones sustain; a one-shot plays to its end like a struck drum. */
-        for (unsigned i = 0; i < SAMPLE_DRUM_MELODIC_VOICES; ++i)
-            if (s->mvoice[i].active && s->mvoice[i].note == note && !s->mvoice[i].releasing &&
-                s->mvoice[i].loop_end) {
-                s->mvoice[i].releasing = 1;
-                s->mvoice[i].release = MELODIC_RELEASE;
-            }
-        return;
-    }
-    uint32_t key = fm1b.image[fm1b.keymaps + (uint32_t)fm1b.preset * 128U + note];
-    const uint8_t *preset = fm1b.image + fm1b.presets + (uint32_t)fm1b.preset * 24U;
-    uint32_t first = rd16(preset), count = rd16(preset + 2);
-    if (key == 0xff || key >= count || first + key >= fm1b.zone_count)
-        return;
-    const uint8_t *zone = fm1b.image + fm1b.zones + (first + key) * 20U;
-    uint32_t data = rd32(zone), length = rd32(zone + 4), start = rd32(zone + 8), end = rd32(zone + 12);
-    unsigned unit = fm1b.bits16 ? 2U : 1U;
-    uint64_t span = fm1b.sea ? (uint64_t)((length + 319U) / 320U) * CHUNK_BYTES : (uint64_t)length * unit;
-    if (!length || !region_ok(data, span))
-        return;
-    if (!(zone[17] & 1U) || end <= start || end > length)
-        end = start = 0; /* no loop */
-    int index = (int)note - (int)zone[16] + 64;
-    index = index < 0 ? 0 : index > 127 ? 127 : index;
-    uint32_t pitch = rd32(fm1b.image + fm1b.pitch + (uint32_t)index * 4U);
-
-    unsigned slot = SAMPLE_DRUM_MELODIC_VOICES, oldest = 0;
-    for (unsigned i = 0; i < SAMPLE_DRUM_MELODIC_VOICES; ++i) {
-        if (!s->mvoice[i].active) { slot = i; break; }
-        if ((uint32_t)(s->mage - s->mvoice[i].age) > (uint32_t)(s->mage - s->mvoice[oldest].age))
-            oldest = i;
-    }
-    if (slot == SAMPLE_DRUM_MELODIC_VOICES)
-        slot = oldest;
-    memset(&s->mvoice[slot], 0, sizeof s->mvoice[slot]);
-    s->mvoice[slot].active = 1;
-    s->mvoice[slot].note = (uint8_t)note;
-    s->mvoice[slot].age = ++s->mage;
-    s->mvoice[slot].cache_index[0] = s->mvoice[slot].cache_index[1] = -1;
-    s->mvoice[slot].data = data;
-    s->mvoice[slot].length = length;
-    s->mvoice[slot].loop_start = start;
-    s->mvoice[slot].loop_end = end;
-    s->mvoice[slot].step = (uint32_t)(((uint64_t)pitch * fm1b.rate + MELODIC_ENGINE_RATE / 2U) / MELODIC_ENGINE_RATE);
-    s->mvoice[slot].gain = (int32_t)((int64_t)velocity * s->pot[0][SAMPLE_DRUM_LEVEL] * FM_Q30_ONE / (127 * 127 * 4));
-}
-/* A SEA5 chunk is self-contained (it carries its own LMS seed), so a read anywhere, including a
- * loop jump, decodes the one chunk it lands in. Chunks go in the cache slot of their parity, so
- * the chunk being read and the next one never evict each other. */
-static FM1_DSP_CODE int melodic_at(sampledrum_t *s, unsigned v, const uint8_t *pcm, uint32_t at)
-{
-    if (fm1b.sea) {
-        int32_t chunk = (int32_t)(at / 320U);
-        unsigned slot = (unsigned)chunk & 1U;
-        if (s->mvoice[v].cache_index[slot] != chunk) {
-            if (fm1_sea_decode(pcm + (uint32_t)chunk * CHUNK_BYTES, CHUNK_BYTES, 5, sample_dqt,
-                               s->mvoice[v].cache[slot]))
-                memset(s->mvoice[v].cache[slot], 0, sizeof s->mvoice[v].cache[slot]);
-            s->mvoice[v].cache_index[slot] = chunk;
-        }
-        return s->mvoice[v].cache[slot][at % 320U];
-    }
-    return fm1b.bits16 ? (int16_t)rd16(pcm + at * 2U) : (int)(int8_t)pcm[at] * 256;
-}
-static FM1_DSP_CODE void melodic_render(sampledrum_t *s, int32_t *out, unsigned frames)
-{
-    if (!fm1b.image)
-        return;
-    for (unsigned v = 0; v < SAMPLE_DRUM_MELODIC_VOICES; ++v) {
-        if (!s->mvoice[v].active)
-            continue;
-        const uint8_t *pcm = fm1b.image + s->mvoice[v].data;
-        uint32_t length = s->mvoice[v].length, ls = s->mvoice[v].loop_start, le = s->mvoice[v].loop_end;
-        for (unsigned i = 0; i < frames; ++i) {
-            uint32_t position = s->mvoice[v].position;
-            if (le && position >= le) {
-                position = ls + (position - le) % (le - ls);
-                s->mvoice[v].position = position;
-            }
-            if (position >= length) {
-                s->mvoice[v].active = 0;
-                break;
-            }
-            uint32_t next = position + 1;
-            if (le && next >= le)
-                next = ls;
-            int a = melodic_at(s, v, pcm, position), b = next < length ? melodic_at(s, v, pcm, next) : 0;
-            int64_t mixed = (int64_t)a * 65536 + (int64_t)(b - a) * s->mvoice[v].fraction;
-            int32_t y = (int32_t)((mixed * s->mvoice[v].gain) >> 37);
-            if (s->mvoice[v].releasing) {
-                y = (int32_t)((int64_t)y * s->mvoice[v].release / MELODIC_RELEASE);
-                if (!--s->mvoice[v].release)
-                    s->mvoice[v].active = 0;
-            }
-            out[i] += y;
-            uint32_t phase = s->mvoice[v].fraction + s->mvoice[v].step;
-            s->mvoice[v].position += phase >> 16;
-            s->mvoice[v].fraction = phase & 65535U;
-            if (!s->mvoice[v].active)
-                break;
-        }
-    }
+    if (s)
+        fm1b_note(s, note, velocity, s->pot[0][SAMPLE_DRUM_LEVEL]);
 }
 FM1_DSP_CODE unsigned sampledrum_note(unsigned pad)
 {
@@ -470,7 +320,7 @@ FM1_DSP_ENTRY void sampledrum_render(sampledrum_t *s, int32_t *out, unsigned fra
                 break;
         }
     }
-    melodic_render(s, out, frames);
+    fm1b_render(s, out, frames);
 }
 
 size_t sampledrum_size(void) { return sizeof(sampledrum_t); }

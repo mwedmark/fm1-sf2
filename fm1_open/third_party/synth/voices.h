@@ -68,17 +68,6 @@ struct sampledrum {
     uint32_t age, limit;
     uint8_t pot[SAMPLE_DRUM_PADS][SAMPLE_DRUM_PARAMS];
     uint8_t round[SAMPLE_DRUM_PADS];
-    /* Melodic FM1B voices: raw PCM from a zone, 16.16 position, optional loop. */
-    struct {
-        uint32_t position, fraction, step, age, data, length, loop_start, loop_end;
-        int32_t gain;
-        uint16_t release;
-        uint8_t note, active, releasing;
-        /* SEA5 zones: the two most recent 320-frame chunks, by chunk parity (-1: empty). */
-        int32_t cache_index[2];
-        int16_t cache[2][320];
-    } mvoice[SAMPLE_DRUM_MELODIC_VOICES];
-    uint32_t mage;
 };
 
 #endif
