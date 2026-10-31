@@ -46,10 +46,11 @@ void groove_screen_control(void)
     struct fm1_controls controls;
     fm1_controls_read(&controls);
     (void)groove_master_update(controls.knob);               /* the volume knob; without it the output stays muted */
-    if (controls.encoders[0]) {                               /* first encoder: next / previous program */
-        int next = (int)program + controls.encoders[0];
-        if (next >= 0 && next < 128 && fm1b_program(0, (unsigned)next) == 0)
-            program = (unsigned)next;
+    if (controls.encoders[0]) {                               /* first encoder: next / previous program the bank has */
+        int step = controls.encoders[0] > 0 ? 1 : -1;
+        for (int clicks = controls.encoders[0] * step; clicks > 0; --clicks)
+            for (int next = (int)program + step; next >= 0 && next < 128; next += step)
+                if (fm1b_program(0, (unsigned)next) == 0) { program = (unsigned)next; break; }
     }
     uint32_t changed = controls.keys ^ previous_keys;
     for (unsigned key = 0; key < KEYS; ++key) {

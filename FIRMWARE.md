@@ -30,6 +30,19 @@ layout are unchanged. Not flashed and not run on a device. Whether the web workb
 keys, LEDs and volume knob do under this firmware, is unknown. Flashing something untested to the only device can leave it needing a recovery with M-VAVE's
 tools; keep the original firmware (`sdk/firmware/FM-1_015.fwsc`) at hand.
 
+### Run in the browser emulator (fm1-emu)
+
+[fm1-emu](https://joakimeriksson.github.io/fm1-emu/) emulates the FM-1's CPU and runs `.fwsc` packages unchanged; **Open .fwsc...** takes ours.
+Its page cannot read files from a local server across origins, so a local copy of the site's files (`index.html`, `main.js`, `worklet.js`,
+`persistence.js`, `fwsc.js`, `tryout.js`, `firmwares.json`, `fm1_web.wasm`) was served next to the package for the tests. Measured at 120 MHz with the
+status line's `load`: the stock library engine alone cost 26 % when idle (36 % total), so `board/audio.c` skips `fm1_engine_render()` for the player
+(`FM1B_SKIP_ENGINE`); then idle is 10-14 % and a voice costs about 12 % (Harmonica, 22 kHz bank) or 4 % (piano, 12 kHz bank). Keys down raise the load and
+releasing them lowers it again, so the key -> note queue -> SEA5 decode -> mix path runs. Audio was not listened to and the screen only shows a dark background.
+
+`dist/sf2player_gm22.fwsc` (not committed) is the firmware with `make_bank_c.js 1mgm.sf2 0,4,6,11,16,19,24,25,27,32,33,40,48,56,60,65,71,73,80,88,104,115 12000`:
+22 GM melodic programs at 12 kHz SEA5, 57 576 bytes, app image 448 796 of 453 921 allowed. The first encoder steps through the programs the bank has.
+The whole `1mgm.sf2` (316 604 bytes at 32 kHz) does not fit: the package carries the image, not the user flash.
+
 ## The hook is written, but the stock image is full
 
 The hook (`board/audio.c`), the key route (`groove_midi_local` in `midi_router.c`: a key on a track whose source is the sampler plays the bank),
