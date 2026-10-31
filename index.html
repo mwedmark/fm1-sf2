@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SF2 till FM-1</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66;
+    --line: #dcdcd5; --accent: #1f6feb; --accent-ink: #ffffff; --ok: #1a7f37; --warn: #9a6700;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92;
+      --line: #34342f; --accent: #5b9bff; --accent-ink: #0b1220; --ok: #56d364; --warn: #e3b341;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  #drop { display: block; text-align: center; padding: 36px 16px; border: 2px dashed var(--line);
+          border-radius: 10px; cursor: pointer; background: var(--panel); margin-bottom: 16px; }
+  #drop.over, #drop:focus-visible { border-color: var(--accent); outline: none; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+  #drop strong { display: block; font-size: 16px; }
+  #drop span { color: var(--muted); }
+  #file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  label.f { display: block; margin: 0 0 12px; }
+  label.f > span { display: block; font-weight: 600; margin-bottom: 4px; }
+  select, button { font: inherit; }
+  select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+  button { padding: 9px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .meta { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  [hidden] { display: none !important; }
+  .tablewrap { max-height: 280px; overflow: auto; margin-top: 8px; }
+  .keys { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0; }
+  .keys button { min-width: 38px; padding: 14px 4px 6px; font-size: 11px; background: var(--panel); color: var(--ink); border-radius: 4px; }
+  .keys button.black { background: var(--ink); color: var(--bg); padding-top: 6px; }
+  .keys button.down { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>SF2 till FM-1</h1>
+  <p class="sub">Dra in en SoundFont. Allt sker i webbläsaren, filen lämnar aldrig datorn.</p>
+
+  <label id="drop" for="file" tabindex="0">
+    <strong id="dropTitle">Släpp en .sf2-fil här</strong>
+    <span>eller klicka för att välja</span>
+    <input id="file" type="file" accept=".sf2">
+  </label>
+
+  <section id="opts" class="panel" hidden>
+    <p class="meta" id="info"></p>
+    <label class="f"><span>Preset</span><select id="preset"></select></label>
+    <div class="row">
+      <label class="f"><span>Kodning</span>
+        <select id="codec">
+          <option value="sea" selected>SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
+          <option value="pcm">Rå PCM</option>
+        </select></label>
+      <label class="f"><span>Samplingsfrekvens</span>
+        <select id="rate">
+          <option value="32000" selected>32 000 Hz (SEA5)</option>
+          <option value="11029">11 029 Hz (FM-1 ÷ 4)</option>
+          <option value="14706">14 706 Hz (FM-1 ÷ 3)</option>
+          <option value="22059">22 059 Hz (FM-1 ÷ 2)</option>
+          <option value="44118">44 118 Hz (FM-1, hel)</option>
+          <option value="8000">8 000 Hz</option>
+          <option value="11025">11 025 Hz</option>
+          <option value="22050">22 050 Hz</option>
+          <option value="44100">44 100 Hz</option>
+        </select></label>
+      <label class="f"><span>Bitdjup</span>
+        <select id="bits">
+          <option value="8" selected>8 bit</option>
+          <option value="16">16 bit</option>
+        </select></label>
+    </div>
+    <div class="actions"><button id="go" class="primary">Konvertera</button></div>
+  </section>
+
+  <section id="result" class="panel" hidden>
+    <p class="meta" id="summary"></p>
+    <div class="actions">
+      <button id="dlSf2">Ladda ned .sf2</button>
+      <button id="dlBin">Ladda ned .bin</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Ljud</th><th class="n">Toner</th><th class="n">Grundton</th><th>Loop</th><th class="n">Byte</th></tr></thead>
+        <tbody id="zones"></tbody>
+      </table>
+    </div>
+  </section>
+  <section id="play" class="panel" hidden>
+    <label class="f"><span>Provspela i FM-1-simulatorn</span><select id="program"></select></label>
+    <div id="keys" class="keys" role="group" aria-label="Pianotangenter"></div>
+    <p class="meta" id="playHelp">Klicka på tangenterna eller spela med datorns tangentbord: a w s e d f t g y h u j k. Oktav ned/upp: z / x.</p>
+  </section>
+  <p id="err" class="warn" role="alert" hidden></p>
+</main>
+<script src="simulator_wasm.js" onerror="void 0"></script>
+
+<script id="core">
+// ---- SF2 reader -----------------------------------------------------------
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const noteName = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
+
+function parseSf2(buf) {
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  const str = (o, n) => { let s = ''; for (let i = 0; i < n; i++) { const c = u8[o + i]; if (!c) break; s += String.fromCharCode(c); } return s; };
+  if (buf.byteLength < 12 || str(0, 4) !== 'RIFF' || str(8, 4) !== 'sfbk') throw new Error('Det här är ingen SF2-fil (RIFF/sfbk saknas).');
+
+  const chunks = {};
+  let smplOff = 0, smplLen = 0;
+  const end = Math.min(buf.byteLength, 8 + dv.getUint32(4, true));
+  for (let pos = 12; pos + 8 <= end;) {
+    const id = str(pos, 4), size = dv.getUint32(pos + 4, true);
+    if (id === 'LIST') {
+      const stop = Math.min(pos + 8 + size, buf.byteLength);
+      for (let p = pos + 12; p + 8 <= stop;) {
+        const cid = str(p, 4), cs = dv.getUint32(p + 4, true);
+        if (cid === 'smpl') { smplOff = p + 8; smplLen = cs; } else chunks[cid] = { off: p + 8, size: cs };
+        p += 8 + cs + (cs & 1);
+      }
+    }
+    pos += 8 + size + (size & 1);
+  }
+  for (const k of ['phdr', 'pbag', 'pgen', 'inst', 'ibag', 'igen', 'shdr'])
+    if (!chunks[k]) throw new Error('SF2-filen saknar chunken ' + k + '.');
+  if (!smplLen) throw new Error('SF2-filen har ingen 16-bitars sampledata (smpl).');
+
+  const recs = (name, size, fn) => {
+    const c = chunks[name], out = [];
+    for (let i = 0; i + size <= c.size; i += size) out.push(fn(c.off + i));
+    return out;
+  };
+  const sf = {
+    buf, dv, smplOff, smplLen,
+    phdr: recs('phdr', 38, o => ({ name: str(o, 20), preset: dv.getUint16(o + 20, true), bank: dv.getUint16(o + 22, true), bag: dv.getUint16(o + 24, true) })),
+    pbag: recs('pbag', 4, o => ({ gen: dv.getUint16(o, true) })),
+    pgen: recs('pgen', 4, o => ({ op: dv.getUint16(o, true), lo: u8[o + 2], hi: u8[o + 3], s: dv.getInt16(o + 2, true), u: dv.getUint16(o + 2, true) })),
+    inst: recs('inst', 22, o => ({ name: str(o, 20), bag: dv.getUint16(o + 20, true) })),
+    ibag: recs('ibag', 4, o => ({ gen: dv.getUint16(o, true) })),
+    igen: recs('igen', 4, o => ({ op: dv.getUint16(o, true), lo: u8[o + 2], hi: u8[o + 3], s: dv.getInt16(o + 2, true), u: dv.getUint16(o + 2, true) })),
+    shdr: recs('shdr', 46, o => ({
+      name: str(o, 20), start: dv.getUint32(o + 20, true), end: dv.getUint32(o + 24, true),
+      startLoop: dv.getUint32(o + 28, true), endLoop: dv.getUint32(o + 32, true),
+      rate: dv.getUint32(o + 36, true), pitch: u8[o + 40], correction: dv.getInt8(o + 41),
+      link: dv.getUint16(o + 42, true), type: dv.getUint16(o + 44, true)
+    })),
+  };
+  sf.presets = sf.phdr.slice(0, -1);   // last record is the EOP terminator
+  return sf;
+}
+
+function genMap(sf, kind, bagIdx) {
+  const bag = sf[kind + 'bag'], gen = sf[kind + 'gen'], m = {};
+  for (let g = bag[bagIdx].gen; g < bag[bagIdx + 1].gen; g++) m[gen[g].op] = gen[g];
+  return m;
+}
+
+// One entry per playable key range of a preset: {lo, hi, sample, root, loop, loopOffStart, loopOffEnd}
+function presetZones(sf, p) {
+  const ph = sf.phdr[p], next = sf.phdr[p + 1];
+  const zones = [];
+  let pGlobal = null;
+  for (let b = ph.bag; b < next.bag; b++) {
+    const pm = genMap(sf, 'p', b);
+    if (pm[41] === undefined) { if (b === ph.bag) pGlobal = pm; continue; }
+    const pr = pm[43] || (pGlobal && pGlobal[43]);
+    const plo = pr ? pr.lo : 0, phi = pr ? pr.hi : 127;
+    const ii = sf.inst[pm[41].u], iNext = sf.inst[pm[41].u + 1];
+    if (!ii || !iNext) continue;
+    let iGlobal = null;
+    for (let ib = ii.bag; ib < iNext.bag; ib++) {
+      const im = genMap(sf, 'i', ib);
+      if (im[53] === undefined) { if (ib === ii.bag) iGlobal = im; continue; }
+      const g = k => im[k] || (iGlobal && iGlobal[k]);
+      const kr = g(43);
+      const lo = Math.max(kr ? kr.lo : 0, plo), hi = Math.min(kr ? kr.hi : 127, phi);
+      if (lo > hi) continue;
+      const vr = g(44);
+      const sample = im[53].u;
+      const sh = sf.shdr[sample];
+      if (!sh || sh.type === 2) continue;            // right channel of a stereo pair: the left one is used as mono
+      const rk = g(58), mode = g(54);
+      const n = k => { const v = g(k); return v ? v.s : 0; };
+      zones.push({
+        lo, hi, sample,
+        vlo: vr ? vr.lo : 0, vhi: vr ? vr.hi : 127,
+        root: rk && rk.s >= 0 && rk.s <= 127 ? rk.s : (sh.pitch <= 127 ? sh.pitch : 60),
+        loop: !!mode && (mode.u & 3) !== 0 && (mode.u & 3) !== 2,
+        loopOffStart: n(2) + n(45) * 32768,
+        loopOffEnd: n(3) + n(50) * 32768,
+      });
+    }
+  }
+  // Several velocity layers would stack on the same keys: keep the layers that answer to velocity 100.
+  const hit = zones.filter(z => z.vlo <= 100 && z.vhi >= 100);
+  const kept = hit.length ? hit : zones;
+  kept.sort((a, b) => a.lo - b.lo || a.hi - b.hi);
+  return kept;
+}
+
+// Every sample in the file as one zone spanning the whole keyboard, like the original convert.py.
+// A sample loops only when some instrument zone uses it with a loop mode.
+function allSampleZones(sf) {
+  const looped = new Set();
+  for (let i = 0; i < sf.inst.length - 1; i++) {
+    let glob = null;
+    for (let b = sf.inst[i].bag; b < sf.inst[i + 1].bag; b++) {
+      const m = genMap(sf, 'i', b);
+      if (m[53] === undefined) { if (b === sf.inst[i].bag) glob = m; continue; }
+      const mode = m[54] || (glob && glob[54]);
+      if (mode && ((mode.u & 3) === 1 || (mode.u & 3) === 3)) looped.add(m[53].u);
+    }
+  }
+  const zones = [];
+  for (let i = 0; i < sf.shdr.length - 1; i++) {   // last record is EOS
+    const sh = sf.shdr[i];
+    if (sh.type === 2 || sh.end - sh.start < 2) continue;
+    zones.push({ lo: 0, hi: 127, sample: i, root: sh.pitch <= 127 ? sh.pitch : 60, loop: looped.has(i), loopOffStart: 0, loopOffEnd: 0 });
+  }
+  return zones;
+}
+
+// ---- Resampling -----------------------------------------------------------
+
+function readSample(sf, sh) {
+  const n = Math.max(0, sh.end - sh.start), out = new Float32Array(n);
+  const base = sf.smplOff + sh.start * 2;
+  for (let i = 0; i < n; i++) {
+    if (base + i * 2 + 2 > sf.buf.byteLength) break;
+    out[i] = sf.dv.getInt16(base + i * 2, true);
+  }
+  return out;
+}
+
+// Linear interpolation when going up, box average when going down (cheap anti-aliasing).
+function resample(src, ratio) {
+  const n = Math.max(1, Math.floor(src.length * ratio)), out = new Float32Array(n);
+  if (src.length === 0) return out;
+  for (let i = 0; i < n; i++) {
+    if (ratio >= 1) {
+      const pos = i / ratio, i0 = Math.floor(pos), f = pos - i0;
+      const a = src[Math.min(i0, src.length - 1)], b = src[Math.min(i0 + 1, src.length - 1)];
+      out[i] = a + (b - a) * f;
+    } else {
+      const s0 = Math.floor(i / ratio), s1 = Math.max(s0 + 1, Math.min(src.length, Math.floor((i + 1) / ratio)));
+      let sum = 0;
+      for (let k = s0; k < s1; k++) sum += src[Math.min(k, src.length - 1)];
+      out[i] = sum / (s1 - s0);
+    }
+  }
+  return out;
+}
+
+// ---- SEA5 encoder -----------------------------------------------------------
+// Port of fm1_open/web/synth/sea_encode.h (MIT, (c) 2025 Dani Biro, modifications (c) 2026 M-VAVE): the FM-1's own
+// sample codec. A chunk is 320 frames in 228 bytes (0.7125 byte per sample) and carries its own LMS seed, so
+// a decoder can start in any chunk. Sums are kept in doubles: they stay below 2^53, so they are exact.
+
+const SEA_FRAMES = 320, SEA_GROUP = 20, SEA_CHUNK = 228;
+const SEA_DQT = Int16Array.from([1,-1,3,-3,5,-5,7,-7,9,-9,11,-11,13,-13,15,-15,17,-17,19,-19,21,-21,23,-23,25,-25,27,-27,29,-29,31,-31,4,-4,13,-13,23,-23,33,-33,43,-43,53,-53,63,-63,73,-73,83,-83,93,-93,103,-103,113,-113,123,-123,133,-133,143,-143,155,-155,11,-11,35,-35,63,-63,91,-91,119,-119,147,-147,175,-175,203,-203,231,-231,259,-259,287,-287,315,-315,343,-343,371,-371,399,-399,434,-434,21,-21,70,-70,126,-126,182,-182,238,-238,294,-294,350,-350,406,-406,462,-462,518,-518,574,-574,630,-630,686,-686,742,-742,798,-798,868,-868,36,-36,120,-120,216,-216,312,-312,408,-408,504,-504,600,-600,696,-696,792,-792,888,-888,984,-984,1080,-1080,1176,-1176,1272,-1272,1368,-1368,1488,-1488,56,-56,188,-188,338,-338,488,-488,638,-638,788,-788,938,-938,1088,-1088,1238,-1238,1388,-1388,1538,-1538,1688,-1688,1838,-1838,1988,-1988,2138,-2138,2325,-2325,81,-81,270,-270,486,-486,702,-702,918,-918,1134,-1134,1350,-1350,1566,-1566,1782,-1782,1998,-1998,2214,-2214,2430,-2430,2646,-2646,2862,-2862,3078,-3078,3348,-3348,113,-113,375,-375,675,-675,975,-975,1275,-1275,1575,-1575,1875,-1875,2175,-2175,2475,-2475,2775,-2775,3075,-3075,3375,-3375,3675,-3675,3975,-3975,4275,-4275,4650,-4650,149,-149,498,-498,896,-896,1294,-1294,1692,-1692,2090,-2090,2488,-2488,2886,-2886,3284,-3284,3682,-3682,4080,-4080,4478,-4478,4876,-4876,5274,-5274,5672,-5672,6169,-6169,193,-193,643,-643,1157,-1157,1671,-1671,2185,-2185,2699,-2699,3213,-3213,3727,-3727,4241,-4241,4755,-4755,5269,-5269,5783,-5783,6297,-6297,6811,-6811,7325,-7325,7967,-7967,242,-242,808,-808,1454,-1454,2100,-2100,2746,-2746,3392,-3392,4038,-4038,4684,-4684,5330,-5330,5976,-5976,6622,-6622,7268,-7268,7914,-7914,8560,-8560,9206,-9206,10013,-10013,299,-299,995,-995,1791,-1791,2587,-2587,3383,-3383,4179,-4179,4975,-4975,5771,-5771,6567,-6567,7363,-7363,8159,-8159,8955,-8955,9751,-9751,10547,-10547,11343,-11343,12338,-12338,362,-362,1208,-1208,2174,-2174,3140,-3140,4106,-4106,5072,-5072,6038,-6038,7004,-7004,7970,-7970,8936,-8936,9902,-9902,10868,-10868,11834,-11834,12800,-12800,13766,-13766,14973,-14973,434,-434,1445,-1445,2601,-2601,3757,-3757,4913,-4913,6069,-6069,7225,-7225,8381,-8381,9537,-9537,10693,-10693,11849,-11849,13005,-13005,14161,-14161,15317,-15317,16473,-16473,17918,-17918,512,-512,1705,-1705,3069,-3069,4433,-4433,5797,-5797,7161,-7161,8525,-8525,9889,-9889,11253,-11253,12617,-12617,13981,-13981,15345,-15345,16709,-16709,18073,-18073,19437,-19437,21142,-21142,598,-598,1993,-1993,3587,-3587,5181,-5181,6775,-6775,8369,-8369,9963,-9963,11557,-11557,13151,-13151,14745,-14745,16339,-16339,17933,-17933,19527,-19527,21121,-21121,22715,-22715,24707,-24707]);
+const SEA_RECIPROCAL = [65536, 13107, 4681, 2340, 1365, 873, 606, 436, 329, 255, 202, 164, 135, 113, 96, 82];
+
+function seaSat(x) { return x > 32767 ? 32767 : x < -32768 ? -32768 : x; }
+function seaPredict(st) {
+  return Math.floor((st[0] * st[4] + st[1] * st[5] + st[2] * st[6] + st[3] * st[7]) / 8192);
+}
+function seaUpdate(st, pcm, residual) {
+  const delta = residual >> 4;
+  for (let i = 0; i < 4; i++) st[4 + i] = seaSat(st[4 + i] + (st[i] < 0 ? -delta : delta));
+  st[0] = st[1]; st[1] = st[2]; st[2] = st[3]; st[3] = pcm;
+}
+function seaPenalty(st) {
+  const sum = st[4] * st[4] + st[5] * st[5] + st[6] * st[6] + st[7] * st[7];
+  const v = Math.floor(sum / 262144) - 0x8ff;
+  return v > 0 ? v * v : 0;
+}
+function seaDivide(v, reciprocal) {
+  const n = Math.floor((v * reciprocal + 32768) / 65536);
+  return n + Math.sign(v) - Math.sign(n);
+}
+
+// pcm: Int16Array. Returns the chunks, ceil(n / 320) * 228 bytes.
+function seaEncode(pcm) {
+  const bits = 5, limit = 1 << bits, frames = pcm.length;
+  const blocks = Math.ceil(frames / SEA_FRAMES), data = new Uint8Array(blocks * SEA_CHUNK);
+  const quant = new Uint8Array(2 * limit + 1);
+  let x = limit - 1;
+  quant[0] = x;
+  for (let i = 1; i < limit; i += 2) { quant[i] = quant[i + 1] = x; x -= 2; }
+  x = 0;
+  for (let i = limit; i < 2 * limit; i += 2) { quant[i] = quant[i + 1] = x; x += 2; }
+  quant[2 * limit] = x - 2;
+
+  let state = [0, 0, 0, 0, 0, 0, -8192, 16384], previous = 0;
+  const trialCodes = new Uint8Array(SEA_GROUP), bestCodes = new Uint8Array(SEA_GROUP);
+  for (let block = 0; block < blocks; block++) {
+    const base = block * SEA_CHUNK;
+    data[base] = 1; data[base + 1] = 0x40 | bits; data[base + 2] = SEA_GROUP; data[base + 3] = 0x5a;
+    for (let i = 0; i < 8; i++) { const v = state[i] & 0xffff; data[base + 4 + 2 * i] = v & 255; data[base + 5 + 2 * i] = v >> 8; }
+    for (let group = 0; group < SEA_FRAMES / SEA_GROUP; group++) {
+      let bestRank = Infinity, bestState = null, bestSf = 0;
+      for (let search = 0; search < 16; search++) {
+        const sf = (search + previous) & 15, trial = state.slice(), reciprocal = SEA_RECIPROCAL[sf];
+        let rank = 0, i;
+        for (i = 0; i < SEA_GROUP; i++) {
+          const position = block * SEA_FRAMES + group * SEA_GROUP + i;
+          const sample = position < frames ? pcm[position] : 0;
+          const prediction = seaPredict(trial);
+          let scaled = seaDivide(sample - prediction, reciprocal);
+          if (scaled > limit) scaled = limit;
+          if (scaled < -limit) scaled = -limit;
+          const q = quant[limit + scaled];
+          const residual = SEA_DQT[(sf << bits) + q];
+          const reconstructed = seaSat(prediction + residual);
+          const error = sample - reconstructed;
+          rank += error * error + seaPenalty(trial);
+          if (rank > bestRank) break;
+          trialCodes[i] = q;
+          seaUpdate(trial, reconstructed, residual);
+        }
+        if (i === SEA_GROUP && rank < bestRank) { bestRank = rank; bestSf = sf; bestState = trial; bestCodes.set(trialCodes); }
+      }
+      state = bestState; previous = bestSf;
+      data[base + 20 + (group >> 1)] |= bestSf << ((group & 1) ? 0 : 4);
+      for (let i = 0; i < SEA_GROUP; i++) {
+        const at = (group * SEA_GROUP + i) * bits;
+        const packed = bestCodes[i] << (11 - (at & 7));
+        data[base + 28 + (at >> 3)] |= packed >> 8;
+        if ((at & 7) > 3) data[base + 29 + (at >> 3)] |= packed & 255;
+      }
+    }
+  }
+  return data;
+}
+
+// The decoder side, for tools and tests (the device and the simulator have their own).
+function seaDecode(data, frames) {
+  const out = new Int16Array(Math.ceil(frames / SEA_FRAMES) * SEA_FRAMES), st = new Array(8);
+  for (let b = 0; b * SEA_CHUNK < data.length; b++) {
+    const c = data.subarray(b * SEA_CHUNK, (b + 1) * SEA_CHUNK);
+    for (let i = 0; i < 8; i++) { const v = c[4 + 2 * i] | c[5 + 2 * i] << 8; st[i] = v < 32768 ? v : v - 65536; }
+    for (let g = 0; g < SEA_FRAMES / SEA_GROUP; g++) {
+      const sf = (c[20 + (g >> 1)] >> ((g & 1) ? 0 : 4)) & 15;
+      for (let i = 0; i < SEA_GROUP; i++) {
+        const at = (g * SEA_GROUP + i) * 5;
+        let code = 0;
+        for (let k = 0; k < 5; k++) code = (code << 1) | ((c[28 + ((at + k) >> 3)] >> (7 - ((at + k) & 7))) & 1);
+        const residual = SEA_DQT[(sf << 5) + code], value = seaSat(seaPredict(st) + residual);
+        seaUpdate(st, value, residual);
+        out[b * SEA_FRAMES + g * SEA_GROUP + i] = value;
+      }
+    }
+  }
+  return out.subarray(0, frames);
+}
+
+// ---- Bank building --------------------------------------------------------
+
+function buildBank(sf, presetIdx, opt) {
+  const rate = opt.rate, sea = !!opt.sea, bits = sea ? 16 : opt.bits;
+  // presetIdx: >= 0 one preset, -1 every sample without key mapping, -2 every preset with its key mapping
+  const groups = presetIdx === -1 ? [{ p: null, zones: allSampleZones(sf) }]
+    : presetIdx === -2 ? sf.presets.map((p, i) => ({ p, zones: presetZones(sf, i) }))
+    : [{ p: sf.presets[presetIdx], zones: presetZones(sf, presetIdx) }];
+  const cache = new Map(), samples = [], out = [], presets = [];
+  for (const g of groups) {
+    if (!g.zones.length) continue;
+    const first = out.length;
+    for (const z of g.zones) addZone(z, g.p ? g.p.name : '');
+    if (g.p) presets.push({ name: g.p.name, bank: g.p.bank, preset: g.p.preset, first, count: out.length - first });
+  }
+  let off = 0;
+  for (const s of samples) { s.offset = off; off += s.bytes; }
+  return { zones: out, samples, presets, rate, bits, sea, dataBytes: off };
+
+  function addZone(z, presetName) {
+    const sh = sf.shdr[z.sample];
+    let s = cache.get(z.sample);
+    if (!s) {
+      const srcRate = sh.rate > 0 ? sh.rate : 44100, ratio = rate / srcRate;
+      const f = resample(readSample(sf, sh), ratio);
+      const pcm = bits === 8 ? new Int8Array(f.length) : new Int16Array(f.length);
+      for (let i = 0; i < f.length; i++) {
+        pcm[i] = bits === 8 ? Math.max(-128, Math.min(127, Math.round(f[i] / 256)))
+                            : Math.max(-32768, Math.min(32767, Math.round(f[i])));
+      }
+      const enc = sea ? seaEncode(pcm) : null;               // SEA5 keeps the 16-bit pcm too, for the .sf2 and the tests
+      s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root, loopStart: 0, loopEnd: 0, loop: false };
+      cache.set(z.sample, s);
+      samples.push(s);
+    }
+    const len = s.pcm.length;
+    let ls = Math.floor((sh.startLoop - sh.start + z.loopOffStart) * s.ratio);
+    let le = Math.floor((sh.endLoop - sh.start + z.loopOffEnd) * s.ratio);
+    ls = Math.max(0, ls); le = Math.min(len, le);
+    const loop = z.loop && le > ls;
+    if (loop && !s.loop) { s.loop = true; s.loopStart = ls; s.loopEnd = le; }
+    out.push({ lo: z.lo, hi: z.hi, root: z.root, loop, loopStart: loop ? ls : 0, loopEnd: loop ? le : 0, sample: s, presetName });
+  }
+}
+
+// FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
+// file in place: a lookup is a few indexed loads and never a search.
+//   header (48) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
+//   key maps (128 bytes per preset) | zones (20 each) | sample data (each sample padded to 4 bytes)
+const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
+const FM1B_HEADER = 48, FM1B_PRESET = 24, FM1B_ZONE = 20;
+
+function writeFm1(bank) {
+  // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
+  const slot = p => p.bank === 0 ? p.preset : p.bank === 128 ? 128 + p.preset : -1;
+  const presets = bank.presets.filter(p => slot(p) >= 0 && slot(p) < 256 && p.count <= 254);
+  bank.dropped = bank.presets.length - presets.length;
+  const np = presets.length, nz = bank.zones.length;
+
+  const offPitch = FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
+  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offSmp = offZone + FM1B_ZONE * nz;
+  let end = offSmp;
+  for (const s of bank.samples) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
+
+  const out = new Uint8Array(end), dv = new DataView(out.buffer);
+  out.set([0x46, 0x4d, 0x31, 0x42]);                       // 'FM1B'
+  dv.setUint16(4, 1, true);                                // version
+  // flags: bit 0 = 16-bit samples, bit 1 = SEA5 chunks (the zone then holds ceil(length / 320) chunks of 228 bytes)
+  dv.setUint16(6, bank.sea ? 2 : bank.bits === 16 ? 1 : 0, true);
+  dv.setUint32(8, bank.rate, true);
+  dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
+  [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
+
+  for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
+  for (let i = 0; i < 256; i++) dv.setUint16(offBank + i * 2, 0xffff, true);
+
+  presets.forEach((p, pi) => {
+    const sl = slot(p);
+    if (dv.getUint16(offBank + sl * 2, true) === 0xffff) dv.setUint16(offBank + sl * 2, pi, true);
+    const o = offPre + pi * FM1B_PRESET;
+    dv.setUint16(o, p.first, true); dv.setUint16(o + 2, p.count, true);
+    putName(out, o + 4, p.name);
+    const km = offKey + pi * 128;
+    out.fill(0xff, km, km + 128);
+    for (let k = 0; k < p.count; k++) {                    // lowest zone wins where ranges overlap
+      const z = bank.zones[p.first + k];
+      for (let n = z.lo; n <= z.hi; n++) if (out[km + n] === 0xff) out[km + n] = k;
+    }
+  });
+  bank.zones.forEach((z, i) => {
+    const o = offZone + i * FM1B_ZONE;
+    dv.setUint32(o, z.sample.fileOff, true);
+    dv.setUint32(o + 4, z.sample.pcm.length, true);
+    dv.setUint32(o + 8, z.loopStart, true);
+    dv.setUint32(o + 12, z.loopEnd, true);
+    out[o + 16] = z.root; out[o + 17] = z.loop ? 1 : 0;
+  });
+  for (const s of bank.samples) out.set(s.enc || new Uint8Array(s.pcm.buffer, s.pcm.byteOffset, s.pcm.byteLength), s.fileOff);
+  return out;
+}
+
+
+// ---- Simplified SF2 writer: one preset, one instrument, mono 16-bit samples ----
+
+function concat(parts) {
+  let n = 0; for (const p of parts) n += p.length;
+  const out = new Uint8Array(n); let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+function chunk(id, data) {
+  const pad = data.length & 1, out = new Uint8Array(8 + data.length + pad), dv = new DataView(out.buffer);
+  for (let i = 0; i < 4; i++) out[i] = id.charCodeAt(i);
+  dv.setUint32(4, data.length, true);
+  out.set(data, 8);
+  return out;
+}
+function list(type, parts) {
+  const body = concat(parts), data = new Uint8Array(4 + body.length);
+  for (let i = 0; i < 4; i++) data[i] = type.charCodeAt(i);
+  data.set(body, 4);
+  return chunk('LIST', data);
+}
+function zstr(s) {   // zero terminated, padded to an even length
+  const len = (s.length + 1 + 1) & ~1, out = new Uint8Array(len);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0x7f;
+  return out;
+}
+function putName(u8, o, s) { for (let i = 0; i < Math.min(19, s.length); i++) u8[o + i] = s.charCodeAt(i) & 0x7f; }
+function records(size, items, fn) {
+  const out = new Uint8Array(size * items.length), dv = new DataView(out.buffer);
+  items.forEach((it, i) => fn(dv, out, i * size, it));
+  return out;
+}
+
+function writeSf2(bank, name) {
+  const pcm16 = s => {
+    if (bank.bits === 16) return s.pcm;
+    const o = new Int16Array(s.pcm.length);
+    for (let i = 0; i < o.length; i++) o[i] = s.pcm[i] * 256;
+    return o;
+  };
+  // sample data, each followed by the 46 zero samples SF2 requires
+  const smpl = [], hdr = [];
+  let pos = 0;
+  const used = new Set();
+  for (const s of bank.samples) {
+    const data = pcm16(s);
+    let nm = (s.name || 'S' + s.index).slice(0, 19), k = 1;
+    while (used.has(nm)) nm = (s.name || 'S').slice(0, 15) + '_' + (k++);
+    used.add(nm);
+    // SF2 wants loop points inside the sample with 8 points of margin, also for samples that do not loop
+    const n = data.length, lo = Math.min(8, n >> 2), hi = Math.max(lo, n - 8);
+    const ls = s.loop ? Math.min(Math.max(s.loopStart, lo), hi) : hi - Math.min(8, hi - lo);
+    const le = s.loop ? Math.min(Math.max(s.loopEnd, ls), hi) : hi;
+    hdr.push({ name: nm, start: pos, end: pos + n, ls: pos + ls, le: pos + le, s });
+    smpl.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+    smpl.push(new Uint8Array(92));
+    pos += data.length + 46;
+  }
+  const smplBytes = concat(smpl);
+  const zones = bank.zones;
+
+  // one preset per source preset, each with an instrument of its own; a plain sample dump is one preset
+  const pl = bank.presets.length ? bank.presets : [{ name, bank: 0, preset: 0, first: 0, count: zones.length }];
+  const np = pl.length;
+  const phdr = records(38, pl.concat([null]), (dv, u8, o, p) => {
+    if (p) {
+      putName(u8, o, p.name); dv.setUint16(o + 20, p.preset, true); dv.setUint16(o + 22, p.bank, true);
+      dv.setUint16(o + 24, pl.indexOf(p), true);
+    } else { putName(u8, o, 'EOP'); dv.setUint16(o + 24, np, true); }
+  });
+  const pbag = records(4, pl.concat([null]), (dv, u8, o, p) => dv.setUint16(o, p ? pl.indexOf(p) : np, true));
+  const pmod = new Uint8Array(10);
+  const pgen = records(4, pl.concat([null]), (dv, u8, o, p) => {
+    dv.setUint16(o, p ? 41 : 0, true); dv.setUint16(o + 2, p ? pl.indexOf(p) : 0, true);
+  });
+  const inst = records(22, pl.concat([null]), (dv, u8, o, p) => {
+    if (p) { putName(u8, o, p.name); dv.setUint16(o + 20, p.first, true); } else { putName(u8, o, 'EOI'); dv.setUint16(o + 20, zones.length, true); }
+  });
+  // generators per zone: keyRange, [sampleModes], overridingRootKey, sampleID (last)
+  const gens = [], bagStart = [];
+  for (const z of zones) {
+    bagStart.push(gens.length);
+    gens.push({ op: 43, lo: z.lo, hi: z.hi });
+    if (z.loop) gens.push({ op: 54, u: 1 });
+    gens.push({ op: 58, u: z.root });
+    gens.push({ op: 53, u: z.sample.index });
+  }
+  bagStart.push(gens.length);
+  gens.push({ op: 0, u: 0 });
+  const ibag = records(4, bagStart, (dv, u8, o, g) => dv.setUint16(o, g, true));
+  const imod = new Uint8Array(10);
+  const igen = records(4, gens, (dv, u8, o, g) => {
+    dv.setUint16(o, g.op, true);
+    if (g.lo !== undefined) { u8[o + 2] = g.lo; u8[o + 3] = g.hi; } else dv.setUint16(o + 2, g.u, true);
+  });
+  const shdr = records(46, hdr.concat([null]), (dv, u8, o, h) => {
+    if (!h) { putName(u8, o, 'EOS'); return; }
+    putName(u8, o, h.name);
+    dv.setUint32(o + 20, h.start, true); dv.setUint32(o + 24, h.end, true);
+    dv.setUint32(o + 28, h.ls, true); dv.setUint32(o + 32, h.le, true);
+    dv.setUint32(o + 36, bank.rate, true);
+    u8[o + 40] = h.s.rootKey !== undefined ? h.s.rootKey : 60;
+    dv.setUint16(o + 44, 1, true);   // mono
+  });
+
+  const ifil = new Uint8Array([2, 0, 1, 0]);
+  const info = list('INFO', [chunk('ifil', ifil), chunk('isng', zstr('EMU8000')), chunk('INAM', zstr(name)), chunk('ICMT', zstr('Simplified for FM-1'))]);
+  const sdta = list('sdta', [chunk('smpl', smplBytes)]);
+  const pdta = list('pdta', [chunk('phdr', phdr), chunk('pbag', pbag), chunk('pmod', pmod), chunk('pgen', pgen),
+    chunk('inst', inst), chunk('ibag', ibag), chunk('imod', imod), chunk('igen', igen), chunk('shdr', shdr)]);
+  const body = concat([new Uint8Array([0x73, 0x66, 0x62, 0x6b]), info, sdta, pdta]);   // 'sfbk'
+  const out = new Uint8Array(8 + body.length), dv = new DataView(out.buffer);
+  out.set([0x52, 0x49, 0x46, 0x46]);
+  dv.setUint32(4, body.length, true);
+  out.set(body, 8);
+  return out;
+}
+</script>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let sf = null, baseName = 'bank', bank = null;
+
+  function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1024).toFixed(1) + ' KB'; }
+  function showErr(msg) { $('err').textContent = msg; $('err').hidden = !msg; }
+
+  async function loadFile(file) {
+    showErr(''); $('result').hidden = true; bank = null;
+    try {
+      sf = parseSf2(await file.arrayBuffer());
+    } catch (e) { sf = null; $('opts').hidden = true; showErr(e.message); return; }
+    baseName = file.name.replace(/\.[^.]+$/, '');
+    $('dropTitle').textContent = file.name;
+    $('info').textContent = fmtBytes(file.size) + ', ' + sf.presets.length + ' presets, ' + (sf.shdr.length - 1) + ' samples';
+    const sel = $('preset'); sel.textContent = '';
+    const allP = document.createElement('option');
+    allP.value = -2; allP.textContent = 'Alla presets med tonmappning (' + sf.presets.length + ' instrument)';
+    sel.appendChild(allP);
+    let pick = 0;
+    sf.presets.forEach((p, i) => {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = (p.bank === 128 ? 'Trummor ' : 'Bank ' + p.bank + ' / ') + String(p.preset).padStart(3, '0') + '  ' + p.name;
+      sel.appendChild(o);
+      if (p.bank === 0 && p.preset === 0 && !pick) pick = i;   // option 0 is "all", presets follow
+    });
+    sel.value = -2;
+    $('opts').hidden = false;
+  }
+
+  function convert() {
+    showErr('');
+    try {
+      bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value === 'sea' });
+    } catch (e) { showErr('Konverteringen misslyckades: ' + e.message); return; }
+    if (!bank.zones.length) { $('result').hidden = true; showErr('Presetet har inga spelbara ljud.'); return; }
+    const bin = writeFm1(bank);
+    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zoner, ' + bank.samples.length + ' unika ljud, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA5' : bank.bits + ' bit') +
+      '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
+      (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(mer än enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (ryms i enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
+      (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets utanför bank 0/128 ingår inte i .bin)</span>' : '');
+    const tb = $('zones'); tb.textContent = '';
+    for (const z of bank.zones) {
+      const tr = document.createElement('tr');
+      [z.presetName ? z.presetName + ': ' + z.sample.name : z.sample.name, noteName(z.lo) + ' – ' + noteName(z.hi), noteName(z.root), z.loop ? 'ja' : 'nej', z.sample.bytes.toLocaleString('sv-SE')]
+        .forEach((t, i) => { const td = document.createElement('td'); td.textContent = t; if (i === 4) td.className = 'n'; tr.appendChild(td); });
+      tb.appendChild(tr);
+    }
+    $('result').hidden = false;
+    Play.load(bin);
+  }
+
+  // ---- Playing the bank in the FM-1 simulator (fm1_open compiled to WebAssembly) ----
+  const Play = (() => {
+    let c = null, ctx = null, loaded = false, base = 48;
+    const held = new Set();
+    const KEYMAP = 'awsedftgyhujk';
+    const has = typeof FM1_WASM_B64 !== 'undefined';
+
+    async function start() {
+      if (!c) {
+        const raw = Uint8Array.from(atob(FM1_WASM_B64), ch => ch.charCodeAt(0));
+        c = (await WebAssembly.instantiate(raw, {})).instance.exports;
+        c._initialize(); c.sim_boot(1);
+        if (c.sim_select(0, 5) !== 0) throw new Error('Simulatorn kunde inte välja samplerspåret.');
+      }
+      if (!ctx) {
+        ctx = new AudioContext({ sampleRate: 44100 });
+        const node = ctx.createScriptProcessor(2048, 0, 2), frames = c.sim_block_frames();
+        node.onaudioprocess = e => {
+          const l = e.outputBuffer.getChannelData(0), r = e.outputBuffer.getChannelData(1);
+          for (let at = 0; at < l.length; at += frames) {
+            const f = new Float32Array(c.memory.buffer, c.sim_render(), frames * 2);
+            for (let k = 0; k < frames && at + k < l.length; k++) { l[at + k] = f[k * 2]; r[at + k] = f[k * 2 + 1]; }
+          }
+        };
+        node.connect(ctx.destination);
+      }
+      if (ctx.state === 'suspended') await ctx.resume();
+    }
+    function midi(status, note, velocity) {
+      new Uint8Array(c.memory.buffer, c.sim_file(), 3).set([status, note, velocity]);
+      c.sim_midi(3);
+    }
+    function programs(bin) {
+      const dv = new DataView(bin.buffer, bin.byteOffset, bin.length);
+      const bankMap = dv.getUint32(20, true), presets = dv.getUint32(24, true), out = [];
+      for (let slot = 0; slot < 256; slot++) {
+        const p = dv.getUint16(bankMap + slot * 2, true);
+        if (p === 0xffff) continue;
+        let name = ''; for (let i = 0; i < 20 && bin[presets + p * 24 + 4 + i]; i++) name += String.fromCharCode(bin[presets + p * 24 + 4 + i]);
+        out.push({ slot, label: (slot < 128 ? 'Bank 0 / ' : 'Trummor ') + String(slot % 128).padStart(3, '0') + '  ' + name.trim() });
+      }
+      return out;
+    }
+    async function load(bin) {
+      $('play').hidden = true; loaded = false;
+      if (!has) return;
+      try {
+        await start();
+        if (bin.length > c.sim_melodic_capacity()) throw new Error('Banken är för stor för simulatorn.');
+        new Uint8Array(c.memory.buffer, c.sim_melodic_buffer(), bin.length).set(bin);
+        if (c.sim_melodic_load(bin.length) !== 0) throw new Error('Simulatorn avvisade banken.');
+        const sel = $('program'); sel.textContent = '';
+        for (const p of programs(bin)) { const o = document.createElement('option'); o.value = p.slot; o.textContent = p.label; sel.appendChild(o); }
+        select();
+        loaded = true; $('play').hidden = false; drawKeys();
+      } catch (e) { showErr('Provspelning: ' + e.message); }
+    }
+    function select() {
+      const slot = +$('program').value;
+      c.sim_melodic_program(slot < 128 ? 0 : 128, slot % 128);
+    }
+    function on(n) { if (!loaded || held.has(n)) return; held.add(n); midi(0x90, n, 100); mark(n, true); }
+    function off(n) { if (!held.delete(n)) return; midi(0x90, n, 0); mark(n, false); }
+    function mark(n, down) { const b = document.querySelector('#keys [data-note="' + n + '"]'); if (b) b.classList.toggle('down', down); }
+    function drawKeys() {
+      const box = $('keys'); box.textContent = '';
+      for (let n = base; n < base + 25; n++) {
+        const b = document.createElement('button');
+        b.dataset.note = n; b.textContent = noteName(n);
+        if ([1, 3, 6, 8, 10].includes(n % 12)) b.className = 'black';
+        box.appendChild(b);
+      }
+    }
+    $('program').addEventListener('change', () => loaded && select());
+    const press = e => { const b = e.target.closest('[data-note]'); if (b) { e.preventDefault(); start().then(() => on(+b.dataset.note)); } };
+    const lift = e => { const b = e.target.closest && e.target.closest('[data-note]'); if (b) off(+b.dataset.note); };
+    $('keys').addEventListener('pointerdown', press);
+    $('keys').addEventListener('pointerup', lift);
+    $('keys').addEventListener('pointerleave', e => lift(e), true);
+    window.addEventListener('keydown', e => {
+      if (!loaded || e.repeat || e.ctrlKey || e.metaKey || e.altKey || /^(SELECT|INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+      if (e.key === 'z' || e.key === 'x') { for (const n of [...held]) off(n); base = Math.max(0, Math.min(96, base + (e.key === 'z' ? -12 : 12))); drawKeys(); return; }
+      const i = KEYMAP.indexOf(e.key.toLowerCase());
+      if (i >= 0) start().then(() => on(base + i));
+    });
+    window.addEventListener('keyup', e => { const i = KEYMAP.indexOf(e.key.toLowerCase()); if (i >= 0) off(base + i); });
+    return { load };
+  })();
+
+  function download(bytes, name, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+  drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
+  $('file').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+  // dropping anywhere else on the page must not make the browser open the file
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+
+  $('go').addEventListener('click', convert);
+  const syncCodec = () => { $('bits').disabled = $('codec').value === 'sea'; };   // SEA5 is always coded from 16 bit
+  $('codec').addEventListener('change', syncCodec);
+  syncCodec();
+  $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank), baseName + '_fm1.bin', 'application/octet-stream'));
+  $('dlSf2').addEventListener('click', () => bank && download(writeSf2(bank, +$('preset').value < 0 || bank.presets.length > 1 ? baseName.slice(0, 19) : $('preset').selectedOptions[0].textContent.replace(/^.*?\s{2}/, '').slice(0, 19) || 'FM1'), baseName + '_fm1.sf2', 'audio/x-soundfont'));
+})();
+</script>
+</body>
+</html>
