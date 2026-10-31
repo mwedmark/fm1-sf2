@@ -1,3 +1,4 @@
+#ifndef FM1_HOST_TEST
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 /* SF2 player firmware: the whole application. libfm1_engine.a expects the groove_* functions the stock panel,
  * project and sequencer code provides; here they are stubs, and the keys play an FM1B bank (fm1b.c) that is mixed
@@ -104,3 +105,4 @@ void groove_samples_init(void) {}
 void groove_samples_poll(void) {}
 void groove_transfer_init(void) {}
 void groove_transfer_poll(void) {}
+#endif

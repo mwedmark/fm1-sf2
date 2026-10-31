@@ -1,3 +1,4 @@
+#ifndef FM1_HOST_TEST
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 /* sdk/Build.ps1 requires engine code (the sequencer, DX7, effects, master gain, ...) to be linked into internal SRAM. The stock application referenced
  * them (sequencer, panel, project code); the SF2 player does not, and the linker drops what nothing references, so
@@ -408,3 +409,4 @@ const void *const keep_engine_linked[] __attribute__((used)) = {
     sprintf,
     strdup,
 };
+#endif
