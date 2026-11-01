@@ -32,6 +32,7 @@ void sf2player_play(unsigned note, unsigned velocity)
 
 /* ---- the panel: F3..G5 are 27 keys, bit 0 = F3 (MIDI 53) -------------------------------------------------- */
 enum { FIRST_NOTE = 53, KEYS = 27, BACKGROUND = 0x0210 /* dark teal */ };
+static int octave;                                       /* -2..2, the panel's OCT- / OCT+ (buttons 0 and 1) */
 
 /* ---- the screen: text lines in a 5x7 font, redrawn only when their text changes --------------------------------- */
 /* Five columns per glyph, bit 0 at the top. Digits, then A-Z (the same glyphs as the stock panel). */
@@ -224,12 +225,16 @@ static void screen_update(void)
     d = put_number(d, (int32_t)sf2fx_reverb(), 0);
     d = put_text(d, "  CHORUS ");
     d = put_number(d, (int32_t)sf2fx_chorus(), 0);
+    d = put_text(d, "  OCT ");
+    if (octave > 0) *d++ = '+';
+    d = put_number(d, octave, 0);
     *d = 0;
     line_show(9, 158, line, 1, YELLOW);
     line_show(7, 228, "ENCODER 1 PROG  2 REVERB  3 CHORUS", 1, GREY);
 }
 
-static uint32_t previous_keys;
+static uint32_t previous_keys, previous_buttons;
+static uint8_t sounding[KEYS];                           /* the note each key started, so a release stops that one */
 static unsigned program;
 
 void groove_screen_init(void)
@@ -237,7 +242,8 @@ void groove_screen_init(void)
     fm1_controls_init();
     fm1_screen_init();
     fm1_screen_fill(0, 0, FM1_SCREEN_WIDTH, FM1_SCREEN_HEIGHT, BACKGROUND);
-    previous_keys = 0;
+    previous_keys = previous_buttons = 0;
+    octave = 0;
     program = 0;
     memset(shown, 0, sizeof shown);
 }
@@ -261,12 +267,22 @@ void groove_screen_control(void)
         if (which == 1) sf2fx_set((unsigned)level, sf2fx_chorus());
         else sf2fx_set(sf2fx_reverb(), (unsigned)level);
     }
+    uint32_t pressed = controls.buttons & ~previous_buttons;
+    previous_buttons = controls.buttons;
+    if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */
+        octave += (int)((pressed >> 1) & 1U) - (int)(pressed & 1U);
+        octave = octave < -2 ? -2 : octave > 2 ? 2 : octave;
+    }
     uint32_t changed = controls.keys ^ previous_keys;
     for (unsigned key = 0; key < KEYS; ++key) {
         if (!(changed & (1U << key)))
             continue;
         unsigned on = (controls.keys >> key) & 1U;
-        sf2player_play(FIRST_NOTE + key, on ? 100U : 0U);
+        if (on) {
+            int note = FIRST_NOTE + (int)key + 12 * octave;
+            sounding[key] = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
+        }
+        sf2player_play(sounding[key], on ? 100U : 0U);
         fm1_led_set(14 + key, (int)on);
     }
     previous_keys = controls.keys;

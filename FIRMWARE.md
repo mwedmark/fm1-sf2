@@ -74,7 +74,7 @@ frames after about 20 of them (the same with the flash calls left out), and the 
 The library's own reverb and delay are internal to its engine (local symbols, state for its tracks), so the player has its own: a Freeverb-style reverb (four combs,
 two allpasses a side, mono in and stereo out) and a two-tap chorus (16 ms +- 6.8 ms, 0.8 Hz, opposite on the two channels). About 16 KB of SRAM, 16-bit delay lines, run from the
 audio interrupt after the voices (`board/audio.c`); after 3 s of silence they cost nothing. Levels 0..127 (0 = off), default reverb 30 and chorus 20: MIDI CC 91 (reverb) and
-CC 93 (chorus), and on the panel encoder 2 (reverb) and 3 (chorus), 4 steps a click; the panel shows them. `node test_fx.js` runs it on WebAssembly (off is bit exact dry, the tail
+CC 93 (chorus), and on the panel encoder 2 (reverb) and 3 (chorus), 4 steps a click; the panel shows them. OCT- and OCT+ (buttons 0 and 1) move the keys by octaves, -2..2; a key released stops the note it started. `node test_fx.js` runs it on WebAssembly (off is bit exact dry, the tail
 falls and dies out, no wrap at full level with noise, silence after the idle time, a new note after it). Measured in fm1-emu at 240 MHz with 8 voices held: 56 % with both effects
 off, 62 % with both at 127 (idle 11 %). Not heard on a device.
 
