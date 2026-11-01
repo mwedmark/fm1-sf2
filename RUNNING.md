@@ -79,6 +79,22 @@ The simulator plays on one sampler track through the panel slot only. **MIDI cha
 
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
+**Quick start** (verified): build the firmware (section 1), then
+
+```powershell
+cd D:\git\fm1-sf2
+.\start_emu.ps1            # multitimbral check: serves emu\ on 127.0.0.1:8781 and opens it
+.\start_emu.ps1 -Script '' # no script, play it yourself with the keys or a MIDI keyboard
+.\start_emu.ps1 -Tap       # the page that records the emulator's audio into window.__cap (see step 6)
+```
+
+`start_emu.ps1` keeps the emulator's site files in `emu\` (git ignores it), copies the newest `FM1_OFFICIAL_OPEN.fwsc` and `test_emu\*` into it,
+makes `gm.flash` from `dist\gm_32k.fm1b` when needed, points the `sf2` entry of `firmwares.json` at its port, starts `test_emu\cors_server.py`
+hidden if nothing listens on the port, and opens the URL. The first run copies the emulator's files from the old scratchpad folder below;
+if that is gone it stops and lists the files to download from the site. Stop the server by its port, so that other Python servers survive:
+`Get-NetTCPConnection -State Listen -LocalPort 8781 | ForEach-Object { Stop-Process -Id $_.OwningProcess }`.
+The rest of this section is how it works, and what the script does by hand.
+
 fm1-emu (<https://joakimeriksson.github.io/fm1-emu/>, MIT) runs `.fwsc` packages unchanged. The firmware package has no bank, so it
 shows `NO BANK` until a bank is laid in the user flash. The online page cannot fetch our bank (other origin), so the emulator's site files
 run from a **local copy served with CORS headers**. That copy already exists, in an old scratchpad under Temp:
