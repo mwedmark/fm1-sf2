@@ -1,0 +1,40 @@
+/* Exports for test_multitimbral.js: the real fm1b.c on WebAssembly with a bank, a block buffer and the calls the firmware makes. */
+#include "fm1b.h"
+#include <stdint.h>
+#include "fm1b_dqt.inc"                                  /* the SEA5 quantizer table the firmware binds with */
+#define EXPORT __attribute__((used, visibility("default")))
+enum { BLOCK = 128, BANK_MAX = 1 << 20 };
+static uint8_t bank_image[BANK_MAX];
+static int32_t out[BLOCK];
+EXPORT uint8_t *mt_bank(void) { return bank_image; }
+EXPORT unsigned mt_bank_capacity(void) { return BANK_MAX; }
+EXPORT int mt_bind(unsigned bytes) { return fm1b_bind(bank_image, bytes, fm1b_dqt); }
+EXPORT int32_t *mt_out(void) { return out; }
+EXPORT void mt_block(void)                               /* one audio block, as board/audio.c renders it */
+{
+    for (unsigned i = 0; i < BLOCK; ++i)
+        out[i] = 0;
+    fm1b_render(0, out, BLOCK);
+}
+EXPORT int mt_program(unsigned bank, unsigned program) { return fm1b_program(bank, program); }
+EXPORT void mt_panel_note(unsigned note, unsigned velocity) { fm1b_note(0, note, velocity, 100); }
+EXPORT void mt_note(unsigned channel, unsigned note, unsigned velocity) { fm1b_channel_note(channel, note, velocity, 100); }
+EXPORT void mt_drum(unsigned channel, unsigned note, unsigned velocity) { fm1b_channel_drum_note(channel, note, velocity, 100); }
+EXPORT void mt_channel_program(unsigned channel, unsigned bank, unsigned program) { fm1b_channel_program(channel, bank, program); }
+EXPORT void mt_control(unsigned channel, unsigned controller, unsigned value) { fm1b_channel_control(channel, controller, value); }
+EXPORT unsigned mt_multitimbral(void) { return fm1b_multitimbral(); }
+EXPORT void mt_panic(void) { fm1b_panic(); }
+EXPORT unsigned mt_voices(void)
+{
+    struct fm1b_status st;
+    fm1b_status(&st);
+    return st.voices;
+}
+EXPORT unsigned mt_status(unsigned field)                /* 0 channels, 1 program channel, 2 program number */
+{
+    struct fm1b_status st;
+    fm1b_status(&st);
+    return field == 0 ? st.channels : field == 1 ? st.program_channel : st.program_number;
+}
+EXPORT void mt_panel_drum(unsigned note, unsigned velocity) { fm1b_drum_note(0, note, velocity, 100); }
+EXPORT unsigned mt_has_drums(void) { return fm1b_has_drums(); }

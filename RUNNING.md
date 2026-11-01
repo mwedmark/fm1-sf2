@@ -1,0 +1,209 @@
+# Build, test, run: the short version
+
+Everything needed to get the SF2 player going again. Facts marked **(verified)** were run on this machine on 2026-11-01;
+**(not verified)** means it comes from older notes or is a best guess. Details of the firmware are in `FIRMWARE.md`.
+
+## 0. What is where
+
+| What | Where |
+|---|---|
+| Project | `D:\git\fm1-sf2` (not `D:\git\fm-sf2`, that folder is empty) |
+| JieLi device toolchain 2.5.3 | **`D:\JL\pi32`** (not `C:\JL`). Needs `bin\clang.exe` |
+| WASI SDK 27 (for the WebAssembly tests) | `fm1_open\build\tools\wasi-sdk-27.0-x86_64-windows` (downloaded by `Build-Web.ps1`) |
+| Node, Python 3.13 | on `PATH` (Python only for `http.server`) |
+| Docker | **not needed**. The firmware builds natively (verified). The Docker images on the machine are for other projects |
+| Recovery firmware | `fm1_open\sdk\firmware\FM-1_015.fwsc`, keep it at hand before flashing anything |
+
+## 1. Build the firmware (verified)
+
+```powershell
+cd D:\git\fm1-sf2\fm1_open
+$env:FM1_PI32_TOOLCHAIN = 'D:\JL\pi32'
+./sdk/Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'
+```
+
+Success looks like this, and the five `keep_linked.c` warnings about `malloc`/`calloc`/`realloc`/`sprintf`/`strdup` are old and harmless:
+
+```
+FM1: 403260 bytes app image; SRAM/BLE/USB checks passed
+Offline package fits 1 MiB: image 421888, VM 81920, user 536576 bytes
+```
+
+Outputs, all under `fm1_open\build\dx7\`:
+
+- `generated\FM1_OFFICIAL_OPEN.fwsc` is **the package**: for fm1-emu (section 4) and the M-VAVE workbench.
+- `sdk.elf` is the linked image. `firmware-report.json` has the sizes.
+
+App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB). If a change makes the build stop with
+"Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
+
+`dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
+
+## 2. Tests that need no device (verified, all pass)
+
+Each one compiles the real C source to WebAssembly with the WASI SDK on the first run (and again when a source is newer).
+
+```bash
+cd D:/git/fm1-sf2
+node test_multitimbral.js     # 35 checks: channels, program change, volume, CC120/121/123, channel 10. Uses dist/gm_32k.fm1b
+node test_fx.js               # reverb and chorus (sf2fx.c)
+node test_upload.js           # the SysEx bank upload (sf2_upload.c)
+```
+
+`test_multitimbral.js` runs the real `fm1b.c` with 16 voices (the browser build), the device has 8. It does **not** cover
+`transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the CC10 rule) or the `MULTI` panel line.
+Those are only compiled, so test them in the emulator or on the device.
+
+## 3. The converter and browser simulator (verified)
+
+```powershell
+cd D:\git\fm1-sf2
+python -m http.server 8765
+```
+
+Open <http://localhost:8765/index.html> ("SF2 till FM-1"): drop an `.sf2`, convert to an FM1B bank, play it in the simulator,
+or send it to a connected FM-1 ("Skicka till FM-1", Web MIDI over USB). Serve it, do not open the file directly.
+A server on port 8765 was already running when this was written, so check before starting another.
+
+Rebuild the simulator after changing `fm1b.c` or `fm1_open\web`:
+
+```powershell
+cd D:\git\fm1-sf2\fm1_open
+.\tools\Build-Web.ps1 -LocalPreview
+cd ..
+node make_wasm_js.js
+```
+
+The simulator plays on one sampler track through the panel slot only. **MIDI channels and program change are firmware only**
+(`transfer.c`), so multitimbral cannot be heard in the simulator.
+
+## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
+
+**Quick start** (verified): build the firmware (section 1), then
+
+```powershell
+cd D:\git\fm1-sf2
+.\start_emu.ps1            # multitimbral check: serves emu\ on 127.0.0.1:8781 and opens it
+.\start_emu.ps1 -Script '' # no script, play it yourself with the keys or a MIDI keyboard
+.\start_emu.ps1 -Tap       # the page that records the emulator's audio into window.__cap (see step 6)
+```
+
+`start_emu.ps1` keeps the emulator's site files in `emu\` (git ignores it), copies the newest `FM1_OFFICIAL_OPEN.fwsc` and `test_emu\*` into it,
+makes `gm.flash` from `dist\gm_32k.fm1b` when needed, points the `sf2` entry of `firmwares.json` at its port, starts `test_emu\cors_server.py`
+hidden if nothing listens on the port, and opens the URL. The first run copies the emulator's files from the old scratchpad folder below;
+if that is gone it stops and lists the files to download from the site. Stop the server by its port, so that other Python servers survive:
+`Get-NetTCPConnection -State Listen -LocalPort 8781 | ForEach-Object { Stop-Process -Id $_.OwningProcess }`.
+The rest of this section is how it works, and what the script does by hand.
+
+fm1-emu (<https://joakimeriksson.github.io/fm1-emu/>, MIT) runs `.fwsc` packages unchanged. The firmware package has no bank, so it
+shows `NO BANK` until a bank is laid in the user flash. The online page cannot fetch our bank (other origin), so the emulator's site files
+run from a **local copy served with CORS headers**. That copy already exists, in an old scratchpad under Temp:
+
+```
+C:\Users\Magnus\AppData\Local\Temp\claude\D--git-pico8-hws\df678bca-34d6-48e4-84f5-0df8efb5cf71\scratchpad\
+    cors_server.py        the server: python cors_server.py <port> <folder>   (binds 127.0.0.1, adds CORS headers)
+    emu\                  the emulator's files: index.html main.js worklet.js persistence.js fwsc.js tryout.js style.css
+                          firmwares.json fm1_web.wasm, plus ours: sf2player.fwsc, gm.flash, *.script
+```
+
+**It is in Temp and can disappear.** If it is gone, download those site files again into a new folder, copy `cors_server.py` (14 lines, below),
+and redo the two registrations in steps 2-3.
+
+1. **Server** (it was running on port 8780 when this was written; check `Get-NetTCPConnection -State Listen -LocalPort 8780`):
+   ```powershell
+   cd <scratchpad folder above>
+   python cors_server.py 8780 emu
+   ```
+2. **Firmware** is registered in `emu\firmwares.json` as `"id": "sf2"`, `"package": "http://127.0.0.1:8780/sf2player.fwsc"`.
+   To test a new build, overwrite `emu\sf2player.fwsc` with `fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc`.
+   (On 2026-11-01 the file there was byte-identical to `dist\sf2player_flash.fwsc`, the build before multitimbral.)
+3. **Bank**: `emu\gm.flash` is `dist\gm_32k.fm1b` laid at the user flash. Make it again with:
+   ```bash
+   node make_flash_overlay.js dist/gm_32k.fm1b gm.flash
+   ```
+4. **Open** `http://127.0.0.1:8780/?fw=sf2&flash=gm.flash` (use `127.0.0.1`, not `localhost`: `flash=` and `script=` are only fetched from the page's own
+   origin, and the package URL says `127.0.0.1`). A try-out is its own session: nothing is loaded from or saved to the browser's saved flash.
+   Add `&mhz=240` for the device's clock (the page default is 100).
+5. **Scripted input**: `&script=NAME.script` plays an input script on the emulated clock, in the syntax `ms:mHEX` (MIDI bytes into the DIN jack),
+   `ms:id` / `ms:id^` (key or button down / up), `ms:eN:clicks` (encoder), `ms:pot:N`, separated by commas. `emu\drum.script` is `4000:m99267f`
+   (note on, channel 10, note 38). `test_emu\mt.script` is the multitimbral check: program change 73 (`C1 49`, flute) on channel 2 at 3.0 s,
+   then note C4 on channels 1 and 2 at 3.1 s, off at 6.0 s: `3000:mC149,3100:m903C64,3100:m913C64,6000:m803C00,6000:m813C00`.
+   The scripts are kept in `test_emu\` in this repo; copy them to `emu\`.
+6. **The screen stays dark** (the emulator does not draw the firmware's own LCD), so the `MULTI` line cannot be seen. Measure the audio instead:
+   copy `test_emu\tap.js` to `emu\`, make `emu\index_tap.html` from `emu\index.html` by adding `<script src="tap.js"></script>` right after `<head>`,
+   and open `index_tap.html?fw=sf2&flash=gm.flash&script=mt.script&mhz=240`. The script must be in the page before the emulator's own
+   (the audio node is made at the first boot; a reboot from the clock selector reuses it). `window.__cap` then holds `{t, pk, rms, cen}` every 100 ms
+   (peak, RMS, spectral centroid in Hz) of what the emulator plays. Audio starts by itself, no click needed.
+
+   Result with the multitimbral build, mean of 3.5-5.5 s (the notes sound from 3.0 s and are gone 0.5 s after 6.0 s):
+
+   | Script | RMS | Centroid |
+   |---|---|---|
+   | `mt_ch1` channel 1 only (piano, the panel's program) | 0.0096 | 348 Hz |
+   | `mt_nopc` both channels, **no** program change | 0.0193 (= 2 x channel 1) | 348 Hz |
+   | `mt_ch2` channel 2 only, after program change 73 | 0.0953 | 275 Hz |
+   | `mt` channel 1 and 2 together | 0.0976 | 280 Hz |
+
+   Without a program change both channels play the panel's piano (twice the level, same spectrum); after one, channel 2 plays a different,
+   sustained instrument. The mix of both is about the level of the louder one, as it should be. This does not separate the piano inside the mix
+   (it decays quickly); the WebAssembly test proves that part bit for bit.
+
+`cors_server.py`, in case it has to be recreated:
+
+```python
+import http.server, sys, os
+class H(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
+        super().end_headers()
+    def do_OPTIONS(self):
+        self.send_response(204); self.end_headers()
+os.chdir(sys.argv[2])
+http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+```
+
+Two other servers were running at the same time: `http.server 8765` in `D:\git\fm1-sf2` (the converter, section 3) and `http.server 8790` (the converter
+again, bound to 127.0.0.1).
+
+Known from older notes: the emulator's DIN MIDI input can stop delivering after a while. The scripted program change and notes of `mt.script`
+did arrive in every run on 2026-11-01 (they are played shortly after boot). Measured load at 240 MHz with 8 voices held: about 56 % with both effects.
+
+## 5. On the real FM-1
+
+- Flash the package with the M-VAVE workbench (<https://open.m-vave.com/fm1-workbench>). Back up first and keep the device powered.
+- Send a bank over USB MIDI from the converter page ("Skicka till FM-1"). The panel shows `UPLOAD n Rx` and then the program.
+- Panel: encoder 1 program, OCT-/OCT+ octave, SCL drums, KNOB1 reverb, KNOB2 chorus, KNOB3 pan. Pan (KNOB3 and CC10) was reported working after it was added.
+
+## 6. Playing it from Windows
+
+- **USB or DIN keyboard:** Windows shows it as a MIDI port, nothing else needed.
+- **A DAW or MIDI file into the FM-1:** create a virtual port with **loopMIDI**, send to it, and route it to the FM-1's USB MIDI port.
+- **BLE MIDI** (reported working, the method used was not written down): pair the device in Windows, then either let the FM-1 take BLE MIDI
+  directly or bridge with **MIDIberry** (BLE in, loopMIDI port out). Windows MIDI Services is also installed on this machine.
+- **Recording the audio:** Audacity with the *Windows WASAPI* host and the output device marked *(loopback)*, or OBS "Audio Output Capture".
+
+## 7. What the firmware does with MIDI (multitimbral)
+
+| Message | Effect |
+|---|---|
+| Note on/off, channels 1-9, 11-16 | Plays the channel's preset. A channel that never had a program change plays the panel's preset (encoder 1) |
+| Note on/off, channel 10 | The percussion kit (the first kit in the bank), same as the SCL button |
+| Program change | Per channel. Bank select first (CC0/CC32): CC0=120, or CC0=1 and CC32=0, is the percussion bank, anything else melodic. A preset the bank lacks is ignored. Ignored on channel 10 |
+| CC7 volume, CC11 expression | Per channel, General MIDI curve, live on sounding notes. 127/127 is unity |
+| CC120 / CC121 / CC123 | All sound off / reset volume and expression / all notes off, **for that channel only** |
+| CC91 / CC93 | Reverb and chorus send, global |
+| CC10 pan | **Global** pan. Ignored as soon as any channel has its own program (otherwise channels would overwrite each other) |
+
+Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received.
+
+Limits: 8 voices in total on the device (oldest is stolen first), no pitch bend, no sustain pedal, no per-channel pan.
+
+## 8. Open items
+
+- Run the multitimbral build on the real FM-1 with program changes on two channels (it has run in fm1-emu, section 4), and note the result here.
+- Measure the audio interrupt load with notes sounding (the emulator's status line shows `load`; only idle values, 12-20 % at 240 MHz, were seen).
+  The multitimbral build adds one multiply per voice per 32 frames.
+- Check the `MULTI` panel line and the bank-select rule (CC0/CC32) on a screen: the emulator draws no LCD.
+- Per-channel pan needs a stereo `fm1b_render` and a changed `sf2fx_mix`.
+- Fill in section 4 once the emulator has been started again.

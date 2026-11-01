@@ -15,7 +15,7 @@ struct voice {
     const void *owner;
     uint32_t env, attack_inc, sustain, left;  /* envelope level Q24 at the start of a step, the attack's rise per step, sustain Q24 */
     uint16_t decay, release, frames;          /* Q16 factors per step; frames left in this step */
-    uint8_t note, active, phase, fixed, drum;
+    uint8_t note, active, phase, fixed, drum, channel;
     /* SEA5 zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
@@ -29,9 +29,34 @@ static struct {
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
     int32_t last_note, last_zone, last_voice, last_drum;   /* the latest note that sounded: for the panel */
+    int32_t last_program_channel, last_program;            /* the latest MIDI program change: for the panel */
     const uint8_t *last_zone_record, *last_env;
 } bank;
 static struct voice voices[FM1B_VOICES];
+
+/* One state per MIDI channel plus the panel's: the preset a note plays (-1: bank.preset), and the channel's volume and
+ * expression with their product, a Q14 gain on the General MIDI curve, which the voices apply as the envelope ramps. */
+enum { PANEL_CHANNEL = FM1B_CHANNELS, CHANNEL_SLOTS = FM1B_CHANNELS + 1, SCALE_ONE = 1 << 14 };
+static int32_t channel_preset[CHANNEL_SLOTS];
+static uint8_t channel_volume[CHANNEL_SLOTS], channel_expression[CHANNEL_SLOTS];
+static uint16_t channel_scale[CHANNEL_SLOTS];
+
+static FM1_DSP_CODE void channel_rescale(unsigned channel)
+{
+    uint32_t x = (uint32_t)channel_volume[channel] * channel_expression[channel];   /* 0..16129 */
+    uint32_t y = (x * x) >> 14;                                                     /* (x / 16129)^2 in Q14, a little low: 15877 at the top */
+    y += y >> 5;
+    channel_scale[channel] = (uint16_t)(x == 127U * 127U ? SCALE_ONE : y > SCALE_ONE ? SCALE_ONE : y);
+}
+static void channels_reset(void)
+{
+    for (unsigned c = 0; c < CHANNEL_SLOTS; ++c) {
+        channel_preset[c] = -1;
+        channel_volume[c] = channel_expression[c] = 127;
+        channel_rescale(c);
+    }
+    bank.last_program_channel = bank.last_program = -1;
+}
 
 static inline __attribute__((always_inline)) uint32_t rd16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
 static inline __attribute__((always_inline)) uint32_t rd32(const uint8_t *p) { return rd16(p) | rd16(p + 2) << 16; }
@@ -47,6 +72,7 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.preset = -1;
     bank.drum_preset = -1;
     bank.last_note = -1;
+    channels_reset();                                         /* preset numbers belong to a bank */
     if (!image)
         return 0;
     if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (rd16(image + 6) & ~3U) ||
@@ -88,14 +114,20 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     }
     return 0;
 }
-int fm1b_program(unsigned program_bank, unsigned program)
+/* The preset the bank maps bank 0 or 128, program 0..127 to, or -1. */
+static FM1_DSP_CODE int32_t preset_of(unsigned program_bank, unsigned program)
 {
     if (!bank.image || program > 127 || (program_bank != 0 && program_bank != 128))
         return -1;
     uint32_t p = rd16(bank.image + bank.bankmap + ((program_bank ? 128U : 0U) + program) * 2U);
-    if (p >= bank.preset_count)
+    return p < bank.preset_count ? (int32_t)p : -1;
+}
+int fm1b_program(unsigned program_bank, unsigned program)
+{
+    int32_t p = preset_of(program_bank, program);
+    if (p < 0)
         return -1;
-    bank.preset = (int32_t)p;
+    bank.preset = p;
     bank.last_note = -1;
     bank.last_zone_record = NULL;
     return 0;
@@ -106,6 +138,10 @@ void fm1b_status(struct fm1b_status *status)
     if (!bank.image || bank.preset < 0)
         return;
     status->ready = 1;
+    for (unsigned c = 0; c < FM1B_CHANNELS; ++c)
+        status->channels += channel_preset[c] >= 0;
+    status->program_channel = bank.last_program_channel < 0 ? 255 : (uint8_t)bank.last_program_channel;
+    status->program_number = bank.last_program < 0 ? 0 : (uint8_t)bank.last_program;
     status->drums = bank.drum_preset >= 0;
     status->last_drum = bank.last_drum > 0;
     if (bank.drum_preset >= 0)
@@ -160,15 +196,15 @@ void fm1b_panic(void)
         voices[i].active = 0;
 }
 
-static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned velocity, unsigned level, unsigned drum)
+static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigned note, unsigned velocity, unsigned level, unsigned drum)
 {
     if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127 || (drum && bank.drum_preset < 0))
         return;
-    int32_t preset_index = drum ? bank.drum_preset : bank.preset;
+    int32_t preset_index = drum ? bank.drum_preset : channel_preset[channel] >= 0 ? channel_preset[channel] : bank.preset;
     if (!velocity) {
         /* A zone with the fixed flag (percussion) plays to its end like a struck drum. */
         for (unsigned i = 0; i < FM1B_VOICES; ++i)
-            if (voices[i].active && voices[i].owner == owner && voices[i].note == note && voices[i].drum == drum && !voices[i].fixed && voices[i].phase != RELEASE)
+            if (voices[i].active && voices[i].owner == owner && voices[i].channel == channel && voices[i].note == note && voices[i].drum == drum && !voices[i].fixed && voices[i].phase != RELEASE)
                 voices[i].phase = RELEASE;
         return;
     }
@@ -210,6 +246,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned v
     v->owner = owner;
     v->note = (uint8_t)note;
     v->drum = (uint8_t)drum;
+    v->channel = (uint8_t)channel;
     v->age = ++bank.age;
     v->state_group = v->id[0] = v->id[1] = -1;
     v->data = data;
@@ -236,27 +273,98 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned v
     bank.last_env = env;
 }
 
-/* Notes arrive from the panel or MIDI and are played from the audio interrupt, so they go through a small
- * single-producer, single-consumer ring: fm1b_note() only writes an event and fm1b_render() applies it. */
+/* Notes, program changes and controllers arrive from the panel or MIDI and are applied from the audio interrupt, so they
+ * go through a small single-producer, single-consumer ring in the order they came: the fm1b_* calls only write an event
+ * and fm1b_render() applies it. For a note, a is the note and b the velocity; for a program change a is the program and
+ * b is 1 for the percussion bank; for a controller a is its number and b its value. */
 enum { QUEUE_SIZE = 32 };
-static struct { const void *owner; uint8_t note, velocity, level, drum; } queue[QUEUE_SIZE];
+enum { EVENT_NOTE, EVENT_PROGRAM, EVENT_CONTROL };
+static struct { const void *owner; uint8_t kind, channel, a, b, level, drum; } queue[QUEUE_SIZE];
 static volatile uint32_t queue_head, queue_tail;
-static void queue_note(const void *owner, unsigned note, unsigned velocity, unsigned level, unsigned drum)
+static void queue_event(unsigned kind, const void *owner, unsigned channel, unsigned a, unsigned b, unsigned level, unsigned drum)
 {
     uint32_t head = queue_head;
-    if (head - queue_tail >= QUEUE_SIZE || note > 127 || velocity > 127 || level > 127)
-        return; /* full: the note is lost, like a dropped MIDI byte */
+    if (head - queue_tail >= QUEUE_SIZE || channel >= CHANNEL_SLOTS || a > 127 || b > 127 || level > 127)
+        return; /* full: the event is lost, like a dropped MIDI byte */
     queue[head % QUEUE_SIZE].owner = owner;
-    queue[head % QUEUE_SIZE].note = (uint8_t)note;
-    queue[head % QUEUE_SIZE].velocity = (uint8_t)velocity;
+    queue[head % QUEUE_SIZE].kind = (uint8_t)kind;
+    queue[head % QUEUE_SIZE].channel = (uint8_t)channel;
+    queue[head % QUEUE_SIZE].a = (uint8_t)a;
+    queue[head % QUEUE_SIZE].b = (uint8_t)b;
     queue[head % QUEUE_SIZE].level = (uint8_t)level;
     queue[head % QUEUE_SIZE].drum = (uint8_t)drum;
     __asm__ volatile("" ::: "memory");
     queue_head = head + 1U;
 }
-void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_note(owner, note, velocity, level, 0); }
-void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_note(owner, note, velocity, level, 1); }
+void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_event(EVENT_NOTE, owner, PANEL_CHANNEL, note, velocity, level, 0); }
+void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_event(EVENT_NOTE, owner, PANEL_CHANNEL, note, velocity, level, 1); }
+void fm1b_channel_note(unsigned channel, unsigned note, unsigned velocity, unsigned level)
+{
+    if (channel < FM1B_CHANNELS)
+        queue_event(EVENT_NOTE, NULL, channel, note, velocity, level, 0);
+}
+void fm1b_channel_drum_note(unsigned channel, unsigned note, unsigned velocity, unsigned level)
+{
+    if (channel < FM1B_CHANNELS)
+        queue_event(EVENT_NOTE, NULL, channel, note, velocity, level, 1);
+}
+void fm1b_channel_program(unsigned channel, unsigned program_bank, unsigned program)
+{
+    if (channel < FM1B_CHANNELS && (program_bank == 0 || program_bank == 128))
+        queue_event(EVENT_PROGRAM, NULL, channel, program, program_bank != 0, 0, 0);
+}
+void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value)
+{
+    if (channel < FM1B_CHANNELS)
+        queue_event(EVENT_CONTROL, NULL, channel, controller, value, 0, 0);
+}
 unsigned fm1b_has_drums(void) { return bank.image && bank.drum_preset >= 0; }
+unsigned fm1b_multitimbral(void)
+{
+    unsigned n = 0;
+    for (unsigned c = 0; c < FM1B_CHANNELS; ++c)
+        n += channel_preset[c] >= 0;
+    return n;
+}
+
+static FM1_DSP_CODE void program_apply(unsigned channel, unsigned program_bank, unsigned program)
+{
+    int32_t p = preset_of(program_bank ? 128U : 0U, program);
+    if (p < 0)
+        return;
+    channel_preset[channel] = p;
+    bank.last_program_channel = (int32_t)channel;
+    bank.last_program = (int32_t)program;
+}
+static FM1_DSP_CODE void control_apply(unsigned channel, unsigned controller, unsigned value)
+{
+    switch (controller) {
+    case 7:
+        channel_volume[channel] = (uint8_t)value;
+        channel_rescale(channel);
+        break;
+    case 11:
+        channel_expression[channel] = (uint8_t)value;
+        channel_rescale(channel);
+        break;
+    case 121:
+        channel_volume[channel] = channel_expression[channel] = 127;
+        channel_rescale(channel);
+        break;
+    case 120:
+    case 123:
+        for (unsigned i = 0; i < FM1B_VOICES; ++i)
+            if (voices[i].active && voices[i].channel == channel) {
+                if (controller == 120)
+                    voices[i].active = 0;
+                else if (!voices[i].fixed && voices[i].phase != RELEASE)
+                    voices[i].phase = RELEASE;
+            }
+        break;
+    default:
+        break;
+    }
+}
 
 /* Decode SEA5 group g (20 frames) of voice v. The LMS state carries from one group to the next inside a chunk, so
  * a forward step costs one group; anything else (the first read, a loop jump, a chunk change) starts from the
@@ -317,7 +425,7 @@ static FM1_DSP_CODE void env_step(struct voice *v)
         v->active = 0;
         return;
     }
-    int32_t next = (int32_t)(((int64_t)v->gain * target) >> 24);
+    int32_t next = (int32_t)((((int64_t)v->gain * target >> 24) * channel_scale[v->channel]) >> 14);   /* the channel's volume applies live */
     v->level_step = (next - v->level) / ENV_STEP;
     v->frames = ENV_STEP;
 }
@@ -326,7 +434,12 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
 {
     while (queue_tail != queue_head) {
         uint32_t at = queue_tail % QUEUE_SIZE;
-        note_apply(queue[at].owner, queue[at].note, queue[at].velocity, queue[at].level, queue[at].drum);
+        if (queue[at].kind == EVENT_PROGRAM)
+            program_apply(queue[at].channel, queue[at].b, queue[at].a);
+        else if (queue[at].kind == EVENT_CONTROL)
+            control_apply(queue[at].channel, queue[at].a, queue[at].b);
+        else
+            note_apply(queue[at].owner, queue[at].channel, queue[at].a, queue[at].b, queue[at].level, queue[at].drum);
         __asm__ volatile("" ::: "memory");
         queue_tail = queue_tail + 1U;
     }

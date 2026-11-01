@@ -36,6 +36,31 @@ void sf2player_drum(unsigned note, unsigned velocity)
     fm1b_drum_note(NULL, note, velocity, 100);
     fm1_device_irq_restore(flags);
 }
+/* Multitimbral: what MIDI input does to one channel (0..15). Same single writer as above, so the same lock. */
+void sf2player_channel_play(unsigned channel, unsigned note, unsigned velocity)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_channel_note(channel, note, velocity, 100);
+    fm1_device_irq_restore(flags);
+}
+void sf2player_channel_drum(unsigned channel, unsigned note, unsigned velocity)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_channel_drum_note(channel, note, velocity, 100);
+    fm1_device_irq_restore(flags);
+}
+void sf2player_channel_program(unsigned channel, unsigned program_bank, unsigned program)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_channel_program(channel, program_bank, program);
+    fm1_device_irq_restore(flags);
+}
+void sf2player_channel_control(unsigned channel, unsigned controller, unsigned value)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_channel_control(channel, controller, value);
+    fm1_device_irq_restore(flags);
+}
 
 /* ---- the panel: F3..G5 are 27 keys, bit 0 = F3 (MIDI 53) -------------------------------------------------- */
 enum { FIRST_NOTE = 53, KEYS = 27, BACKGROUND = 0x0210 /* dark teal */ };
@@ -63,7 +88,7 @@ static const uint8_t punctuation[][6] = {
     {'.', 0, 0x60, 0x60, 0, 0}, {':', 0, 0x36, 0x36, 0, 0}, {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'(', 0, 0x1c, 0x22, 0x41, 0},
     {')', 0, 0x41, 0x22, 0x1c, 0}};
 enum { WHITE = 0xffff, GREY = 0x8410, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
-       LINE_CHARS = 41, LINES = 10, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
+       LINE_CHARS = 41, LINES = 11, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
 static char shown[LINES][LINE_CHARS + 1];
 
@@ -246,6 +271,17 @@ static void screen_update(void)
     d = put_number(d, octave, 0);
     *d = 0;
     line_show(9, 158, line, 1, YELLOW);
+    if (st.channels) {                                        /* MIDI program changes made some channels play a preset of their own */
+        d = put_text(line, "MULTI ");
+        d = put_number(d, st.channels, 0);
+        d = put_text(d, " CH   LAST CH");
+        d = put_number(d, st.program_channel + 1, 0);
+        d = put_text(d, " PRG ");
+        d = put_number(d, st.program_number + 1, 3);
+        *d = 0;
+    } else
+        *line = 0;
+    line_show(10, 172, line, 1, CYAN);
     line_show(7, 228, "ENC1 PROG SCL DRUMS K1 REV K2 CHO K3 PAN", 1, GREY);
 }
 

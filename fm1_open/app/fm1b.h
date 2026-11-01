@@ -30,6 +30,22 @@ void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned lev
 void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level);
 unsigned fm1b_has_drums(void);
 void fm1b_panic(void);
+
+/* Multitimbral use: the 16 MIDI channels each have their own preset, volume and expression. A channel that never got a
+ * program change follows the preset fm1b_program() selected, and fm1b_note()/fm1b_drum_note() (the panel, the browser
+ * sampler) are a seventeenth channel that always does, so a caller that ignores channels hears what it always heard.
+ * Like the notes, these are queued and applied from the audio interrupt, and have the same single writer. */
+#define FM1B_CHANNELS 16U
+void fm1b_channel_note(unsigned channel, unsigned note, unsigned velocity, unsigned level);
+void fm1b_channel_drum_note(unsigned channel, unsigned note, unsigned velocity, unsigned level);
+/* Program change: program_bank 0 melodic or 128 percussion (a kit may be played on any channel), program 0..127. A preset
+ * the bank does not have leaves the channel as it was. */
+void fm1b_channel_program(unsigned channel, unsigned program_bank, unsigned program);
+/* Controllers 7 (volume), 11 (expression; both follow the General MIDI curve, 127 and 127 is unity), 120 (all sound off),
+ * 121 (reset the two levels) and 123 (all notes off) for one channel. */
+void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value);
+/* How many channels have a preset of their own: 0 while a single preset plays on all of them. */
+unsigned fm1b_multitimbral(void);
 /* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several
  * sampler instances, each rendered once per block, and a voice must advance exactly once per block. */
 void fm1b_render(const void *owner, int32_t *out, unsigned frames);
@@ -38,6 +54,7 @@ void fm1b_render(const void *owner, int32_t *out, unsigned frames);
 struct fm1b_status {
     char name[21], drum_name[21];
     uint8_t ready, drums, last_drum, program, note, zone, zones, root, loop, voices, phase, level;  /* level 0..255, phase 0..4 = A H D S R */
+    uint8_t channels, program_channel, program_number;  /* channels with a preset of their own; the latest program change (channel 0..15, 255: none) */
     int8_t fine;
     uint8_t lo, hi, sustain_percent;
     uint16_t attack_ms, hold_ms;
