@@ -7,4 +7,8 @@
 #define FM1B_IN_FIRMWARE 1
 /* 1: board/audio.c does not call fm1_engine_render() (the stock instrument is unused by the SF2 player). */
 #define FM1B_SKIP_ENGINE 1
+/* Where the FM1B bank lives in the user flash (offsets start at zero in the firmware's user partition): the stock
+ * firmware's sample region, GROOVE_SAMPLE_OFFSET and GROOVE_SAMPLE_BYTES in instrument.h. */
+#define FM1B_FLASH_OFFSET 69632U
+#define FM1B_FLASH_BYTES 466944U
 #endif

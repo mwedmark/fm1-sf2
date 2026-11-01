@@ -361,6 +361,8 @@ discard:
  * (sdk/Build.ps1 lists transfer.c): the LTO plugin can let a weak default in the library replace them. */
 #include "fm1.h"
 #include "fm1b.h"
+#include "fm1b_config.h"
+#include "sf2_upload.h"
 #include <stddef.h>
 
 void sf2player_play(unsigned note, unsigned velocity);
@@ -374,6 +376,6 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
     else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 123U)   /* all notes off */
         fm1b_panic();
 }
-void fm1_app_sysex(const uint8_t *message, size_t bytes) { (void)message; (void)bytes; }
+void fm1_app_sysex(const uint8_t *message, size_t bytes) { sf2_upload_offer(message, bytes); }
 
 #endif

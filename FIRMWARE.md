@@ -52,6 +52,23 @@ The whole `1mgm.sf2` (343 732 bytes at 32 kHz) does not fit: the package carries
 - **Tuning**: whole semitones move the root key, the rest (-50..50 cents) is a fine tune the player applies to the step.
 - **The panel** shows the program, the zone the latest note hit (key range, root key, fine tune, sample length, loop, rate), the envelope and the voice's level.
 
+### The bank in the user flash (`dist/sf2player_flash.fwsc`)
+
+The package carries the firmware image only, so a bank too big for the image lives in the user flash, the region the stock firmware used for samples
+(`FM1B_FLASH_OFFSET` 69 632, up to 466 944 bytes, `fm1b_config.h`). `fm1b_bank.c` looks for an FM1B bank there at start (`fm1_flash_map()`, magic, size from
+the header) and plays it in place; without one it uses a bank compiled into the image if the build has one (`fm1b_bank_data.inc`), else the panel says NO BANK.
+The flash build has no built-in bank (image 398 140 bytes, 56 KB room to spare). The whole 1mgm.sf2 at 32 kHz SEA5 (335.7 KB) plays from it in fm1-emu:
+`node make_flash_overlay.js bank.fm1b gm.flash` makes the sector file for `&flash=` (the user partition starts at 0x7C000 of the flash image).
+
+**Upload over MIDI SysEx** (`fm1_open/app/sf2_upload.c`, host side in `index.html`, button "Skicka till FM-1", Web MIDI): `F0 7D 'S' 'F' 02 cmd ... F7`,
+numbers as 5 x 7 bits. `begin` (1, size) stops the bank and erases the flash it needs, `data` (2, offset + up to 448 bytes packed 7 to 8) is written where it says, `end`
+(3, CRC-32) binds the bank when the checksum matches. The firmware answers each frame with `cmd | 0x40` and a status (0 done, 1 malformed, 2 outside the flash,
+3 flash error, 4 CRC differs, 5 no begin first); the host sends the next frame only on the answer and sends a lost one again (writing the same bytes twice is
+harmless). The SDK says no flash access from the SysEx callback, so the callback copies the frame and the control task (`groove_screen_control`, every cycle) does the work.
+`node test_upload.js` runs the real `sf2_upload.c` on WebAssembly against a flash model that only lets bits be cleared: the whole bank in frames of 448, 112, 7 and 1 bytes,
+and the refusals (data before begin, bad CRC, outside the bank, a flash error). **Not run on a device**, and fm1-emu cannot test it end to end: its DIN input stops delivering
+frames after about 20 of them (the same with the flash calls left out), and the firmware's answers go nowhere. Over USB with the host waiting for the answers the pacing is the host's.
+
 ## The hook is written, but the stock image is full
 
 The hook (`board/audio.c`), the key route (`groove_midi_local` in `midi_router.c`: a key on a track whose source is the sampler plays the bank),

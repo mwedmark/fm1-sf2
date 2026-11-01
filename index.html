@@ -99,7 +99,10 @@
     <div class="actions">
       <button id="dlSf2">Ladda ned .sf2</button>
       <button id="dlBin">Ladda ned .bin</button>
+      <button id="sendFm1" title="Skriver banken i FM-1:s flash över MIDI (SF2-spelarens firmware, Chrome/Edge med Web MIDI)">Skicka till FM-1</button>
+      <select id="midiOut" aria-label="MIDI-utgång till FM-1" hidden></select>
     </div>
+    <p class="meta" id="sendStatus" hidden></p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Ljud</th><th class="n">Toner</th><th class="n">Grundton</th><th>Loop</th><th class="n">Byte</th></tr></thead>
@@ -544,6 +547,40 @@ function writeFm1(bank) {
 }
 
 
+// ---- Upload to the FM-1 over MIDI SysEx (the SF2 player firmware, fm1_open/app/transfer.c) ----
+// Frames: F0 7D 'S' 'F' 02 cmd ... F7. begin (1): size; data (2): offset and up to 448 bytes packed 7 to 8; end (3): CRC-32.
+// Every number is 5 x 7 bits, least significant first. The firmware answers each frame with cmd | 0x40 and a status
+// (0 = done; 1 malformed, 2 outside the flash, 3 flash error, 4 CRC differs, 5 no begin first).
+const UPLOAD_CHUNK = 448;
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    c ^= bytes[i];
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return (~c) >>> 0;
+}
+function num35(v) { return [v & 127, (v >>> 7) & 127, (v >>> 14) & 127, (v >>> 21) & 127, (v >>> 28) & 127]; }
+function packSysex(bytes) {                                  // 7 bytes become a byte of high bits and 7 of low parts
+  const out = [];
+  for (let i = 0; i < bytes.length; i += 7) {
+    const n = Math.min(7, bytes.length - i);
+    let high = 0;
+    for (let k = 0; k < n; k++) high |= (bytes[i + k] >> 7) << k;
+    out.push(high);
+    for (let k = 0; k < n; k++) out.push(bytes[i + k] & 127);
+  }
+  return out;
+}
+function uploadFrames(bin, chunk = UPLOAD_CHUNK) {
+  const head = [0xf0, 0x7d, 0x53, 0x46, 2];
+  const frames = [Uint8Array.from([...head, 1, ...num35(bin.length), 0xf7])];
+  for (let at = 0; at < bin.length; at += chunk)
+    frames.push(Uint8Array.from([...head, 2, ...num35(at), ...packSysex(bin.subarray(at, at + chunk)), 0xf7]));
+  frames.push(Uint8Array.from([...head, 3, ...num35(crc32(bin)), 0xf7]));
+  return frames;
+}
+
 // ---- Simplified SF2 writer: one preset, one instrument, mono 16-bit samples ----
 
 function concat(parts) {
@@ -827,6 +864,64 @@ function writeSf2(bank, name) {
   $('codec').addEventListener('change', syncCodec);
   syncCodec();
   $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank), baseName + '_fm1.bin', 'application/octet-stream'));
+  // ---- Skicka banken till FM-1 (SF2-spelarens firmware tar emot den som SysEx och skriver den i flashen) ----
+  const send = { access: null, busy: false };
+  function sendMsg(text, bad) { const el = $('sendStatus'); el.hidden = !text; el.textContent = text || ''; el.className = bad ? 'meta warn' : 'meta'; }
+  function midiPorts() {
+    const out = $('midiOut'), cur = out.value;
+    out.textContent = '';
+    for (const o of send.access.outputs.values()) out.add(new Option(o.name, o.id));
+    out.hidden = out.options.length === 0;
+    const fm = [...out.options].find(o => /fm-?1/i.test(o.text));
+    out.value = [...out.options].some(o => o.value === cur) ? cur : fm ? fm.value : out.value;
+    return out.options.length;
+  }
+  // One frame out, its answer in (F0 7D 'S' 'F' 02 cmd|0x40 status F7): the firmware answers when the flash is written.
+  function exchange(output, input, frame, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { input.removeEventListener('midimessage', on); reject(new Error('timeout')); }, ms);
+      function on(e) {
+        const d = e.data;
+        if (d.length === 8 && d[0] === 0xf0 && d[1] === 0x7d && d[2] === 0x53 && d[3] === 0x46 && d[4] === 2 && d[5] === (frame[5] | 0x40)) {
+          clearTimeout(timer); input.removeEventListener('midimessage', on); resolve(d[6]);
+        }
+      }
+      input.addEventListener('midimessage', on);
+      output.send(frame);
+    });
+  }
+  const SEND_ERRORS = { 1: 'felaktig ram', 2: 'utanför flashen', 3: 'flashfel', 4: 'kontrollsumman stämmer inte', 5: 'ingen överföring pågår' };
+  async function sendBank() {
+    if (send.busy || !bank) return;
+    const bin = writeFm1(bank);
+    if (bin.length > FM1_SAMPLE_BANK) { sendMsg('Banken (' + fmtBytes(bin.length) + ') är större än flashen (' + fmtBytes(FM1_SAMPLE_BANK) + ').', true); return; }
+    if (!navigator.requestMIDIAccess) { sendMsg('Webbläsaren saknar Web MIDI. Använd Chrome eller Edge.', true); return; }
+    try {
+      if (!send.access) send.access = await navigator.requestMIDIAccess({ sysex: true });
+      if (!midiPorts()) { sendMsg('Ingen MIDI-utgång hittades. Anslut FM-1 med USB och försök igen.', true); return; }
+      const output = send.access.outputs.get($('midiOut').value);
+      const input = [...send.access.inputs.values()].find(i => i.name === output.name) || [...send.access.inputs.values()].find(i => /fm-?1/i.test(i.name));
+      if (!input) { sendMsg('Hittade ingen MIDI-ingång som hör till ' + output.name + ' (svaret från FM-1 behövs).', true); return; }
+      await input.open(); await output.open();
+      send.busy = true; $('sendFm1').disabled = true;
+      const frames = uploadFrames(bin);
+      for (const [i, frame] of frames.entries()) {
+        sendMsg(i === 0 ? 'Raderar flashen i FM-1 ...' : i === frames.length - 1 ? 'Kontrollerar banken ...' : 'Skickar ' + Math.round(100 * i / frames.length) + ' %');
+        let status = -1;
+        for (let attempt = 0; attempt < 3 && status < 0; attempt++) {     // a lost frame is sent again: writing the same bytes twice is harmless
+          try { status = await exchange(output, input, frame, i === 0 ? 30000 : 3000); } catch (e) { if (i === 0) break; }
+        }
+        if (status < 0) throw new Error('FM-1 svarar inte. Kör den SF2-spelarens firmware?');
+        if (status !== 0) throw new Error('FM-1 avvisade ramen ' + (i + 1) + ': ' + (SEND_ERRORS[status] || 'fel ' + status));
+      }
+      sendMsg('Klart: ' + fmtBytes(bin.length) + ' ligger i FM-1:s flash och spelas direkt. Den ligger kvar när den stängs av.');
+    } catch (e) {
+      sendMsg(e.message || String(e), true);
+    } finally {
+      send.busy = false; $('sendFm1').disabled = false;
+    }
+  }
+  $('sendFm1').addEventListener('click', sendBank);
   $('dlSf2').addEventListener('click', () => bank && download(writeSf2(bank, +$('preset').value < 0 || bank.presets.length > 1 ? baseName.slice(0, 19) : $('preset').selectedOptions[0].textContent.replace(/^.*?\s{2}/, '').slice(0, 19) || 'FM1'), baseName + '_fm1.sf2', 'audio/x-soundfont'));
 })();
 </script>

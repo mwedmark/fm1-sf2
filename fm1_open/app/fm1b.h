@@ -42,4 +42,6 @@ struct fm1b_status {
 void fm1b_status(struct fm1b_status *status);
 /* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
 void fm1b_device_init(void);
+/* Firmware only: bind the FM1B bank in the user flash (1), or leave things as they are (0). */
+int fm1b_bind_flash(void);
 #endif

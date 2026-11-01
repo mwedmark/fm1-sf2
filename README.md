@@ -11,3 +11,4 @@ Turns a SoundFont (`.sf2`) into a sound bank for the M-VAVE FM-1, and plays it i
 - `convert.py`: the original command-line converter, no longer maintained.
 
 `.sf2` and `.bin` files are not committed.
+- `index.html` also sends the bank to an FM-1 running the SF2 player firmware (button "Skicka till FM-1", Web MIDI over USB): see `FIRMWARE.md`. `test_upload.js` tests the firmware's side of that on WebAssembly; `make_flash_overlay.js` makes a flash image for fm1-emu.

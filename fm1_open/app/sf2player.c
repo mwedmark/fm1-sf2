@@ -7,6 +7,7 @@
 #include "fm_patch.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
+#include "sf2_upload.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
@@ -103,6 +104,26 @@ static char *put_note(char *d, unsigned note)
     return put_number(d, (int)note / 12 - 1, 0);
 }
 
+/* SysEx traffic of a bank upload: frames the firmware saw / took, and the status of the last one (0 = done). */
+static void upload_line(void)
+{
+    char line[LINE_CHARS + 1], *d;
+    unsigned seen, taken, step, status;
+    sf2_upload_state(&seen, &taken, &step, &status);
+    if (!seen) {
+        line_show(8, 184, "", 2, GREY);
+        return;
+    }
+    d = put_text(line, "UPLOAD ");
+    d = put_number(d, (int32_t)taken, 0);
+    if (status != 255) {
+        d = put_text(d, " R");
+        d = put_number(d, (int32_t)status, 0);
+    }
+    *d = 0;
+    line_show(8, 184, line, 2, GREY);
+}
+
 static void screen_update(void)
 {
     struct fm1b_status st;
@@ -110,6 +131,7 @@ static void screen_update(void)
     fm1b_status(&st);
     if (!st.ready) {
         line_show(0, 8, "NO BANK", 2, ORANGE);
+        upload_line();
         return;
     }
     d = put_number(line, st.program + 1, 3);
@@ -196,7 +218,8 @@ static void screen_update(void)
     if (st.level) { d = put_text(d, "   PHASE "); *d++ = phases[st.phase < 5 ? st.phase : 4]; }
     *d = 0;
     line_show(6, 140, line, 1, GREY);
-    line_show(7, 214, "ENCODER 1  PROGRAM", 1, GREY);
+    upload_line();
+    line_show(7, 228, "ENCODER 1  PROGRAM", 1, GREY);
 }
 
 static uint32_t previous_keys;
@@ -213,6 +236,7 @@ void groove_screen_init(void)
 }
 void groove_screen_control(void)
 {
+    sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
     struct fm1_controls controls;
     fm1_controls_read(&controls);
     (void)groove_master_update(controls.knob);               /* the volume knob; without it the output stays muted */
@@ -281,5 +305,5 @@ struct groove_project *groove_project_scratch(void)
 void groove_samples_init(void) {}
 void groove_samples_poll(void) {}
 void groove_transfer_init(void) {}
-void groove_transfer_poll(void) {}
+void groove_transfer_poll(void) { sf2_upload_poll(); }
 #endif
