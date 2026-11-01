@@ -26,6 +26,9 @@ unsigned fm1b_ready(void);
 /* Note on (velocity 1..127) or off (velocity 0) for `owner`, any pointer the caller keeps rendering with.
  * level 0..127 scales the whole player. */
 void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level);
+/* The same for the percussion kit (bank 128), which sounds beside the selected program. -1 if the bank has none. */
+void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level);
+unsigned fm1b_has_drums(void);
 void fm1b_panic(void);
 /* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several
  * sampler instances, each rendered once per block, and a voice must advance exactly once per block. */
@@ -33,8 +36,8 @@ void fm1b_render(const void *owner, int32_t *out, unsigned frames);
 /* What the panel shows: the selected preset, the zone the latest note hit (its sample and envelope) and the state of
  * the voice that plays it. Read from the control task; the audio interrupt may change a field while it is copied. */
 struct fm1b_status {
-    char name[21];
-    uint8_t ready, program, note, zone, zones, root, loop, voices, phase, level;  /* level 0..255, phase 0..4 = A H D S R */
+    char name[21], drum_name[21];
+    uint8_t ready, drums, last_drum, program, note, zone, zones, root, loop, voices, phase, level;  /* level 0..255, phase 0..4 = A H D S R */
     int8_t fine;
     uint8_t lo, hi, sustain_percent;
     uint16_t attack_ms, hold_ms;

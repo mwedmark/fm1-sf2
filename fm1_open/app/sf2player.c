@@ -29,9 +29,18 @@ void sf2player_play(unsigned note, unsigned velocity)
     fm1b_note(NULL, note, velocity, 100);
     fm1_device_irq_restore(flags);
 }
+/* The percussion kit: MIDI channel 10, and the keys while SCL has the panel in drum mode. */
+void sf2player_drum(unsigned note, unsigned velocity)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_drum_note(NULL, note, velocity, 100);
+    fm1_device_irq_restore(flags);
+}
 
 /* ---- the panel: F3..G5 are 27 keys, bit 0 = F3 (MIDI 53) -------------------------------------------------- */
 enum { FIRST_NOTE = 53, KEYS = 27, BACKGROUND = 0x0210 /* dark teal */ };
+static unsigned drum_mode;                                /* SCL: the keys play the percussion kit */
+static uint32_t sounding_drum;                           /* per key: it started a drum note */
 static int octave;                                       /* -2..2, the panel's OCT- / OCT+ (buttons 0 and 1) */
 
 /* ---- the screen: text lines in a 5x7 font, redrawn only when their text changes --------------------------------- */
@@ -136,11 +145,16 @@ static void screen_update(void)
         upload_line();
         return;
     }
-    d = put_number(line, st.program + 1, 3);
-    *d++ = ' ';
-    for (unsigned i = 0; i < 16 && st.name[i]; ++i) *d++ = st.name[i];
+    if (drum_mode) {
+        d = put_text(line, "DRUMS ");
+        for (unsigned i = 0; i < 14 && st.drum_name[i]; ++i) *d++ = st.drum_name[i];
+    } else {
+        d = put_number(line, st.program + 1, 3);
+        *d++ = ' ';
+        for (unsigned i = 0; i < 16 && st.name[i]; ++i) *d++ = st.name[i];
+    }
     *d = 0;
-    line_show(0, 8, line, 2, WHITE);
+    line_show(0, 8, line, 2, drum_mode ? ORANGE : WHITE);
 
     if (st.length) {
         d = put_text(line, "NOTE ");
@@ -230,7 +244,7 @@ static void screen_update(void)
     d = put_number(d, octave, 0);
     *d = 0;
     line_show(9, 158, line, 1, YELLOW);
-    line_show(7, 228, "ENCODER 1 PROG  2 REVERB  3 CHORUS", 1, GREY);
+    line_show(7, 228, "ENC1 PROG SCL DRUMS K1 REVERB K2 CHORUS", 1, GREY);
 }
 
 static uint32_t previous_keys, previous_buttons;
@@ -244,6 +258,8 @@ void groove_screen_init(void)
     fm1_screen_fill(0, 0, FM1_SCREEN_WIDTH, FM1_SCREEN_HEIGHT, BACKGROUND);
     previous_keys = previous_buttons = 0;
     octave = 0;
+    drum_mode = 0;
+    sounding_drum = 0;
     program = 0;
     memset(shown, 0, sizeof shown);
 }
@@ -259,16 +275,18 @@ void groove_screen_control(void)
             for (int next = (int)program + step; next >= 0 && next < 128; next += step)
                 if (fm1b_program(0, (unsigned)next) == 0) { program = (unsigned)next; break; }
     }
-    for (unsigned which = 1; which <= 2; ++which) {            /* encoders 2 and 3: reverb and chorus send */
+    for (unsigned which = 2; which <= 3; ++which) {            /* KNOB1 (encoder 2): reverb send, KNOB2 (encoder 3): chorus send */
         if (!controls.encoders[which])
             continue;
-        int level = (int)(which == 1 ? sf2fx_reverb() : sf2fx_chorus()) + controls.encoders[which] * 4;
+        int level = (int)(which == 2 ? sf2fx_reverb() : sf2fx_chorus()) + controls.encoders[which] * 4;
         level = level < 0 ? 0 : level > 127 ? 127 : level;
-        if (which == 1) sf2fx_set((unsigned)level, sf2fx_chorus());
+        if (which == 2) sf2fx_set((unsigned)level, sf2fx_chorus());
         else sf2fx_set(sf2fx_reverb(), (unsigned)level);
     }
     uint32_t pressed = controls.buttons & ~previous_buttons;
     previous_buttons = controls.buttons;
+    if ((pressed & 8U) && fm1b_has_drums())                  /* SCL: button 3 switches between the program and the drum kit */
+        drum_mode ^= 1U;
     if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */
         octave += (int)((pressed >> 1) & 1U) - (int)(pressed & 1U);
         octave = octave < -2 ? -2 : octave > 2 ? 2 : octave;
@@ -281,8 +299,12 @@ void groove_screen_control(void)
         if (on) {
             int note = FIRST_NOTE + (int)key + 12 * octave;
             sounding[key] = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
+            sounding_drum = (sounding_drum & ~(1U << key)) | (drum_mode << key);
         }
-        sf2player_play(sounding[key], on ? 100U : 0U);
+        if ((sounding_drum >> key) & 1U)
+            sf2player_drum(sounding[key], on ? 100U : 0U);
+        else
+            sf2player_play(sounding[key], on ? 100U : 0U);
         fm1_led_set(14 + key, (int)on);
     }
     previous_keys = controls.keys;

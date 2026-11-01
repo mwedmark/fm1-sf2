@@ -15,7 +15,7 @@ struct voice {
     const void *owner;
     uint32_t env, attack_inc, sustain, left;  /* envelope level Q24 at the start of a step, the attack's rise per step, sustain Q24 */
     uint16_t decay, release, frames;          /* Q16 factors per step; frames left in this step */
-    uint8_t note, active, phase, fixed;
+    uint8_t note, active, phase, fixed, drum;
     /* SEA5 zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
@@ -26,8 +26,9 @@ static struct {
     uint32_t bytes, rate, bits16, sea;
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
     int32_t preset; /* -1: none selected */
+    int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
-    int32_t last_note, last_zone, last_voice;   /* the latest note that sounded: for the panel */
+    int32_t last_note, last_zone, last_voice, last_drum;   /* the latest note that sounded: for the panel */
     const uint8_t *last_zone_record, *last_env;
 } bank;
 static struct voice voices[FM1B_VOICES];
@@ -44,6 +45,7 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     fm1b_panic();
     bank.image = NULL;
     bank.preset = -1;
+    bank.drum_preset = -1;
     bank.last_note = -1;
     if (!image)
         return 0;
@@ -79,6 +81,11 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
         if (p < bank.preset_count)
             bank.preset = (int32_t)p;
     }
+    for (unsigned slot = 128; slot < 256 && bank.drum_preset < 0; ++slot) {   /* the first percussion kit the bank has */
+        uint32_t p = rd16(image + bank.bankmap + slot * 2U);
+        if (p < bank.preset_count)
+            bank.drum_preset = (int32_t)p;
+    }
     return 0;
 }
 int fm1b_program(unsigned program_bank, unsigned program)
@@ -99,6 +106,10 @@ void fm1b_status(struct fm1b_status *status)
     if (!bank.image || bank.preset < 0)
         return;
     status->ready = 1;
+    status->drums = bank.drum_preset >= 0;
+    status->last_drum = bank.last_drum > 0;
+    if (bank.drum_preset >= 0)
+        memcpy(status->drum_name, bank.image + bank.presets + (uint32_t)bank.drum_preset * 24U + 4, 20);
     status->rate = bank.rate;
     const uint8_t *preset = bank.image + bank.presets + (uint32_t)bank.preset * 24U;
     memcpy(status->name, preset + 4, 20);
@@ -113,6 +124,8 @@ void fm1b_status(struct fm1b_status *status)
     if (bank.last_note < 0 || !bank.last_zone_record)
         return;
     const uint8_t *zone = bank.last_zone_record, *env = bank.last_env;
+    if (bank.last_drum > 0)
+        status->zones = (uint8_t)rd16(bank.image + bank.presets + (uint32_t)bank.drum_preset * 24U + 2);
     status->note = (uint8_t)bank.last_note;
     status->zone = (uint8_t)bank.last_zone;
     status->root = zone[16];
@@ -123,7 +136,7 @@ void fm1b_status(struct fm1b_status *status)
     status->loop_end = rd32(zone + 12);
     unsigned found = 0;
     for (unsigned n = 0; n < 128; ++n)                        /* the key range the zone answers: the notes whose key map points at it */
-        if (bank.image[bank.keymaps + (uint32_t)bank.preset * 128U + n] == (uint32_t)bank.last_zone) {
+        if (bank.image[bank.keymaps + (uint32_t)(bank.last_drum > 0 ? bank.drum_preset : bank.preset) * 128U + n] == (uint32_t)bank.last_zone) {
             if (!found++)
                 status->lo = (uint8_t)n;
             status->hi = (uint8_t)n;
@@ -147,19 +160,20 @@ void fm1b_panic(void)
         voices[i].active = 0;
 }
 
-static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned velocity, unsigned level)
+static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned velocity, unsigned level, unsigned drum)
 {
-    if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127)
+    if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127 || (drum && bank.drum_preset < 0))
         return;
+    int32_t preset_index = drum ? bank.drum_preset : bank.preset;
     if (!velocity) {
         /* A zone with the fixed flag (percussion) plays to its end like a struck drum. */
         for (unsigned i = 0; i < FM1B_VOICES; ++i)
-            if (voices[i].active && voices[i].owner == owner && voices[i].note == note && !voices[i].fixed && voices[i].phase != RELEASE)
+            if (voices[i].active && voices[i].owner == owner && voices[i].note == note && voices[i].drum == drum && !voices[i].fixed && voices[i].phase != RELEASE)
                 voices[i].phase = RELEASE;
         return;
     }
-    uint32_t key = bank.image[bank.keymaps + (uint32_t)bank.preset * 128U + note];
-    const uint8_t *preset = bank.image + bank.presets + (uint32_t)bank.preset * 24U;
+    uint32_t key = bank.image[bank.keymaps + (uint32_t)preset_index * 128U + note];
+    const uint8_t *preset = bank.image + bank.presets + (uint32_t)preset_index * 24U;
     uint32_t first = rd16(preset), count = rd16(preset + 2);
     if (key == 0xff || key >= count || first + key >= bank.zone_count)
         return;
@@ -195,6 +209,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned v
     v->active = 1;
     v->owner = owner;
     v->note = (uint8_t)note;
+    v->drum = (uint8_t)drum;
     v->age = ++bank.age;
     v->state_group = v->id[0] = v->id[1] = -1;
     v->data = data;
@@ -214,6 +229,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned v
     v->fixed = (uint8_t)(rd16(env + 10) & 1U);
     v->phase = ATTACK;
     bank.last_note = (int32_t)note;
+    bank.last_drum = (int32_t)drum;
     bank.last_zone = (int32_t)key;
     bank.last_voice = (int32_t)slot;
     bank.last_zone_record = zone;
@@ -223,9 +239,9 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned note, unsigned v
 /* Notes arrive from the panel or MIDI and are played from the audio interrupt, so they go through a small
  * single-producer, single-consumer ring: fm1b_note() only writes an event and fm1b_render() applies it. */
 enum { QUEUE_SIZE = 32 };
-static struct { const void *owner; uint8_t note, velocity, level; } queue[QUEUE_SIZE];
+static struct { const void *owner; uint8_t note, velocity, level, drum; } queue[QUEUE_SIZE];
 static volatile uint32_t queue_head, queue_tail;
-void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level)
+static void queue_note(const void *owner, unsigned note, unsigned velocity, unsigned level, unsigned drum)
 {
     uint32_t head = queue_head;
     if (head - queue_tail >= QUEUE_SIZE || note > 127 || velocity > 127 || level > 127)
@@ -234,9 +250,13 @@ void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned lev
     queue[head % QUEUE_SIZE].note = (uint8_t)note;
     queue[head % QUEUE_SIZE].velocity = (uint8_t)velocity;
     queue[head % QUEUE_SIZE].level = (uint8_t)level;
+    queue[head % QUEUE_SIZE].drum = (uint8_t)drum;
     __asm__ volatile("" ::: "memory");
     queue_head = head + 1U;
 }
+void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_note(owner, note, velocity, level, 0); }
+void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_note(owner, note, velocity, level, 1); }
+unsigned fm1b_has_drums(void) { return bank.image && bank.drum_preset >= 0; }
 
 /* Decode SEA5 group g (20 frames) of voice v. The LMS state carries from one group to the next inside a chunk, so
  * a forward step costs one group; anything else (the first read, a loop jump, a chunk change) starts from the
@@ -306,7 +326,7 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
 {
     while (queue_tail != queue_head) {
         uint32_t at = queue_tail % QUEUE_SIZE;
-        note_apply(queue[at].owner, queue[at].note, queue[at].velocity, queue[at].level);
+        note_apply(queue[at].owner, queue[at].note, queue[at].velocity, queue[at].level, queue[at].drum);
         __asm__ volatile("" ::: "memory");
         queue_tail = queue_tail + 1U;
     }

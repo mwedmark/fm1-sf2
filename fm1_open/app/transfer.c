@@ -367,13 +367,19 @@ discard:
 #include <stddef.h>
 
 void sf2player_play(unsigned note, unsigned velocity);
+void sf2player_drum(unsigned note, unsigned velocity);
 
 /* MIDI input from DIN, USB and BLE, any channel. The default would feed the stock instrument. */
 void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes)
 {
     (void)source;
-    if (bytes == 3 && (message[0] & 0xe0U) == 0x80U)
-        sf2player_play(message[1], (message[0] & 0xf0U) == 0x90U ? message[2] : 0U);
+    if (bytes == 3 && (message[0] & 0xe0U) == 0x80U) {
+        unsigned velocity = (message[0] & 0xf0U) == 0x90U ? message[2] : 0U;
+        if ((message[0] & 0x0fU) == 9U)                       /* MIDI channel 10: the percussion kit */
+            sf2player_drum(message[1], velocity);
+        else
+            sf2player_play(message[1], velocity);
+    }
     else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 123U)   /* all notes off */
         fm1b_panic();
     else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 91U)    /* reverb send */
