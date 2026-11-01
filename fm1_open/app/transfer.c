@@ -366,28 +366,57 @@ discard:
 #include "sf2_upload.h"
 #include <stddef.h>
 
-void sf2player_play(unsigned note, unsigned velocity);
-void sf2player_drum(unsigned note, unsigned velocity);
+void sf2player_channel_play(unsigned channel, unsigned note, unsigned velocity);
+void sf2player_channel_drum(unsigned channel, unsigned note, unsigned velocity);
+void sf2player_channel_program(unsigned channel, unsigned program_bank, unsigned program);
+void sf2player_channel_control(unsigned channel, unsigned controller, unsigned value);
 
-/* MIDI input from DIN, USB and BLE, any channel. The default would feed the stock instrument. */
+/* The bank select (CC 0 and 32) of each channel, which the next program change on it uses. */
+static uint8_t bank_msb[16], bank_lsb[16];
+
+/* MIDI input from DIN, USB and BLE. Multitimbral: every channel plays the preset its program change chose (channel 10
+ * the percussion kit), and a channel that never had one plays the preset of the panel. The default would feed the stock
+ * instrument. */
 void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes)
 {
     (void)source;
-    if (bytes == 3 && (message[0] & 0xe0U) == 0x80U) {
-        unsigned velocity = (message[0] & 0xf0U) == 0x90U ? message[2] : 0U;
-        if ((message[0] & 0x0fU) == 9U)                       /* MIDI channel 10: the percussion kit */
-            sf2player_drum(message[1], velocity);
+    if (!bytes)
+        return;
+    unsigned type = message[0] & 0xf0U, channel = message[0] & 0x0fU;
+    if (bytes == 3 && (type == 0x80U || type == 0x90U)) {
+        unsigned velocity = type == 0x90U ? message[2] : 0U;
+        if (channel == 9U)                                    /* MIDI channel 10: the percussion kit */
+            sf2player_channel_drum(channel, message[1], velocity);
         else
-            sf2player_play(message[1], velocity);
+            sf2player_channel_play(channel, message[1], velocity);
     }
-    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 123U)   /* all notes off */
-        fm1b_panic();
-    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 91U)    /* reverb send */
-        sf2fx_set(message[2], sf2fx_chorus());
-    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 10U && (message[0] & 0x0fU) != 9U)   /* pan */
-        sf2fx_set_pan(message[2]);
-    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 93U)    /* chorus send */
-        sf2fx_set(sf2fx_reverb(), message[2]);
+    else if (bytes == 2 && type == 0xc0U) {                   /* program change; the kit of channel 10 is the bank's first */
+        /* 120 (General MIDI 2) or the 14-bit bank 128 is the percussion bank; any other bank is the melodic one. */
+        unsigned drum_bank = bank_msb[channel] == 120U || (bank_msb[channel] == 1U && !bank_lsb[channel]);
+        if (channel != 9U)
+            sf2player_channel_program(channel, drum_bank ? 128U : 0U, message[1]);
+    }
+    else if (bytes == 3 && type == 0xb0U) {
+        unsigned value = message[2];
+        switch (message[1]) {
+        case 0:   bank_msb[channel] = (uint8_t)value; break;
+        case 32:  bank_lsb[channel] = (uint8_t)value; break;
+        case 7:                                                /* volume and expression: per channel */
+        case 11:
+        case 120:                                              /* all sound off, reset all controllers, all notes off: the channel's */
+        case 121:
+        case 123:
+            sf2player_channel_control(channel, message[1], value);
+            break;
+        case 91:  sf2fx_set(value, sf2fx_chorus()); break;     /* reverb send */
+        case 93:  sf2fx_set(sf2fx_reverb(), value); break;     /* chorus send */
+        case 10:                                               /* pan: one for all, so only while nothing is multitimbral */
+            if (channel != 9U && !fm1b_multitimbral())
+                sf2fx_set_pan(value);
+            break;
+        default:  break;
+        }
+    }
 }
 void fm1_app_sysex(const uint8_t *message, size_t bytes) { sf2_upload_offer(message, bytes); }
 
