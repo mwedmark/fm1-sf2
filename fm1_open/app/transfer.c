@@ -362,6 +362,7 @@ discard:
 #include "fm1.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
+#include "sf2fx.h"
 #include "sf2_upload.h"
 #include <stddef.h>
 
@@ -375,6 +376,10 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         sf2player_play(message[1], (message[0] & 0xf0U) == 0x90U ? message[2] : 0U);
     else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 123U)   /* all notes off */
         fm1b_panic();
+    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 91U)    /* reverb send */
+        sf2fx_set(message[2], sf2fx_chorus());
+    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 93U)    /* chorus send */
+        sf2fx_set(sf2fx_reverb(), message[2]);
 }
 void fm1_app_sysex(const uint8_t *message, size_t bytes) { sf2_upload_offer(message, bytes); }
 

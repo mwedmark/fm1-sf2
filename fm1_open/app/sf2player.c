@@ -8,6 +8,7 @@
 #include "fm1b.h"
 #include "fm1b_config.h"
 #include "sf2_upload.h"
+#include "sf2fx.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
@@ -52,7 +53,7 @@ static const uint8_t punctuation[][6] = {
     {'.', 0, 0x60, 0x60, 0, 0}, {':', 0, 0x36, 0x36, 0, 0}, {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'(', 0, 0x1c, 0x22, 0x41, 0},
     {')', 0, 0x41, 0x22, 0x1c, 0}};
 enum { WHITE = 0xffff, GREY = 0x8410, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
-       LINE_CHARS = 41, LINES = 9, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
+       LINE_CHARS = 41, LINES = 10, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
 static char shown[LINES][LINE_CHARS + 1];
 
@@ -219,7 +220,13 @@ static void screen_update(void)
     *d = 0;
     line_show(6, 140, line, 1, GREY);
     upload_line();
-    line_show(7, 228, "ENCODER 1  PROGRAM", 1, GREY);
+    d = put_text(line, "REVERB ");
+    d = put_number(d, (int32_t)sf2fx_reverb(), 0);
+    d = put_text(d, "  CHORUS ");
+    d = put_number(d, (int32_t)sf2fx_chorus(), 0);
+    *d = 0;
+    line_show(9, 158, line, 1, YELLOW);
+    line_show(7, 228, "ENCODER 1 PROG  2 REVERB  3 CHORUS", 1, GREY);
 }
 
 static uint32_t previous_keys;
@@ -245,6 +252,14 @@ void groove_screen_control(void)
         for (int clicks = controls.encoders[0] * step; clicks > 0; --clicks)
             for (int next = (int)program + step; next >= 0 && next < 128; next += step)
                 if (fm1b_program(0, (unsigned)next) == 0) { program = (unsigned)next; break; }
+    }
+    for (unsigned which = 1; which <= 2; ++which) {            /* encoders 2 and 3: reverb and chorus send */
+        if (!controls.encoders[which])
+            continue;
+        int level = (int)(which == 1 ? sf2fx_reverb() : sf2fx_chorus()) + controls.encoders[which] * 4;
+        level = level < 0 ? 0 : level > 127 ? 127 : level;
+        if (which == 1) sf2fx_set((unsigned)level, sf2fx_chorus());
+        else sf2fx_set(sf2fx_reverb(), (unsigned)level);
     }
     uint32_t changed = controls.keys ^ previous_keys;
     for (unsigned key = 0; key < KEYS; ++key) {

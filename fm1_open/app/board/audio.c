@@ -5,6 +5,7 @@
 #include "audio_output.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
+#include "sf2fx.h"
 #include <string.h>
 
 #define DMA_ALIGNED __attribute__((aligned(32)))
@@ -59,10 +60,7 @@ FM1_AUDIO_CODE __attribute__((interrupt(""))) void fm1_audio_irq(void)
     if (fm1b_ready()) {
         for (unsigned i = 0; i < FM1_BLOCK_FRAMES; ++i) melodic[i] = 0;
         fm1b_render(NULL, melodic, FM1_BLOCK_FRAMES);
-        for (unsigned i = 0; i < FM1_BLOCK_WORDS; ++i) {
-            int32_t value = rendered[i] + melodic[i >> 1];
-            rendered[i] = value > 8388607 ? 8388607 : value < -8388608 ? -8388608 : value;
-        }
+        sf2fx_mix(melodic, rendered, FM1_BLOCK_FRAMES);          /* dry on both channels, plus reverb and chorus */
     }
 #endif
     fm1_output_mix(rendered);

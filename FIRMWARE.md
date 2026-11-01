@@ -69,6 +69,15 @@ harmless). The SDK says no flash access from the SysEx callback, so the callback
 and the refusals (data before begin, bad CRC, outside the bank, a flash error). **Not run on a device**, and fm1-emu cannot test it end to end: its DIN input stops delivering
 frames after about 20 of them (the same with the flash calls left out), and the firmware's answers go nowhere. Over USB with the host waiting for the answers the pacing is the host's.
 
+### Reverb and chorus (`fm1_open/app/sf2fx.c`)
+
+The library's own reverb and delay are internal to its engine (local symbols, state for its tracks), so the player has its own: a Freeverb-style reverb (four combs,
+two allpasses a side, mono in and stereo out) and a two-tap chorus (16 ms +- 6.8 ms, 0.8 Hz, opposite on the two channels). About 16 KB of SRAM, 16-bit delay lines, run from the
+audio interrupt after the voices (`board/audio.c`); after 3 s of silence they cost nothing. Levels 0..127 (0 = off), default reverb 30 and chorus 20: MIDI CC 91 (reverb) and
+CC 93 (chorus), and on the panel encoder 2 (reverb) and 3 (chorus), 4 steps a click; the panel shows them. `node test_fx.js` runs it on WebAssembly (off is bit exact dry, the tail
+falls and dies out, no wrap at full level with noise, silence after the idle time, a new note after it). Measured in fm1-emu at 240 MHz with 8 voices held: 56 % with both effects
+off, 62 % with both at 127 (idle 11 %). Not heard on a device.
+
 ## The hook is written, but the stock image is full
 
 The hook (`board/audio.c`), the key route (`groove_midi_local` in `midi_router.c`: a key on a track whose source is the sampler plays the bank),
