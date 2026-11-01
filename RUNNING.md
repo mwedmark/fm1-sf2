@@ -77,23 +77,81 @@ node make_wasm_js.js
 The simulator plays on one sampler track through the panel slot only. **MIDI channels and program change are firmware only**
 (`transfer.c`), so multitimbral cannot be heard in the simulator.
 
-## 4. fm1-emu, the CPU emulator (not verified in the latest session)
+## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
-<https://joakimeriksson.github.io/fm1-emu/> runs `.fwsc` packages unchanged (**Open .fwsc...**). The firmware package has
-no bank, so it shows `NO BANK` until one is in the user flash.
+fm1-emu (<https://joakimeriksson.github.io/fm1-emu/>, MIT) runs `.fwsc` packages unchanged. The firmware package has no bank, so it
+shows `NO BANK` until a bank is laid in the user flash. The online page cannot fetch our bank (other origin), so the emulator's site files
+run from a **local copy served with CORS headers**. That copy already exists, in an old scratchpad under Temp:
 
-1. Make the flash sector file for the bank (verified to run):
+```
+C:\Users\Magnus\AppData\Local\Temp\claude\D--git-pico8-hws\df678bca-34d6-48e4-84f5-0df8efb5cf71\scratchpad\
+    cors_server.py        the server: python cors_server.py <port> <folder>   (binds 127.0.0.1, adds CORS headers)
+    emu\                  the emulator's files: index.html main.js worklet.js persistence.js fwsc.js tryout.js style.css
+                          firmwares.json fm1_web.wasm, plus ours: sf2player.fwsc, gm.flash, *.script
+```
+
+**It is in Temp and can disappear.** If it is gone, download those site files again into a new folder, copy `cors_server.py` (14 lines, below),
+and redo the two registrations in steps 2-3.
+
+1. **Server** (it was running on port 8780 when this was written; check `Get-NetTCPConnection -State Listen -LocalPort 8780`):
+   ```powershell
+   cd <scratchpad folder above>
+   python cors_server.py 8780 emu
+   ```
+2. **Firmware** is registered in `emu\firmwares.json` as `"id": "sf2"`, `"package": "http://127.0.0.1:8780/sf2player.fwsc"`.
+   To test a new build, overwrite `emu\sf2player.fwsc` with `fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc`.
+   (On 2026-11-01 the file there was byte-identical to `dist\sf2player_flash.fwsc`, the build before multitimbral.)
+3. **Bank**: `emu\gm.flash` is `dist\gm_32k.fm1b` laid at the user flash. Make it again with:
    ```bash
    node make_flash_overlay.js dist/gm_32k.fm1b gm.flash
    ```
-2. The page cannot fetch `gm.flash` from another origin, so it needs a **local copy of the site's files** next to the package
-   (`index.html`, `main.js`, `worklet.js`, `persistence.js`, `fwsc.js`, `tryout.js`, `firmwares.json`, `fm1_web.wasm`). No such copy
-   was found on this machine on 2026-11-01. Download it from the site again, put `gm.flash` and `FM1_OFFICIAL_OPEN.fwsc` in the same
-   folder, and serve that folder (`python -m http.server <port>`).
-3. `tryout.js` takes `&flash=PATH` (sector records: a little-endian u32 flash offset and 4096 bytes). The exact query format was not
-   written down: read `tryout.js` in the local copy and put the query format here.
-4. Known: the emulator's DIN MIDI input stops delivering, so a MIDI test of program change per channel may not work in it;
-   panel keys and the `MULTI` line are the safer checks. Measured load at 240 MHz with 8 voices held: about 56 % with both effects.
+4. **Open** `http://127.0.0.1:8780/?fw=sf2&flash=gm.flash` (use `127.0.0.1`, not `localhost`: `flash=` and `script=` are only fetched from the page's own
+   origin, and the package URL says `127.0.0.1`). A try-out is its own session: nothing is loaded from or saved to the browser's saved flash.
+   Add `&mhz=240` for the device's clock (the page default is 100).
+5. **Scripted input**: `&script=NAME.script` plays an input script on the emulated clock, in the syntax `ms:mHEX` (MIDI bytes into the DIN jack),
+   `ms:id` / `ms:id^` (key or button down / up), `ms:eN:clicks` (encoder), `ms:pot:N`, separated by commas. `emu\drum.script` is `4000:m99267f`
+   (note on, channel 10, note 38). `test_emu\mt.script` is the multitimbral check: program change 73 (`C1 49`, flute) on channel 2 at 3.0 s,
+   then note C4 on channels 1 and 2 at 3.1 s, off at 6.0 s: `3000:mC149,3100:m903C64,3100:m913C64,6000:m803C00,6000:m813C00`.
+   The scripts are kept in `test_emu\` in this repo; copy them to `emu\`.
+6. **The screen stays dark** (the emulator does not draw the firmware's own LCD), so the `MULTI` line cannot be seen. Measure the audio instead:
+   copy `test_emu\tap.js` to `emu\`, make `emu\index_tap.html` from `emu\index.html` by adding `<script src="tap.js"></script>` right after `<head>`,
+   and open `index_tap.html?fw=sf2&flash=gm.flash&script=mt.script&mhz=240`. The script must be in the page before the emulator's own
+   (the audio node is made at the first boot; a reboot from the clock selector reuses it). `window.__cap` then holds `{t, pk, rms, cen}` every 100 ms
+   (peak, RMS, spectral centroid in Hz) of what the emulator plays. Audio starts by itself, no click needed.
+
+   Result with the multitimbral build, mean of 3.5-5.5 s (the notes sound from 3.0 s and are gone 0.5 s after 6.0 s):
+
+   | Script | RMS | Centroid |
+   |---|---|---|
+   | `mt_ch1` channel 1 only (piano, the panel's program) | 0.0096 | 348 Hz |
+   | `mt_nopc` both channels, **no** program change | 0.0193 (= 2 x channel 1) | 348 Hz |
+   | `mt_ch2` channel 2 only, after program change 73 | 0.0953 | 275 Hz |
+   | `mt` channel 1 and 2 together | 0.0976 | 280 Hz |
+
+   Without a program change both channels play the panel's piano (twice the level, same spectrum); after one, channel 2 plays a different,
+   sustained instrument. The mix of both is about the level of the louder one, as it should be. This does not separate the piano inside the mix
+   (it decays quickly); the WebAssembly test proves that part bit for bit.
+
+`cors_server.py`, in case it has to be recreated:
+
+```python
+import http.server, sys, os
+class H(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
+        super().end_headers()
+    def do_OPTIONS(self):
+        self.send_response(204); self.end_headers()
+os.chdir(sys.argv[2])
+http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+```
+
+Two other servers were running at the same time: `http.server 8765` in `D:\git\fm1-sf2` (the converter, section 3) and `http.server 8790` (the converter
+again, bound to 127.0.0.1).
+
+Known from older notes: the emulator's DIN MIDI input can stop delivering after a while. The scripted program change and notes of `mt.script`
+did arrive in every run on 2026-11-01 (they are played shortly after boot). Measured load at 240 MHz with 8 voices held: about 56 % with both effects.
 
 ## 5. On the real FM-1
 
@@ -127,7 +185,9 @@ Limits: 8 voices in total on the device (oldest is stolen first), no pitch bend,
 
 ## 8. Open items
 
-- Run the multitimbral build on the device or in fm1-emu, with program changes on two channels, and note the result here.
-- Measure the audio interrupt load with the multitimbral build (it adds one multiply per voice per 32 frames).
+- Run the multitimbral build on the real FM-1 with program changes on two channels (it has run in fm1-emu, section 4), and note the result here.
+- Measure the audio interrupt load with notes sounding (the emulator's status line shows `load`; only idle values, 12-20 % at 240 MHz, were seen).
+  The multitimbral build adds one multiply per voice per 32 frames.
+- Check the `MULTI` panel line and the bank-select rule (CC0/CC32) on a screen: the emulator draws no LCD.
 - Per-channel pan needs a stereo `fm1b_render` and a changed `sf2fx_mix`.
 - Fill in section 4 once the emulator has been started again.
