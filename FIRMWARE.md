@@ -39,9 +39,18 @@ status line's `load`: the stock library engine alone cost 26 % when idle (36 % t
 (`FM1B_SKIP_ENGINE`); then idle is 10-14 % and a voice costs about 12 % (Harmonica, 22 kHz bank) or 4 % (piano, 12 kHz bank). Keys down raise the load and
 releasing them lowers it again, so the key -> note queue -> SEA5 decode -> mix path runs. Audio was not listened to and the screen only shows a dark background.
 
-`dist/sf2player_gm22.fwsc` (not committed) is the firmware with `make_bank_c.js 1mgm.sf2 0,4,6,11,16,19,24,25,27,32,33,40,48,56,60,65,71,73,80,88,104,115 12000`:
-22 GM melodic programs at 12 kHz SEA5, 57 576 bytes, app image 448 796 of 453 921 allowed. The first encoder steps through the programs the bank has.
-The whole `1mgm.sf2` (316 604 bytes at 32 kHz) does not fit: the package carries the image, not the user flash.
+`dist/sf2player_gm19.fwsc` (not committed) is the firmware with `make_bank_c.js 1mgm.sf2 0,4,11,16,19,24,25,27,32,33,40,48,56,60,65,71,73,80,115 12000`:
+19 GM melodic programs at 12 kHz SEA5, 56 460 bytes, app image 452 764 of 453 921 allowed. The first encoder steps through the programs the bank has.
+The whole `1mgm.sf2` (343 732 bytes at 32 kHz) does not fit: the package carries the image, not the user flash.
+
+### What the player does with a SoundFont zone
+
+- **Envelope per zone** (attack, hold, decay, sustain, release from the SoundFont's volume envelope generators, FORMAT.md "Envelopes"). Decay and release are
+  exponential, a step is 32 frames; the voice ends when it has fallen below -96 dB. Percussion zones ignore note off.
+- **Exact loops.** A piano's loop is 17-18 frames after resampling, and rounding that to a whole number of frames detunes the loop by several percent, which was
+  heard as the pitch changing at the end of the sample. The converter now repeats a loop k times so that k loops are a whole number of frames within 0.25 %.
+- **Tuning**: whole semitones move the root key, the rest (-50..50 cents) is a fine tune the player applies to the step.
+- **The panel** shows the program, the zone the latest note hit (key range, root key, fine tune, sample length, loop, rate), the envelope and the voice's level.
 
 ## The hook is written, but the stock image is full
 

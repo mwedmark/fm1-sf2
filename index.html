@@ -202,9 +202,14 @@ function presetZones(sf, p) {
       const sh = sf.shdr[sample];
       if (!sh || sh.type === 2) continue;            // right channel of a stereo pair: the left one is used as mono
       const rk = g(58), mode = g(54);
+      const pg = k => pm[k] || (pGlobal && pGlobal[k]);
       const n = k => { const v = g(k); return v ? v.s : 0; };
+      const np = k => { const v = pg(k); return v ? v.s : 0; };
+      const tc = (k, dflt) => (g(k) ? g(k).s : dflt) + np(k);       // timecents: instrument value plus preset value
       zones.push({
         lo, hi, sample,
+        cents: n(51) * 100 + n(52) + np(51) * 100 + np(52) + sh.correction,   // coarse + fine tune + the sample's own correction
+        env: { attack: tc(34, -12000), hold: tc(35, -12000), decay: tc(36, -12000), sustain: n(37) + np(37), release: tc(38, -12000) },
         vlo: vr ? vr.lo : 0, vhi: vr ? vr.hi : 127,
         root: rk && rk.s >= 0 && rk.s <= 127 ? rk.s : (sh.pitch <= 127 ? sh.pitch : 60),
         loop: !!mode && (mode.u & 3) !== 0 && (mode.u & 3) !== 2,
@@ -389,7 +394,7 @@ function buildBank(sf, presetIdx, opt) {
   for (const g of groups) {
     if (!g.zones.length) continue;
     const first = out.length;
-    for (const z of g.zones) addZone(z, g.p ? g.p.name : '');
+    for (const z of g.zones) addZone(Object.assign(z, { drum: !!g.p && g.p.bank === 128 }), g.p ? g.p.name : '');
     if (g.p) presets.push({ name: g.p.name, bank: g.p.bank, preset: g.p.preset, first, count: out.length - first });
   }
   let off = 0;
@@ -398,36 +403,81 @@ function buildBank(sf, presetIdx, opt) {
 
   function addZone(z, presetName) {
     const sh = sf.shdr[z.sample];
-    let s = cache.get(z.sample);
+    const srcRate = sh.rate > 0 ? sh.rate : 44100;
+    // The loop of a short sample is a few dozen frames: rounding its length to a whole number of output frames would
+    // detune it by several percent. Repeat the loop k times so that k loops are a whole number of frames within 0.25 % (4 cents),
+    // and let the resampler land exactly on that length.
+    const srcLs = sh.startLoop - sh.start + z.loopOffStart, srcLe = sh.endLoop - sh.start + z.loopOffEnd;
+    const srcLen = Math.max(0, sh.end - sh.start);
+    const wantLoop = !!z.loop && srcLe > srcLs && srcLs >= 0 && srcLe <= srcLen;
+    let ratio = rate / srcRate, reps = 1, outLoop = 0;
+    if (wantLoop) {
+      const L = srcLe - srcLs;
+      let best = 1, bestErr = 9;
+      for (let k = 1; k === 1 || k * L * ratio <= 640; k++) {     // few repeats: each one is flash
+        const exact = k * L * ratio, err = Math.abs(Math.round(exact) - exact) / exact;
+        if (Math.round(exact) >= 1 && err < bestErr - 1e-9) { best = k; bestErr = err; if (err < 0.0025) break; }
+      }
+      reps = best; outLoop = Math.max(1, Math.round(reps * L * ratio));
+      ratio = outLoop / (reps * L);                          // under 0.25 % off the wanted pitch
+    }
+    const key = z.sample + '|' + (wantLoop ? srcLs + ',' + srcLe : '-');
+    let s = cache.get(key);
     if (!s) {
-      const srcRate = sh.rate > 0 ? sh.rate : 44100, ratio = rate / srcRate;
-      const f = resample(readSample(sf, sh), ratio);
+      let src = readSample(sf, sh);
+      let outLs = 0;
+      if (wantLoop) {
+        const L = srcLe - srcLs, unrolled = new Float32Array(srcLs + L * reps);
+        unrolled.set(src.subarray(0, srcLs));
+        for (let r = 0; r < reps; r++) unrolled.set(src.subarray(srcLs, srcLe), srcLs + r * L);
+        src = unrolled;                                      // what follows the loop end is never played
+        outLs = Math.floor(srcLs * ratio);
+      }
+      let f = resample(src, ratio);
+      if (wantLoop && f.length < outLs + outLoop) { const g = new Float32Array(outLs + outLoop); g.set(f); f = g; }
+      if (wantLoop) f = f.subarray(0, outLs + outLoop);
       const pcm = bits === 8 ? new Int8Array(f.length) : new Int16Array(f.length);
       for (let i = 0; i < f.length; i++) {
         pcm[i] = bits === 8 ? Math.max(-128, Math.min(127, Math.round(f[i] / 256)))
                             : Math.max(-32768, Math.min(32767, Math.round(f[i])));
       }
       const enc = sea ? seaEncode(pcm) : null;               // SEA5 keeps the 16-bit pcm too, for the .sf2 and the tests
-      s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root, loopStart: 0, loopEnd: 0, loop: false };
-      cache.set(z.sample, s);
+      s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root,
+            loopStart: wantLoop ? outLs : 0, loopEnd: wantLoop ? outLs + outLoop : 0, loop: wantLoop };
+      cache.set(key, s);
       samples.push(s);
     }
-    const len = s.pcm.length;
-    let ls = Math.floor((sh.startLoop - sh.start + z.loopOffStart) * s.ratio);
-    let le = Math.floor((sh.endLoop - sh.start + z.loopOffEnd) * s.ratio);
-    ls = Math.max(0, ls); le = Math.min(len, le);
-    const loop = z.loop && le > ls;
-    if (loop && !s.loop) { s.loop = true; s.loopStart = ls; s.loopEnd = le; }
-    out.push({ lo: z.lo, hi: z.hi, root: z.root, loop, loopStart: loop ? ls : 0, loopEnd: loop ? le : 0, sample: s, presetName });
+    // Tuning (coarse, fine, the sample's own correction) is not baked into the data, which several zones share: whole
+    // semitones move the root key, the rest is a signed fine tune in cents (-50..50) the player applies to the step.
+    const semis = Math.round((z.cents || 0) / 100), fine = Math.round((z.cents || 0) - semis * 100);
+    out.push({ lo: z.lo, hi: z.hi, root: Math.max(0, Math.min(127, z.root - semis)), fine, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
+               env: envRecord(z.env, z.drum) });
   }
+}
+
+// Volume envelope of a zone from the SoundFont's generators (timecents, centibels), in the form the player uses:
+// a step is 32 frames at 44.1 kHz; decay and release are exponential, so each step multiplies by a Q16 factor.
+function envRecord(e, drum) {
+  const STEP = 32 / 44100, secs = tc => Math.pow(2, Math.max(-12000, Math.min(8000, tc)) / 1200);
+  const factor = t => Math.max(1, Math.min(65535, Math.round(65536 * Math.pow(10, -5 * STEP / Math.max(0.001, t)))));
+  e = e || { attack: -12000, hold: -12000, decay: -12000, sustain: 0, release: -12000 };
+  const sus = Math.max(0, Math.min(1000, e.sustain)) / 10;                      // dB below the peak
+  return {
+    attack: Math.max(2, Math.min(20000, Math.round(secs(e.attack) * 1000))),   // ms
+    hold: Math.max(0, Math.min(20000, Math.round(secs(e.hold) * 1000))),
+    decay: factor(secs(e.decay)),                                              // Q16 per step, used until the sustain level
+    sustain: Math.max(0, Math.min(65535, Math.round(65536 * Math.pow(10, -sus / 20)))),
+    release: factor(Math.max(0.015, secs(e.release))),
+    fixed: !!drum,                                                             // a struck sound: note off does not shorten it
+  };
 }
 
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
 //   header (48) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
-//   key maps (128 bytes per preset) | zones (20 each) | sample data (each sample padded to 4 bytes)
+//   key maps (128 bytes per preset) | zones (24 each) | envelopes (12 each) | sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 48, FM1B_PRESET = 24, FM1B_ZONE = 20;
+const FM1B_HEADER = 48, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ENV = 12;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -437,7 +487,14 @@ function writeFm1(bank) {
   const np = presets.length, nz = bank.zones.length;
 
   const offPitch = FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
-  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offSmp = offZone + FM1B_ZONE * nz;
+  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offEnv = offZone + FM1B_ZONE * nz;
+  const envs = [], envIndex = new Map();                    // envelopes are shared between zones
+  for (const z of bank.zones) {
+    const e = z.env || envRecord(null, false), k = [e.attack, e.hold, e.decay, e.sustain, e.release, e.fixed].join();
+    if (!envIndex.has(k)) { envIndex.set(k, envs.length); envs.push(e); }
+    z.envIndex = envIndex.get(k);
+  }
+  const offSmp = offEnv + FM1B_ENV * envs.length;
   let end = offSmp;
   for (const s of bank.samples) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
 
@@ -448,6 +505,7 @@ function writeFm1(bank) {
   dv.setUint16(6, bank.sea ? 2 : bank.bits === 16 ? 1 : 0, true);
   dv.setUint32(8, bank.rate, true);
   dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
+  dv.setUint32(44, offEnv, true);                          // envelope table
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -473,6 +531,13 @@ function writeFm1(bank) {
     dv.setUint32(o + 8, z.loopStart, true);
     dv.setUint32(o + 12, z.loopEnd, true);
     out[o + 16] = z.root; out[o + 17] = z.loop ? 1 : 0;
+    dv.setUint16(o + 18, z.envIndex, true);
+    dv.setInt16(o + 20, z.fine || 0, true);
+  });
+  envs.forEach((e, i) => {
+    const o = offEnv + i * FM1B_ENV;
+    dv.setUint16(o, e.attack, true); dv.setUint16(o + 2, e.hold, true); dv.setUint16(o + 4, e.decay, true);
+    dv.setUint16(o + 6, e.sustain, true); dv.setUint16(o + 8, e.release, true); dv.setUint16(o + 10, e.fixed ? 1 : 0, true);
   });
   for (const s of bank.samples) out.set(s.enc || new Uint8Array(s.pcm.buffer, s.pcm.byteOffset, s.pcm.byteLength), s.fileOff);
   return out;

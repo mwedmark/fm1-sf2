@@ -29,6 +29,17 @@ void fm1b_panic(void);
 /* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several
  * sampler instances, each rendered once per block, and a voice must advance exactly once per block. */
 void fm1b_render(const void *owner, int32_t *out, unsigned frames);
+/* What the panel shows: the selected preset, the zone the latest note hit (its sample and envelope) and the state of
+ * the voice that plays it. Read from the control task; the audio interrupt may change a field while it is copied. */
+struct fm1b_status {
+    char name[21];
+    uint8_t ready, program, note, zone, zones, root, loop, voices, phase, level;  /* level 0..255, phase 0..4 = A H D S R */
+    int8_t fine;
+    uint8_t lo, hi, sustain_percent;
+    uint16_t attack_ms, hold_ms;
+    uint32_t length, loop_start, loop_end, rate;
+};
+void fm1b_status(struct fm1b_status *status);
 /* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
 void fm1b_device_init(void);
 #endif

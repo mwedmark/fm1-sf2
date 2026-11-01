@@ -17,7 +17,7 @@ function lookup(f, bank, program, note) {
   const k = f[offKey + p * 128 + note];
   if (k === 0xff) return null;
   const first = dv.getUint16(offPre + p * 24, true);
-  const z = offZone + (first + k) * 20;
+  const z = offZone + (first + k) * 24;
   const root = f[z + 16];
   const idx = Math.max(0, Math.min(127, note - root + 64));
   return { addr: dv.getUint32(z, true), len: dv.getUint32(z + 4, true), loopStart: dv.getUint32(z + 8, true),
