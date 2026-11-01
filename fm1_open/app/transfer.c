@@ -384,6 +384,8 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         fm1b_panic();
     else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 91U)    /* reverb send */
         sf2fx_set(message[2], sf2fx_chorus());
+    else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 10U && (message[0] & 0x0fU) != 9U)   /* pan */
+        sf2fx_set_pan(message[2]);
     else if (bytes == 3 && (message[0] & 0xf0U) == 0xb0U && message[1] == 93U)    /* chorus send */
         sf2fx_set(sf2fx_reverb(), message[2]);
 }

@@ -239,12 +239,14 @@ static void screen_update(void)
     d = put_number(d, (int32_t)sf2fx_reverb(), 0);
     d = put_text(d, "  CHORUS ");
     d = put_number(d, (int32_t)sf2fx_chorus(), 0);
+    d = put_text(d, "  PAN ");
+    { int pan = (int)sf2fx_pan() - 64; if (pan > 0) *d++ = '+'; d = put_number(d, pan, 0); }
     d = put_text(d, "  OCT ");
     if (octave > 0) *d++ = '+';
     d = put_number(d, octave, 0);
     *d = 0;
     line_show(9, 158, line, 1, YELLOW);
-    line_show(7, 228, "ENC1 PROG SCL DRUMS K1 REVERB K2 CHORUS", 1, GREY);
+    line_show(7, 228, "ENC1 PROG SCL DRUMS K1 REV K2 CHO K3 PAN", 1, GREY);
 }
 
 static uint32_t previous_keys, previous_buttons;
@@ -282,6 +284,10 @@ void groove_screen_control(void)
         level = level < 0 ? 0 : level > 127 ? 127 : level;
         if (which == 2) sf2fx_set((unsigned)level, sf2fx_chorus());
         else sf2fx_set(sf2fx_reverb(), (unsigned)level);
+    }
+    if (controls.encoders[4]) {                               /* KNOB3 (encoder 4): pan */
+        int pan = (int)sf2fx_pan() + controls.encoders[4] * 4;
+        sf2fx_set_pan((unsigned)(pan < 0 ? 0 : pan > 127 ? 127 : pan));
     }
     uint32_t pressed = controls.buttons & ~previous_buttons;
     previous_buttons = controls.buttons;
