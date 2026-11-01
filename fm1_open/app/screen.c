@@ -1,3 +1,5 @@
+/* The stock instrument application: built for the browser simulator (FM1_HOST_TEST); the SF2 player firmware replaces it (sf2player.c). */
+#ifdef FM1_HOST_TEST
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "instrument.h"
 #include "fm_patch.h"
@@ -2972,3 +2974,4 @@ static void algorithm_draw(unsigned algorithm, unsigned muted)
         number(x + 8, y + 3, i + 1, 1, 1, muted & (1U << i) ? DIM : BACK, bg);
     }
 }
+#endif

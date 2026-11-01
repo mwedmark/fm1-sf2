@@ -1,3 +1,5 @@
+/* The stock instrument application: built for the browser simulator (FM1_HOST_TEST); the SF2 player firmware replaces it (sf2player.c). */
+#ifdef FM1_HOST_TEST
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "fm1_engine_control.h"
 #include "fm1_device.h"
@@ -239,3 +241,4 @@ int groove_samples_read(unsigned offset, uint8_t *data, unsigned bytes)
         return GROOVE_PROJECT_INVALID;
     return fm1_flash_read(GROOVE_SAMPLE_OFFSET + offset, data, bytes);
 }
+#endif

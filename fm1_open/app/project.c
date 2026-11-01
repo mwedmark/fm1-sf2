@@ -1,3 +1,5 @@
+/* The stock instrument application: built for the browser simulator (FM1_HOST_TEST); the SF2 player firmware replaces it (sf2player.c). */
+#ifdef FM1_HOST_TEST
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 /* Modified 2026-10-17: bind tuning to project contents, not device settings;
  * preserve valid version-1 entries before rewriting their project records;
@@ -858,3 +860,4 @@ void groove_project_poll(void)
             settings_changed = fm1_millis();
     }
 }
+#endif

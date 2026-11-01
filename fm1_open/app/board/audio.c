@@ -5,6 +5,7 @@
 #include "audio_output.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
+#include "sf2fx.h"
 #include <string.h>
 
 #define DMA_ALIGNED __attribute__((aligned(32)))
@@ -45,19 +46,21 @@ FM1_AUDIO_CODE __attribute__((interrupt(""))) void fm1_audio_irq(void)
     if (interval > block_ticks + (block_ticks >> 3)) { ++statistics.overruns; return; }
     half = fm1_audio_free_half();
     /* The library renders the instrument; APP mixes external audio. */
+#if FM1B_SKIP_ENGINE
+    /* The SF2 player does not use the library's instrument: skip its (idle) render and start from silence. */
+    for (unsigned i = 0; i < FM1_BLOCK_WORDS; ++i) rendered[i] = 0;
+#else
     if (fm1_engine_render(rendered, FM1_BLOCK_FRAMES) != 0) {
         ++statistics.overruns;
         return;
     }
+#endif
     /* The FM1B player sits beside the library's instrument: one channel of Q23, added to both. */
 #if FM1B_IN_FIRMWARE
     if (fm1b_ready()) {
         for (unsigned i = 0; i < FM1_BLOCK_FRAMES; ++i) melodic[i] = 0;
         fm1b_render(NULL, melodic, FM1_BLOCK_FRAMES);
-        for (unsigned i = 0; i < FM1_BLOCK_WORDS; ++i) {
-            int32_t value = rendered[i] + melodic[i >> 1];
-            rendered[i] = value > 8388607 ? 8388607 : value < -8388608 ? -8388608 : value;
-        }
+        sf2fx_mix(melodic, rendered, FM1_BLOCK_FRAMES);          /* dry on both channels, plus reverb and chorus */
     }
 #endif
     fm1_output_mix(rendered);

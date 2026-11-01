@@ -66,7 +66,7 @@ outer: for (let p = 0; p < np && !found; p++) {
   for (let n = 36; n < 96; n++) {
     const k = bank[offKey + p * 128 + n];
     if (k === 0xff) continue;
-    const z = offZone + (first + k) * 20;
+    const z = offZone + (first + k) * 24;
     if (bank[z + 17] & 1) {
       const len = dv.getUint32(z + 4, true);
       // find the program that maps to preset p
@@ -86,7 +86,7 @@ if (found) {
   midi(0x90, found.n, 0);
   render(0.15);
   const after = render(0.1);
-  check('silent 150 ms after note-off', rms(after) < 0.0005, `rms ${rms(after).toFixed(5)}`);
+  check('releasing 150 ms after note-off (the zone own release time)', rms(after) < rms(tail) * 0.25, `rms ${rms(after).toFixed(5)} against ${rms(tail).toFixed(5)}`);
 } else console.log('no looped zone in this bank');
 
 // 3. silence for a note outside every zone does not crash

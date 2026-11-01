@@ -5,7 +5,7 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (48) | pitch table | bank map | presets | key maps | zones | sample data
+header (48) | pitch table | bank map | presets | key maps | zones | envelopes | sample data
 ```
 
 ## Header (48 bytes)
@@ -25,7 +25,7 @@ header (48) | pitch table | bank map | presets | key maps | zones | sample data
 | 32 | u32 | offset of the zone table |
 | 36 | u32 | offset of the sample data |
 | 40 | u32 | file size |
-| 44 | u32 | reserved, 0 |
+| 44 | u32 | offset of the envelope table, 0 = none (every zone then plays with the default envelope) |
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`.
 
@@ -68,7 +68,7 @@ Preset `p` has its map at `keymaps + p*128`. Entry `note` is the zone number **w
 (`first + entry` is the zone table index), or `0xFF` when the note is silent. Where zones overlap, the
 lowest-numbered zone wins, so the CPU never has to choose.
 
-## Zone: 20 bytes each
+## Zone: 24 bytes each
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -78,6 +78,9 @@ lowest-numbered zone wins, so the CPU never has to choose.
 | 12 | u32 | loop end (exclusive), in samples |
 | 16 | u8 | root key (MIDI note the sample was recorded at) |
 | 17 | u8 | flags, bit 0 = loop (otherwise the sample plays once) |
+| 18 | u16 | envelope number (index into the envelope table) |
+| 20 | i16 | fine tune in cents (-50..50): the step of every note in the zone is multiplied by 2^(cents/1200) |
+| 22 | u16 | reserved, 0 |
 | 18 | u16 | reserved, 0 |
 
 Zones that use the same sample point at the same data.
@@ -85,7 +88,7 @@ Zones that use the same sample point at the same data.
 ## Lookup in C
 
 ```c
-typedef struct { uint32_t off, len, loop_start, loop_end; uint8_t root, flags; uint16_t rsv; } fm1_zone;
+typedef struct { uint32_t off, len, loop_start, loop_end; uint8_t root, flags; uint16_t env; int16_t fine; uint16_t rsv; } fm1_zone;
 
 const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, uint32_t *step) {
     const uint32_t *h = (const uint32_t *)f;
@@ -107,3 +110,17 @@ const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, u
 
 Envelopes, filters, modulation, velocity layers (the layer that answers to velocity 100 is used), stereo (the left channel is used),
 fine tuning and sample start offsets.
+
+## Envelopes: 12 bytes each
+
+The volume envelope of a zone, from the SoundFont's volume envelope generators. A *step* is 32 frames at 44.1 kHz. Decay and
+release are exponential (a constant number of dB per second), so each step multiplies the level by a factor.
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | u16 | attack, ms (linear from 0 to full, at least 2) |
+| 2 | u16 | hold, ms (full level) |
+| 4 | u16 | decay factor per step, Q16 (level falls to the sustain level) |
+| 6 | u16 | sustain level, Q16 linear (65535 = full; under 1/256 the voice ends at the end of the decay) |
+| 8 | u16 | release factor per step, Q16 (after note off; the voice ends below -96 dB) |
+| 10 | u16 | bit 0 = note off does not release (a struck sound that plays to its end) |

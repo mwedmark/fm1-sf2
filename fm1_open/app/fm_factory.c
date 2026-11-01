@@ -1,3 +1,5 @@
+/* The stock instrument application: built for the browser simulator (FM1_HOST_TEST); the SF2 player firmware replaces it (sf2player.c). */
+#ifdef FM1_HOST_TEST
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "fm_patch.h"
 #include "fm_factory.inc"
@@ -30,3 +32,4 @@ FM1_DSP_CODE void groove_fm_factory(uint8_t p[156], unsigned program)
 {
     groove_fm_unpack(p,groove_fm_factory_raw(program));
 }
+#endif
