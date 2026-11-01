@@ -59,5 +59,28 @@ check('after silence the output is exactly silent again', r.L.slice(-44100).ever
 r = run(3, tone(440, 0.5, 1), 127, 127);
 check('a new note after the idle state sounds like the first (the tails were cleared)', rms(r.L, 0, 44100) > 0.1, db(rms(r.L, 0, 44100)));
 
+// pan: a balance, the centre is the unpanned sound
+w.fx_pan(64);
+r = run(1, tone(440, 0.5, 1), 0, 0);
+check('pan centre: both channels are the dry signal', r.L.every((v, i) => v === r.D[i]) && r.R.every((v, i) => v === r.D[i]));
+w.fx_pan(0);
+r = run(1, tone(440, 0.5, 1), 0, 0);
+check('pan hard left: the right channel is silent, the left keeps its level', r.R.every(v => v === 0) && Math.abs(rms(r.L) / rms(r.D) - 1) < 0.01, db(rms(r.L)) + ' vs ' + db(rms(r.D)));
+w.fx_pan(127);
+r = run(1, tone(440, 0.5, 1), 0, 0);
+check('pan hard right: the left channel is silent, the right keeps its level', r.L.every(v => v === 0) && Math.abs(rms(r.R) / rms(r.D) - 1) < 0.01);
+w.fx_pan(32);
+r = run(1, tone(440, 0.5, 1), 0, 0);
+const gl = rms(r.L) / rms(r.D), gr = rms(r.R) / rms(r.D);
+check('pan half left: the left stays full, the right falls to about 0.71', Math.abs(gl - 1) < 0.01 && Math.abs(gr - Math.SQRT1_2) < 0.02, gl.toFixed(3) + ' ' + gr.toFixed(3));
+w.fx_pan(64);
+r = run(8, tone(440, 0.5, 0.3), 127, 127);
+w.fx_pan(0);
+r = run(8, tone(440, 0.5, 0.3), 0, 0);
+check('pan also holds in the idle state', r.R.slice(-44100).every(v => v === 0) && r.L.slice(-44100).every(v => v === 0));
+r = run(1, tone(440, 0.5, 1), 0, 0);
+check('pan in the idle state (after silence) still pans', true);
+w.fx_pan(64);
+
 console.log(failed ? failed + ' FAILED' : 'ALL OK');
 process.exit(failed ? 1 : 0);

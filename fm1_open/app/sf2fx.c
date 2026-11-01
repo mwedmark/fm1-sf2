@@ -23,6 +23,8 @@ static uint32_t chorus_phase, quiet_blocks;
 /* Defaults: a little of both. gain = level * 258 in Q15. */
 static volatile int32_t reverb_gain = 30 * 258, chorus_gain = 20 * 258;
 static volatile unsigned reverb_level = 30, chorus_level = 20;
+static volatile int32_t pan_left = 1024, pan_right = 1024;     /* gains of the dry signal, Q10 */
+static volatile unsigned pan_level = 64;
 
 void sf2fx_set(unsigned reverb, unsigned chorus)
 {
@@ -31,10 +33,31 @@ void sf2fx_set(unsigned reverb, unsigned chorus)
     reverb_gain = (int32_t)reverb_level * 258;
     chorus_gain = (int32_t)chorus_level * 258;
 }
+static uint32_t isqrt(uint32_t v)
+{
+    uint32_t r = 0;
+    for (uint32_t bit = 1U << 30; bit; bit >>= 2) {
+        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+        else r >>= 1;
+    }
+    return r;
+}
+/* Constant power: gain = sqrt(2 * (1 - x)) for the side turned away from, x being the position 0..1, capped at 1. */
+void sf2fx_set_pan(unsigned pan)
+{
+    pan_level = pan > 127 ? 127 : pan;
+    uint32_t x = pan_level < 64 ? pan_level * 256U : pan_level == 127 ? 32768U : 16384U + (pan_level - 64U) * 260U;     /* Q15, 16384 = centre */
+    uint32_t right = isqrt((32768U - x) * 64U), left = isqrt(x * 64U);                      /* Q10 of sqrt(2 * (1 - x)) and sqrt(2 * x) */
+    pan_left = (int32_t)(pan_level < 64 ? 1024U : right > 1024U ? 1024U : right);
+    pan_right = (int32_t)(pan_level > 64 ? 1024U : left > 1024U ? 1024U : left);
+}
+unsigned sf2fx_pan(void) { return pan_level; }
 unsigned sf2fx_reverb(void) { return reverb_level; }
 unsigned sf2fx_chorus(void) { return chorus_level; }
 
 static FM1_DSP_CODE inline int32_t sat16(int32_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : v; }
+/* v (Q23) times a Q10 gain without overflow in 32 bits; a gain of 1024 gives v back exactly */
+#define PAN(v, g) ((((v) >> 10) * (g)) + ((((v) & 1023) * (g)) >> 10))
 static FM1_DSP_CODE inline int32_t sat24(int32_t v) { return v > 8388607 ? 8388607 : v < -8388608 ? -8388608 : v; }
 
 #define COMB(n, input) do {                                                                     \
@@ -60,7 +83,7 @@ static FM1_DSP_CODE void clear(void)
 
 FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
 {
-    const int32_t rg = reverb_gain, cg = chorus_gain;
+    const int32_t rg = reverb_gain, cg = chorus_gain, pl = pan_left, pr = pan_right;
     int32_t peak = 0;
     for (unsigned i = 0; i < frames; ++i) {
         int32_t a = dry[i] >> 8;
@@ -70,8 +93,8 @@ FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
         if (quiet_blocks >= QUIET_BLOCKS) {                  /* the tails are gone: dry only, no work */
             if (quiet_blocks == QUIET_BLOCKS) { clear(); ++quiet_blocks; }
             for (unsigned i = 0; i < frames; ++i) {
-                out[2 * i] = sat24(out[2 * i] + dry[i]);
-                out[2 * i + 1] = sat24(out[2 * i + 1] + dry[i]);
+                out[2 * i] = sat24(out[2 * i] + PAN(dry[i], pl));
+                out[2 * i + 1] = sat24(out[2 * i + 1] + PAN(dry[i], pr));
             }
             return;
         }
@@ -79,7 +102,7 @@ FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
     } else
         quiet_blocks = 0;
     for (unsigned i = 0; i < frames; ++i) {
-        int32_t x = dry[i], x16 = x >> 8, left = x, right = x;
+        int32_t x = dry[i], x16 = x >> 8, left = PAN(x, pl), right = PAN(x, pr);
         if (cg) {
             fx.chorus[fx.chorus_at] = (int16_t)x16;
             chorus_phase += CHORUS_RATE;
