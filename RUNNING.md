@@ -296,6 +296,15 @@ release, vibrato rate and reverb tail as at 44.1 kHz. fm1-emu, 16 voices, SEA6 G
 About 5 points, not the 10 the rate alone suggests: SEA decoding is per bank sample, which does not change, and the filter costs a few.
 `mt.script` gives the flute as before (RMS 0.098, centroid 283 Hz).
 
+More voices at 32 kHz (test builds with `FM1B_VOICES` 24 and 32, both pass the SRAM check; flute on 3 or 4 channels, notes 30 ms apart;
+`_all` adds different sends on every other channel, the wheel at 127 and bend up):
+
+| Voices | `load<N>_plain.script` | `load<N>_all.script` | while the notes start |
+| --- | --- | --- | --- |
+| 16 | 44-48 % | 45-56 % | up to 56 % |
+| 24 | 59-62 % | 57-61 % | up to 76 % |
+| 32 | 70-74 % | 74-78 % | up to 88 % |
+
 What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
 
 | Coding | > -20 dBFS | -20..-40 | -40..-60 | Bytes per sample |
