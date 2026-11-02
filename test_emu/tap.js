@@ -1,7 +1,9 @@
 // Test tap: records level and spectral centroid of whatever the emulator's AudioWorkletNode outputs, into window.__cap.
+// With &mute=1 in the page's address nothing reaches the speakers: the measuring goes on, silently.
 window.__cap = [];
-const orig = AudioNode.prototype.connect;
+const orig = AudioNode.prototype.connect, mute = new URLSearchParams(location.search).has('mute');
 AudioNode.prototype.connect = function (dest, ...a) {
+  if (mute && dest instanceof AudioDestinationNode) return dest;
   if (typeof AudioWorkletNode !== 'undefined' && this instanceof AudioWorkletNode && !this.__tapped) {
     this.__tapped = true;
     const an = this.context.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0;

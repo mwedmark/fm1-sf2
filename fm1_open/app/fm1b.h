@@ -9,10 +9,10 @@
 #define FM1B_H
 #include <stdint.h>
 
-/* The same in the browser and on the device. Measured in fm1-emu at 240 MHz, player at 32 kHz, SEA6 bank, flute: 16 voices
- * 44-56 %, 24 voices 57-62 % (76 % while 24 notes start), 32 voices 70-78 % (88 %): RUNNING.md, section 7b. On the device the
- * audio interrupt's own time lowers fm1b_voice_limit() when it runs short (sf2out_load), so this is a ceiling. */
-#define FM1B_VOICES 24U
+/* The same in the browser and on the device. Measured in fm1-emu at 240 MHz, player at 32 kHz, flute, 32 voices: BFP8 bank
+ * 42-48 % (63 % while the notes start), SEA6 bank 70-78 % (88 %): RUNNING.md, section 7b. On the device the audio interrupt's
+ * own time lowers fm1b_voice_limit() when it runs short (sf2out_load), so this is a ceiling: a SEA6 bank may get fewer. */
+#define FM1B_VOICES 32U
 /* The rate the player renders at, voices and effects alike. The device renders at the bank's 32 kHz and board/audio.c resamples
  * that to the codec's 44.1 kHz (a voice at its root key then reads one sample a frame); the browser and the tests render at
  * 44.1 kHz. A test may set it (-DFM1B_RATE=32000U). */

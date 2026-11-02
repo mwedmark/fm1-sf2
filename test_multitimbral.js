@@ -217,7 +217,7 @@ check(same(render(LONG), kit), 'a program change on a drum channel does not chan
 // 10. Many voices at once: more notes than voices must steal, not crash.
 fresh(0);
 w.mt_channel_program(1, 0, program);
-for (let n = 0; n < 32; ++n) w.mt_note(n % 2, 40 + n, 100);   // more than FM1B_VOICES (24)
+for (let n = 0; n < w.mt_voice_max() + 8; ++n) w.mt_note(n % 2, 30 + n, 100);   // more than FM1B_VOICES
 const chord = render(100);
 check(sumAbs(chord) > 0 && w.mt_voices() <= w.mt_voice_max(), 'a dense chord on two channels sounds and never uses more voices than there are');
 

@@ -112,7 +112,7 @@ for (const [program, note] of [[73, 69], [0, 60], [0, 84], [40, 55]]) {
   check(peak > 0, 'the six newest still sound');
   w.rt_note(0, 88, 100); blocks(10);
   check(w.rt_status(0) === 6 && w.rt_sounding() === 6, `a new note under the limit fades the oldest out: still 6 (${w.rt_status(0)})`);
-  w.rt_limit(24);
+  w.rt_limit(w.rt_voice_max());
   w.rt_note(0, 91, 100); blocks(2);
   check(w.rt_sounding() === 7, `the limit back up: a new note adds a voice (${w.rt_sounding()})`);
   // the guard: over 80 % it takes voices away, never below 4; a quarter second under 60 % gives one back
@@ -128,7 +128,7 @@ for (const [program, note] of [[73, 69], [0, 60], [0, 84], [40, 55]]) {
   for (let i = 0; i < 86 * 30; ++i) w.rt_load(70, 100);
   check(w.rt_status(1) === 5, 'between 60 and 80 % the limit stays');
   for (let i = 0; i < 86 * 30; ++i) w.rt_load(10, 100);
-  check(w.rt_status(1) === 24, `a calm interrupt gets every voice back (${w.rt_status(1)})`);
+  check(w.rt_status(1) === w.rt_voice_max(), `a calm interrupt gets every voice back (${w.rt_status(1)})`);
 }
 console.log(failed ? `${failed} of ${checks} checks FAILED` : `${checks}/${checks} checks passed`);
 process.exitCode = failed ? 1 : 0;
