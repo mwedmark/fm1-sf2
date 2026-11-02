@@ -275,6 +275,9 @@ bank, 32 kHz): 397 532 bytes (85 %), noise 37 / 41 / 33 dB by level against 32 /
 
 The firmware now has 16 voices and `dist\gm_32k.fm1b` is the SEA6 bank. Whole GM bank in fm1-emu, 16 notes held: 51-53 %;
 `mt.script` (program 73 on channel 2) still gives the flute, RMS 0.100, centroid 282 Hz.
+Everything at once (`test_emu/load16_all.script`: 16 voices on two channels with different sends, so both effect buses run,
+modulation wheel at 127 and pitch bend up on both): 49-59 % (the higher figures while the notes start), against 49-51 % for the
+same notes plain (`load16_plain.script`).
 
 What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
 
