@@ -276,6 +276,23 @@ bank, 32 kHz): 397 532 bytes (85 %), noise 37 / 41 / 33 dB by level against 32 /
 The firmware now has 16 voices and `dist\gm_32k.fm1b` is the SEA6 bank. Whole GM bank in fm1-emu, 16 notes held: 51-53 %;
 `mt.script` (program 73 on channel 2) still gives the flute, RMS 0.100, centroid 282 Hz.
 
+What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
+
+| Coding | > -20 dBFS | -20..-40 | -40..-60 | Bytes per sample |
+| --- | --- | --- | --- | --- |
+| SEA5 | 33 dB | 35 dB | 27 dB | 0.71 |
+| SEA6 | 37 dB | 40 dB | 32 dB | 0.84 |
+| 8-bit | 40 dB | 27 dB | 6 dB | 1 |
+| 9-bit | 46 dB | 33 dB | 11 dB | |
+| 10-bit | 52 dB | 40 dB | 17 dB | |
+| 11-bit | 58 dB | 46 dB | 22 dB | |
+| 12-bit | 64 dB | 52 dB | 28 dB | 1.5 |
+
+So SEA6 is about 7.5-bit PCM on loud blocks, 10-bit at -20..-40 dBFS and better than 12-bit below that, where noise is heard.
+A lower bank rate does not add noise; it drops the treble. Energy above 90 % of the new Nyquist frequency, against the block:
+22 050 Hz 18 / 17 / 7 dB, 16 000 Hz 15 / 14 / 6 dB, 11 025 Hz 11 / 11 / 6 dB (by the same levels; the quiet blocks are mostly
+broadband tails). Scripts: the session's `noise.js` and `band.js` were not kept; `compare.js`-style code over `index.html`'s core.
+
 ## 8. Open items
 
 - Run the multitimbral build on the real FM-1 with program changes on two channels (it has run in fm1-emu, section 4), and note the result here.
