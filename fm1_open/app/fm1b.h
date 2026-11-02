@@ -9,13 +9,9 @@
 #define FM1B_H
 #include <stdint.h>
 
-/* The browser has CPU to spare; the device does not (measure fm1_audio_irq's peak before raising this). */
-#ifdef FM1_HOST_TEST
+/* The same in the browser and on the device. Measured in fm1-emu at 240 MHz with the 32 kHz bank, flute, 16 voices held:
+ * SEA5 52-57 %, SEA6 52-59 % (RUNNING.md, section 7b). Measure fm1_audio_irq's peak before raising this. */
 #define FM1B_VOICES 16U
-#else
-/* Measured in fm1-emu at 240 MHz with the 32 kHz SEA5 bank, flute: 8 voices 33-35 %, 16 voices 52-57 % (RUNNING.md, section 7b). */
-#define FM1B_VOICES 8U
-#endif
 
 /* Validate and bind a bank image, which must stay in place while bound. image NULL unbinds. dqt is the SEA5
  * quantizer table (512 entries); the engine has the SEA6 one. Returns 0, or -1 for a bank that is not FM1B version 1, does

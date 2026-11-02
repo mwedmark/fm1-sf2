@@ -70,13 +70,13 @@
     <div class="row">
       <label class="f"><span>Kodning</span>
         <select id="codec">
-          <option value="sea" selected>SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
-          <option value="sea6">SEA6 (6,7 bit/sample, ca 6 dB mindre brus)</option>
+          <option value="sea">SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
+          <option value="sea6" selected>SEA6 (6,7 bit/sample, ca 5 dB mindre brus)</option>
           <option value="pcm">Rå PCM</option>
         </select></label>
       <label class="f"><span>Samplingsfrekvens</span>
         <select id="rate">
-          <option value="32000" selected>32 000 Hz (SEA5)</option>
+          <option value="32000" selected>32 000 Hz (SEA)</option>
           <option value="11029">11 029 Hz (FM-1 ÷ 4)</option>
           <option value="14706">14 706 Hz (FM-1 ÷ 3)</option>
           <option value="22059">22 059 Hz (FM-1 ÷ 2)</option>
@@ -477,7 +477,7 @@ function buildBank(sf, presetIdx, opt) {
                : bits === 12 ? Math.max(-2048, Math.min(2047, Math.round(f[i] / 16))) * 16   // kept as 16-bit values
                             : Math.max(-32768, Math.min(32767, Math.round(f[i])));
       }
-      const enc = sea ? seaEncode(pcm, seaBits) : bits === 12 ? pack12(pcm) : null;               // SEA5 keeps the 16-bit pcm too, for the .sf2 and the tests
+      const enc = sea ? seaEncode(pcm, seaBits) : bits === 12 ? pack12(pcm) : null;               // SEA keeps the 16-bit pcm too, for the .sf2 and the tests
       s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root,
             loopStart: wantLoop ? outLs : 0, loopEnd: wantLoop ? outLs + outLoop : 0, loop: wantLoop };
       cache.set(key, s);

@@ -37,7 +37,7 @@ Outputs, all under `fm1_open\build\dx7\`:
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
 and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
 408 412 with effect sends per channel, 408 668 with 12-bit samples, 413 404 with the faster voice loop and the engine's own
-SEA decoder (SEA5 and SEA6). If a change makes the build stop with
+SEA decoder (SEA5 and SEA6), 412 540 with 16 voices. If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -55,7 +55,7 @@ node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 node test_formats.js          # SEA5, SEA6, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
 ```
 
-`test_multitimbral.js` runs the real `fm1b.c` with 16 voices (the browser build), the device has 8. It does **not** cover
+`test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
 `transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the CC10 rule) or the panel (the `MULTI` line, the channel page).
 Those are only compiled, so test them in the emulator or on the device.
 
@@ -122,7 +122,8 @@ and redo the two registrations in steps 2-3.
 2. **Firmware** is registered in `emu\firmwares.json` as `"id": "sf2"`, `"package": "http://127.0.0.1:8780/sf2player.fwsc"`.
    To test a new build, overwrite `emu\sf2player.fwsc` with `fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc`.
    (On 2026-11-01 the file there was byte-identical to `dist\sf2player_flash.fwsc`, the build before multitimbral.)
-3. **Bank**: `emu\gm.flash` is `dist\gm_32k.fm1b` laid at the user flash. Make it again with:
+3. **Bank**: `emu\gm.flash` is `dist\gm_32k.fm1b` laid at the user flash. Since 2026-11-02 that is the SEA6 bank (1mgm.sf2, 32 kHz,
+   397 532 bytes, the converter's default); the SEA5 one it replaced is `dist\gm_32k_sea5.fm1b`. Make the flash file again with:
    ```bash
    node make_flash_overlay.js dist/gm_32k.fm1b gm.flash
    ```
@@ -228,7 +229,7 @@ Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on SELECT for channel 2,
 a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz). The emulator loses clicks when many come in one
 script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
-Limits: 8 voices in total on the device (oldest is stolen first), no per-channel pan.
+Limits: 16 voices in total on the device (oldest is stolen first; 8 until 2026-11-02), no per-channel pan.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
@@ -271,6 +272,9 @@ in 32 bits. Flute, notes 30 ms apart (`test_emu/load8s.script`, `load16s.script`
 
 SEA6 costs the same as SEA5. With the SDK's decoder instead of the engine's, 8 voices SEA5 was 35-37 %. SEA6 against SEA5 (whole GM
 bank, 32 kHz): 397 532 bytes (85 %), noise 37 / 41 / 33 dB by level against 32 / 35 / 28 dB.
+
+The firmware now has 16 voices and `dist\gm_32k.fm1b` is the SEA6 bank. Whole GM bank in fm1-emu, 16 notes held: 51-53 %;
+`mt.script` (program 73 on channel 2) still gives the flute, RMS 0.100, centroid 282 Hz.
 
 ## 8. Open items
 

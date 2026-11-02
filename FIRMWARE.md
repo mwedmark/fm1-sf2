@@ -59,6 +59,7 @@ The package carries the firmware image only, so a bank too big for the image liv
 the header) and plays it in place; without one it uses a bank compiled into the image if the build has one (`fm1b_bank_data.inc`), else the panel says NO BANK.
 The flash build has no built-in bank (image 398 140 bytes, 56 KB room to spare). The whole 1mgm.sf2 at 32 kHz SEA5 (335.7 KB) plays from it in fm1-emu:
 `node make_flash_overlay.js bank.fm1b gm.flash` makes the sector file for `&flash=` (the user partition starts at 0x7C000 of the flash image).
+Since 2026-11-02 the standard bank is SEA6 (397 532 bytes) and the player has 16 voices: RUNNING.md, section 7b.
 
 **Upload over MIDI SysEx** (`fm1_open/app/sf2_upload.c`, host side in `index.html`, button "Skicka till FM-1", Web MIDI): `F0 7D 'S' 'F' 02 cmd ... F7`,
 numbers as 5 x 7 bits. `begin` (1, size) stops the bank and erases the flash it needs, `data` (2, offset + up to 448 bytes packed 7 to 8) is written where it says, `end`

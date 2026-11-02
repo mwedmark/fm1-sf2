@@ -1,7 +1,7 @@
 // Runs the SF2 player's real voice engine (fm1_open/app/fm1b.c) on WebAssembly and checks the multitimbral behaviour: program
 // change per channel, the mix of channels, note off per channel, volume/expression, the channel controllers, the percussion
 // channel, and that a player which never sends a program change sounds exactly as it did before.
-//   node test_multitimbral.js [bank.fm1b]       (default: dist/gm_32k.fm1b, the SEA5 bank the firmware plays)
+//   node test_multitimbral.js [bank.fm1b]       (default: dist/gm_32k.fm1b, the SEA6 bank the firmware plays)
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
 const root = __dirname;
 const sdk = path.join(root, 'fm1_open/build/tools/wasi-sdk-27.0-x86_64-windows');
