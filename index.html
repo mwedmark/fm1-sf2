@@ -72,6 +72,7 @@
         <select id="codec">
           <option value="sea">SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
           <option value="sea6" selected>SEA6 (6,7 bit/sample, ca 5 dB mindre brus)</option>
+          <option value="bfp8">BFP8 (8 bit med skala per 32 sampel, 8,25 bit/sample, lätt att avkoda)</option>
           <option value="pcm">Rå PCM</option>
         </select></label>
       <label class="f"><span>Samplingsfrekvens</span>
@@ -406,6 +407,27 @@ function seaDecode(data, frames, bits = 5) {
 
 // ---- Bank building --------------------------------------------------------
 
+// BFP8: block floating point. Groups of 32 samples, each a shift byte (0..8) and 32 signed 8-bit mantissas; a sample is
+// mantissa << shift. The shift is the smallest that keeps the group's rounded mantissas in -128..127. pcm becomes the decoded
+// values (an Int16Array), so the .sf2 export and the tests see what the player plays. The last group is zero padded.
+const BFP_GROUP = 32, BFP_GROUP_BYTES = 33;
+function packBfp8(pcm) {
+  const groups = Math.ceil(pcm.length / BFP_GROUP), out = new Uint8Array(groups * BFP_GROUP_BYTES);
+  for (let g = 0; g < groups; g++) {
+    const from = g * BFP_GROUP, to = Math.min(pcm.length, from + BFP_GROUP);
+    let shift = 0;
+    const fits = sh => { for (let i = from; i < to; i++) { const m = Math.round(pcm[i] / (1 << sh)); if (m > 127 || m < -128) return false; } return true; };
+    while (shift < 8 && !fits(shift)) shift++;
+    out[g * BFP_GROUP_BYTES] = shift;
+    for (let i = from; i < to; i++) {
+      const m = Math.max(-128, Math.min(127, Math.round(pcm[i] / (1 << shift))));
+      out[g * BFP_GROUP_BYTES + 1 + i - from] = m & 255;
+      pcm[i] = m * (1 << shift);
+    }
+  }
+  return out;
+}
+
 // 12-bit samples (multiples of 16 in an Int16Array), two in three bytes: b0 = s0 low 8 bits, b1 = s0 high 4 bits | s1 low 4
 // bits << 4, b2 = s1 high 8 bits. An odd count ends with a half pair (two bytes).
 function pack12(pcm) {
@@ -419,7 +441,7 @@ function pack12(pcm) {
 }
 
 function buildBank(sf, presetIdx, opt) {
-  const rate = opt.rate, sea = !!opt.sea, seaBits = sea ? opt.seaBits || 5 : 0, bits = sea ? 16 : opt.bits;
+  const rate = opt.rate, sea = !!opt.sea, seaBits = sea ? opt.seaBits || 5 : 0, bfp = !sea && !!opt.bfp, bits = sea || bfp ? 16 : opt.bits;
   // presetIdx: >= 0 one preset, -1 every sample without key mapping, -2 every preset with its key mapping
   const groups = Array.isArray(presetIdx) ? presetIdx.map(i => ({ p: sf.presets[i], zones: presetZones(sf, i) })) :   // a chosen list of presets
     presetIdx === -1 ? [{ p: null, zones: allSampleZones(sf) }]
@@ -434,7 +456,7 @@ function buildBank(sf, presetIdx, opt) {
   }
   let off = 0;
   for (const s of samples) { s.offset = off; off += s.bytes; }
-  return { zones: out, samples, presets, rate, bits, sea, seaBits, dataBytes: off };
+  return { zones: out, samples, presets, rate, bits, sea, seaBits, bfp, dataBytes: off };
 
   function addZone(z, presetName) {
     const sh = sf.shdr[z.sample];
@@ -477,7 +499,7 @@ function buildBank(sf, presetIdx, opt) {
                : bits === 12 ? Math.max(-2048, Math.min(2047, Math.round(f[i] / 16))) * 16   // kept as 16-bit values
                             : Math.max(-32768, Math.min(32767, Math.round(f[i])));
       }
-      const enc = sea ? seaEncode(pcm, seaBits) : bits === 12 ? pack12(pcm) : null;               // SEA keeps the 16-bit pcm too, for the .sf2 and the tests
+      const enc = sea ? seaEncode(pcm, seaBits) : bfp ? packBfp8(pcm) : bits === 12 ? pack12(pcm) : null;               // SEA keeps the 16-bit pcm too, for the .sf2 and the tests
       s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root,
             loopStart: wantLoop ? outLs : 0, loopEnd: wantLoop ? outLs + outLoop : 0, loop: wantLoop };
       cache.set(key, s);
@@ -539,7 +561,8 @@ function writeFm1(bank) {
   dv.setUint16(4, 1, true);                                // version
   // flags: bit 0 = 16-bit samples, bit 1 = SEA5 chunks (the zone then holds ceil(length / 320) chunks of 228 bytes)
   // bit 2 = 12-bit samples, two in three bytes (see pack12); bits 8..11 = SEA code bits, 0 for 5 (so a SEA5 bank is what it always was)
-  dv.setUint16(6, bank.sea ? 2 | (bank.seaBits && bank.seaBits !== 5 ? bank.seaBits << 8 : 0) : bank.bits === 16 ? 1 : bank.bits === 12 ? 4 : 0, true);
+  // bit 3 = BFP8 (see packBfp8)
+  dv.setUint16(6, bank.sea ? 2 | (bank.seaBits && bank.seaBits !== 5 ? bank.seaBits << 8 : 0) : bank.bfp ? 8 : bank.bits === 16 ? 1 : bank.bits === 12 ? 4 : 0, true);
   dv.setUint32(8, bank.rate, true);
   dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
   dv.setUint32(44, offEnv, true);                          // envelope table
@@ -768,11 +791,11 @@ function writeSf2(bank, name) {
   function convert() {
     showErr('');
     try {
-      bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value !== 'pcm', seaBits: $('codec').value === 'sea6' ? 6 : 5 });
+      bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
     } catch (e) { showErr('Konverteringen misslyckades: ' + e.message); return; }
     if (!bank.zones.length) { $('result').hidden = true; showErr('Presetet har inga spelbara ljud.'); return; }
     const bin = writeFm1(bank);
-    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zoner, ' + bank.samples.length + ' unika ljud, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bits + ' bit') +
+    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zoner, ' + bank.samples.length + ' unika ljud, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
       '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
       (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(mer än enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (ryms i enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
       (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets utanför bank 0/128 ingår inte i .bin)</span>' : '');

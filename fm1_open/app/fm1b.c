@@ -44,7 +44,8 @@ static struct voice voices[FM1B_VOICES];
  * oldest voices fade out in about 5 ms (CUT_RELEASE per envelope step, from full level to -96 dB in 7 steps). */
 static unsigned voice_limit = FM1B_VOICES, voices_cut;
 enum { CUT_RELEASE = 13500 };
-enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA };
+enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA, FORMAT_BFP8 };
+enum { BFP_GROUP = 32, BFP_GROUP_BYTES = 33 };   /* BFP8: a shift byte, then 32 signed 8-bit mantissas */
 
 /* One state per MIDI channel plus the panel's: the preset a note plays (-1: bank.preset), and the channel's volume and
  * expression with their product, a Q14 gain on the General MIDI curve, which the voices apply as the envelope ramps. */
@@ -103,12 +104,13 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     channels_reset();                                         /* preset numbers belong to a bank */
     if (!image)
         return 0;
-    /* flags: bit 0 16-bit, bit 1 SEA chunks, bit 2 12-bit (at most one of them; none: 8-bit), bits 8..11 the SEA code bits (0: 5) */
+    /* flags: bit 0 16-bit, bit 1 SEA chunks, bit 2 12-bit, bit 3 BFP8 (at most one of them; none: 8-bit), bits 8..11 the SEA
+     * code bits (0: 5) */
     uint32_t flags = bytes < 48 ? 0 : rd16(image + 6), sea_bits = (flags >> 8) & 15U;
-    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (flags & ~0x0f07U) || __builtin_popcount(flags & 7U) > 1 ||
+    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (flags & ~0x0f0fU) || __builtin_popcount(flags & 15U) > 1 ||
         rd32(image + 40) != bytes || (sea_bits && !(flags & 2U)))
         return -1;
-    bank.format = flags & 1U ? FORMAT_PCM16 : flags & 4U ? FORMAT_PCM12 : flags & 2U ? FORMAT_SEA : FORMAT_PCM8;
+    bank.format = flags & 1U ? FORMAT_PCM16 : flags & 4U ? FORMAT_PCM12 : flags & 2U ? FORMAT_SEA : flags & 8U ? FORMAT_BFP8 : FORMAT_PCM8;
     bank.sea_bits = sea_bits ? sea_bits : 5U;
     bank.chunk_bytes = 28U + FM1_SEA_FRAMES * bank.sea_bits / 8U;
     bank.dqt = bank.sea_bits == 5U ? dqt : bank.sea_bits == 6U ? fm1b_dqt6 : NULL;   /* the caller has the SEA5 table, the engine the others */
@@ -336,6 +338,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     uint32_t data = rd32(zone), length = rd32(zone + 4), start = rd32(zone + 8), end = rd32(zone + 12);
     uint64_t span = bank.format == FORMAT_SEA ? (uint64_t)((length + 319U) / 320U) * bank.chunk_bytes
                   : bank.format == FORMAT_PCM12 ? ((uint64_t)length * 3U + 1U) / 2U
+                  : bank.format == FORMAT_BFP8 ? (uint64_t)((length + BFP_GROUP - 1U) / BFP_GROUP) * BFP_GROUP_BYTES
                   : (uint64_t)length * (bank.format == FORMAT_PCM16 ? 2U : 1U);
     if (!length || !region_ok(data, span))
         return;
@@ -637,6 +640,11 @@ static inline __attribute__((always_inline)) int sample_at(struct voice *v, cons
         }
         return v->pcm[slot][at - g * FM1_SEA_GROUP];
     }
+    if (format == FORMAT_BFP8) {                              /* mantissa << the group's shift (at most 8) */
+        const uint8_t *group = pcm + (at / BFP_GROUP) * BFP_GROUP_BYTES;
+        unsigned shift = group[0] < 8U ? group[0] : 8U;
+        return (int)(int8_t)group[1 + at % BFP_GROUP] * (1 << shift);
+    }
     if (format == FORMAT_PCM12) { /* pair k is 3 bytes at 3k: s0 = b0 | b1 low nibble << 8, s1 = b1 high nibble | b2 << 4 */
         const uint8_t *b = pcm + (at >> 1) * 3U;
         return (at & 1U) ? (int16_t)((b[1] & 0xf0U) | (unsigned)b[2] << 8) : (int16_t)((unsigned)b[0] << 4 | (b[1] & 0x0fU) << 12);
@@ -755,13 +763,14 @@ done:
     v->level = level;
     v->frames = (uint16_t)left;
 }
-/* voice_run for the bank's format, without and with the effect buses: eight loops in all. */
+/* voice_run for the bank's format, without and with the effect buses: ten loops in all. */
 static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, int32_t *out, unsigned frames)
 {
     switch (bank.format) {
     case FORMAT_SEA: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_SEA); break;
     case FORMAT_PCM16: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM16); break;
     case FORMAT_PCM12: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM12); break;
+    case FORMAT_BFP8: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_BFP8); break;
     default: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM8); break;
     }
 }
@@ -772,6 +781,7 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice
     case FORMAT_SEA: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_SEA); break;
     case FORMAT_PCM16: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM16); break;
     case FORMAT_PCM12: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM12); break;
+    case FORMAT_BFP8: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_BFP8); break;
     default: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM8); break;
     }
 }

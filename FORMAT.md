@@ -14,7 +14,7 @@ header (48) | pitch table | bank map | presets | key maps | zones | envelopes | 
 | --- | --- | --- |
 | 0 | char[4] | `FM1B` |
 | 4 | u16 | version, 1 |
-| 6 | u16 | flags, bit 0 = samples are 16-bit (otherwise 8-bit), bit 1 = samples are SEA chunks, bit 2 = samples are 12-bit (at most one of bits 0-2 is set); bits 8..11 = the SEA code bits, 0 for 5 (set only with bit 1) |
+| 6 | u16 | flags, bit 0 = samples are 16-bit (otherwise 8-bit), bit 1 = samples are SEA chunks, bit 2 = samples are 12-bit, bit 3 = samples are BFP8 (at most one of bits 0-3 is set); bits 8..11 = the SEA code bits, 0 for 5 (set only with bit 1) |
 | 8 | u32 | sample rate of all sample data, in Hz |
 | 12 | u16 | number of presets |
 | 14 | u16 | number of zones |
@@ -31,6 +31,10 @@ Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is 
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
 (an odd count ends with the first two bytes of a pair). A zone of `length` samples takes `ceil(length * 3 / 2)` bytes.
 The player reads a 12-bit sample as `(int16_t)(value << 4)`.
+
+BFP8 (flags bit 3) is block floating point: groups of 32 samples, each a shift byte (0..8) followed by 32 signed 8-bit mantissas,
+so a zone of `length` samples takes `ceil(length / 32) * 33` bytes (the last group zero padded). A sample is `mantissa << shift`;
+the converter picks the smallest shift that keeps the group's rounded mantissas in -128..127. 1.03 bytes a sample.
 
 ### SEA samples (flags bit 1)
 

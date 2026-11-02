@@ -1,4 +1,4 @@
-// Every sample format the engine reads (SEA5, SEA6, 8-, 12- and 16-bit PCM) must play exactly what a 16-bit bank holding the
+// Every sample format the engine reads (SEA5, SEA6, BFP8, 8-, 12- and 16-bit PCM) must play exactly what a 16-bit bank holding the
 // same decoded samples plays: the real fm1b.c on WebAssembly, bit for bit, on notes long enough to cross chunks and loops.
 // The reference decoders are index.html's (seaDecode, the PCM it keeps), so this also checks the engine's own SEA decoder.
 //   node test_formats.js [1mgm.sf2]
@@ -46,12 +46,13 @@ function check(ok, what) { ++checks; if (!ok) { ++failed; console.log('FAIL', wh
 for (const [name, opt, decoded] of [
   ['SEA5', { sea: true, seaBits: 5 }, s => A.seaDecode(s.enc, s.pcm.length, 5)],
   ['SEA6', { sea: true, seaBits: 6 }, s => A.seaDecode(s.enc, s.pcm.length, 6)],
+  ['BFP8', { bfp: true }, s => s.pcm],
   ['12-bit', { bits: 12 }, s => s.pcm],
   ['8-bit', { bits: 8 }, s => Int16Array.from(s.pcm, x => x * 256)],
   ['16-bit', { bits: 16 }, s => s.pcm]]) {
   const bank = A.buildBank(sf, pick, { rate: 32000, ...opt }), bin = A.writeFm1(bank);
   for (const s of bank.samples) { s.pcm = Int16Array.from(decoded(s)); s.enc = null; s.bytes = s.pcm.byteLength; }
-  Object.assign(bank, { sea: false, seaBits: 0, bits: 16 });
+  Object.assign(bank, { sea: false, seaBits: 0, bfp: false, bits: 16 });
   const play = player(bin), twin = player(A.writeFm1(bank));
   let same = true, energy = 0, where = '';
   for (const p of PROGRAMS)

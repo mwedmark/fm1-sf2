@@ -37,7 +37,7 @@ Outputs, all under `fm1_open\build\dx7\`:
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
 and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
 408 412 with effect sends per channel, 408 668 with 12-bit samples, 413 404 with the faster voice loop and the engine's own
-SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 32 kHz (6 KB of it the resampling filter), 420 604 with 24 voices and the CPU guard. If a change makes the build stop with
+SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 32 kHz (6 KB of it the resampling filter), 420 604 with 24 voices and the CPU guard, 421 212 with BFP8. If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -52,7 +52,7 @@ node test_multitimbral.js     # 63 checks: channels, program change, volume, CC1
                               # RPN range, modulation wheel, sustain pedal, what the channel page reads, the effect sends. Uses dist/gm_32k.fm1b
 node test_fx.js               # reverb and chorus (sf2fx.c), master levels times sends
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
-node test_formats.js          # SEA5, SEA6, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
+node test_formats.js          # SEA5, SEA6, BFP8, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
 node test_rate.js             # the output stage at 32 kHz + resampler against 44.1 kHz: pitch, level, brightness, release, vibrato, reverb
 ```
 
@@ -313,6 +313,29 @@ one, up to 24. `test_rate.js` checks the limit and the guard (31 checks). In fm1
 guard never acts; at 160 and 120 MHz it cuts voices and the load settles at 57-61 % and 40-45 % (the RMS falls with the voices).
 fm1-emu's load and the firmware's timer may not scale alike with `&mhz=`, so the thresholds are only checked on WebAssembly; the
 first block of a sudden overload is not caught (the guard reacts after it).
+
+**BFP8 beside SEA6, for evaluation (2026-11-02).** The engine reads every format from the bank's header, so one firmware plays
+either; only the bank changes. `node make_bank.js <sea5|sea6|bfp8|pcm8|pcm12|pcm16> [rate]` builds the whole GM bank as
+`dist\gm_32k_<format>.fm1b`, and `.\start_emu.ps1 -Tap -Bank dist\gm_32k_bfp8.fm1b` plays it in fm1-emu (each bank gets its own
+`.flash` file). The standard bank `dist\gm_32k.fm1b` is still SEA6. Noise by level against 16-bit, sizes of the whole GM bank:
+
+| | > -20 dBFS | -20..-40 | -40..-60 | Whole GM bank |
+| --- | --- | --- | --- | --- |
+| SEA6 | 37 dB | 40 dB | 32 dB | 397 532 (85 %) |
+| BFP8 | 44 dB | 43 dB | 42 dB | 454 656 (97 %, 12 KB to spare) |
+| mu-law 8-bit (not built) | 38 dB | 37 dB | 32 dB | about 439 000 (94 %) |
+| BFP7, groups of 16 (not built) | 38 dB | 38 dB | 37 dB | about 401 000 (86 %) |
+
+fm1-emu, 240 MHz (32-voice figures from a test build with `FM1B_VOICES 32U`):
+
+| | SEA6 | BFP8 |
+| --- | --- | --- |
+| 24 voices, `load24_plain` | 57-59 % | 35-41 % |
+| 24 voices, `load24_all` | 57-62 % (79 % as the notes start) | 38-42 % (53 %) |
+| 32 voices, `load32_plain` | 70-74 % | 41-45 % (55 %) |
+| 32 voices, `load32_all` | 71-78 % (88 %) | 42-48 % (63 %) |
+
+`mt.script` with the BFP8 bank: the flute, RMS 0.099, centroid 284 Hz.
 
 What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
 
