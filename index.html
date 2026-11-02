@@ -88,6 +88,7 @@
       <label class="f"><span>Bitdjup</span>
         <select id="bits">
           <option value="8" selected>8 bit</option>
+          <option value="12">12 bit</option>
           <option value="16">16 bit</option>
         </select></label>
     </div>
@@ -386,6 +387,18 @@ function seaDecode(data, frames) {
 
 // ---- Bank building --------------------------------------------------------
 
+// 12-bit samples (multiples of 16 in an Int16Array), two in three bytes: b0 = s0 low 8 bits, b1 = s0 high 4 bits | s1 low 4
+// bits << 4, b2 = s1 high 8 bits. An odd count ends with a half pair (two bytes).
+function pack12(pcm) {
+  const out = new Uint8Array(Math.ceil(pcm.length * 3 / 2));
+  for (let i = 0, o = 0; i < pcm.length; i += 2, o += 3) {
+    const a = (pcm[i] >> 4) & 0xfff, b = i + 1 < pcm.length ? (pcm[i + 1] >> 4) & 0xfff : 0;
+    out[o] = a & 0xff; out[o + 1] = (a >> 8) | ((b & 0xf) << 4);
+    if (o + 2 < out.length) out[o + 2] = b >> 4;
+  }
+  return out;
+}
+
 function buildBank(sf, presetIdx, opt) {
   const rate = opt.rate, sea = !!opt.sea, bits = sea ? 16 : opt.bits;
   // presetIdx: >= 0 one preset, -1 every sample without key mapping, -2 every preset with its key mapping
@@ -442,9 +455,10 @@ function buildBank(sf, presetIdx, opt) {
       const pcm = bits === 8 ? new Int8Array(f.length) : new Int16Array(f.length);
       for (let i = 0; i < f.length; i++) {
         pcm[i] = bits === 8 ? Math.max(-128, Math.min(127, Math.round(f[i] / 256)))
+               : bits === 12 ? Math.max(-2048, Math.min(2047, Math.round(f[i] / 16))) * 16   // kept as 16-bit values
                             : Math.max(-32768, Math.min(32767, Math.round(f[i])));
       }
-      const enc = sea ? seaEncode(pcm) : null;               // SEA5 keeps the 16-bit pcm too, for the .sf2 and the tests
+      const enc = sea ? seaEncode(pcm) : bits === 12 ? pack12(pcm) : null;               // SEA5 keeps the 16-bit pcm too, for the .sf2 and the tests
       s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root,
             loopStart: wantLoop ? outLs : 0, loopEnd: wantLoop ? outLs + outLoop : 0, loop: wantLoop };
       cache.set(key, s);
@@ -505,7 +519,8 @@ function writeFm1(bank) {
   out.set([0x46, 0x4d, 0x31, 0x42]);                       // 'FM1B'
   dv.setUint16(4, 1, true);                                // version
   // flags: bit 0 = 16-bit samples, bit 1 = SEA5 chunks (the zone then holds ceil(length / 320) chunks of 228 bytes)
-  dv.setUint16(6, bank.sea ? 2 : bank.bits === 16 ? 1 : 0, true);
+  // bit 2 = 12-bit samples, two in three bytes (see pack12)
+  dv.setUint16(6, bank.sea ? 2 : bank.bits === 16 ? 1 : bank.bits === 12 ? 4 : 0, true);
   dv.setUint32(8, bank.rate, true);
   dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
   dv.setUint32(44, offEnv, true);                          // envelope table
@@ -616,7 +631,7 @@ function records(size, items, fn) {
 
 function writeSf2(bank, name) {
   const pcm16 = s => {
-    if (bank.bits === 16) return s.pcm;
+    if (bank.bits !== 8) return s.pcm;
     const o = new Int16Array(s.pcm.length);
     for (let i = 0; i < o.length; i++) o[i] = s.pcm[i] * 256;
     return o;

@@ -36,7 +36,7 @@ Outputs, all under `fm1_open\build\dx7\`:
 
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
 and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
-408 412 with effect sends per channel. If a change makes the build stop with
+408 412 with effect sends per channel, 408 668 with 12-bit samples. If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -232,6 +232,21 @@ Cost: a channel that never gets bend or the wheel plays exactly as before (the t
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
 (`test_emu/load8.script`): load 53 %; the same with the wheel at 127, the bend full up and the pedal down (`load8_bend.script`): 55-59 %.
 Bending up costs most, as the samples are read faster.
+
+## 7b. Sample formats compared (measured 2026-11-02)
+
+1mgm.sf2 at 32 kHz, built with `index.html`'s core in node. Noise is against the 16-bit samples, per 20 ms block, by the block's level.
+Load is fm1-emu at 240 MHz, 8 held voices, a bank of piano, flute and the standard kit in each format (idle about 11 %).
+
+| Format | Whole GM bank | Of 466 944 | Noise > -20 dBFS | -20..-40 | -40..-60 | Load, flute high | Load, piano low |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SEA5 | 343 732 | 74 % | 32 dB | 35 dB | 28 dB | 50 % | 46 % |
+| 8-bit | 439 248 | 94 % | 41 dB | 27 dB | 8 dB | 42 % | 38 % |
+| 12-bit | 640 240 | 137 % | 65 dB | 51 dB | 29 dB | 44 % | 41 % |
+| 16-bit | 841 084 | 180 % | | | | 43 % | 40 % |
+
+SEA5 decoding costs about 1 percentage point per voice. fm1-emu likely does not model flash wait states, so 16-bit (2.8 times the
+bytes of SEA5) may cost more on the device than here.
 
 ## 8. Open items
 

@@ -14,7 +14,7 @@ header (48) | pitch table | bank map | presets | key maps | zones | envelopes | 
 | --- | --- | --- |
 | 0 | char[4] | `FM1B` |
 | 4 | u16 | version, 1 |
-| 6 | u16 | flags, bit 0 = samples are 16-bit (otherwise 8-bit), bit 1 = samples are SEA5 chunks (bit 0 is then 0) |
+| 6 | u16 | flags, bit 0 = samples are 16-bit (otherwise 8-bit), bit 1 = samples are SEA5 chunks, bit 2 = samples are 12-bit (at most one bit is set) |
 | 8 | u32 | sample rate of all sample data, in Hz |
 | 12 | u16 | number of presets |
 | 14 | u16 | number of zones |
@@ -27,7 +27,10 @@ header (48) | pitch table | bank map | presets | key maps | zones | envelopes | 
 | 40 | u32 | file size |
 | 44 | u32 | offset of the envelope table, 0 = none (every zone then plays with the default envelope) |
 
-Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`.
+Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
+for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
+(an odd count ends with the first two bytes of a pair). A zone of `length` samples takes `ceil(length * 3 / 2)` bytes.
+The player reads a 12-bit sample as `(int16_t)(value << 4)`.
 
 ### SEA5 samples (flags bit 1)
 

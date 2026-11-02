@@ -25,7 +25,7 @@ struct voice {
 static struct {
     const uint8_t *image;
     const int16_t *dqt;
-    uint32_t bytes, rate, bits16, sea;
+    uint32_t bytes, rate, bits16, bits12, sea;
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
@@ -93,13 +93,14 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     channels_reset();                                         /* preset numbers belong to a bank */
     if (!image)
         return 0;
-    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (rd16(image + 6) & ~3U) ||
+    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (rd16(image + 6) & ~7U) || __builtin_popcount(rd16(image + 6)) > 1 ||
         rd32(image + 40) != bytes || ((rd16(image + 6) & 2U) && !dqt))
         return -1;
     bank.bytes = bytes;
     bank.dqt = dqt;
     bank.bits16 = rd16(image + 6) & 1U;
     bank.sea = (rd16(image + 6) >> 1) & 1U; /* flag bit 1: zones are SEA5 chunks */
+    bank.bits12 = (rd16(image + 6) >> 2) & 1U; /* flag bit 2: 12-bit, two samples in three bytes */
     bank.rate = rd32(image + 8);
     bank.preset_count = rd16(image + 12);
     bank.zone_count = rd16(image + 14);
@@ -285,6 +286,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     const uint8_t *zone = bank.image + bank.zones + (first + key) * 24U;
     uint32_t data = rd32(zone), length = rd32(zone + 4), start = rd32(zone + 8), end = rd32(zone + 12);
     uint64_t span = bank.sea ? (uint64_t)((length + 319U) / 320U) * CHUNK_BYTES
+                             : bank.bits12 ? ((uint64_t)length * 3U + 1U) / 2U
                              : (uint64_t)length * (bank.bits16 ? 2U : 1U);
     if (!length || !region_ok(data, span))
         return;
@@ -547,6 +549,10 @@ static FM1_DSP_CODE int sample_at(struct voice *v, const uint8_t *pcm, uint32_t 
             v->id[slot] = (int32_t)g;
         }
         return v->pcm[slot][at % FM1_SEA_GROUP];
+    }
+    if (bank.bits12) { /* pair k is 3 bytes at 3k: s0 = b0 | b1 low nibble << 8, s1 = b1 high nibble | b2 << 4 */
+        const uint8_t *b = pcm + (at >> 1) * 3U;
+        return (at & 1U) ? (int16_t)((b[1] & 0xf0U) | (unsigned)b[2] << 8) : (int16_t)((unsigned)b[0] << 4 | (b[1] & 0x0fU) << 12);
     }
     return bank.bits16 ? (int16_t)rd16(pcm + at * 2U) : (int)(int8_t)pcm[at] * 256;
 }
