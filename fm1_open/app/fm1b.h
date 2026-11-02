@@ -13,12 +13,13 @@
 #ifdef FM1_HOST_TEST
 #define FM1B_VOICES 16U
 #else
-/* Measured in fm1-emu at 240 MHz with the 32 kHz bank: about 19 % idle plus 4.2 % per sounding voice (8 voices 53 %, 12 voices 68 %). */
+/* Measured in fm1-emu at 240 MHz with the 32 kHz SEA5 bank, flute: 8 voices 33-35 %, 16 voices 52-57 % (RUNNING.md, section 7b). */
 #define FM1B_VOICES 8U
 #endif
 
 /* Validate and bind a bank image, which must stay in place while bound. image NULL unbinds. dqt is the SEA5
- * quantizer table (512 entries). Returns 0, or -1 for a bank that is not FM1B version 1 or does not fit its size. */
+ * quantizer table (512 entries); the engine has the SEA6 one. Returns 0, or -1 for a bank that is not FM1B version 1, does
+ * not fit its size, or has a SEA code size the engine has no table for. */
 int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt);
 /* Select the preset a note plays: bank 0 melodic or 128 percussion, program 0..127. Returns -1 if there is none. */
 int fm1b_program(unsigned bank, unsigned program);

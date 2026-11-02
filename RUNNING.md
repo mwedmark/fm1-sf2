@@ -36,7 +36,8 @@ Outputs, all under `fm1_open\build\dx7\`:
 
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
 and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
-408 412 with effect sends per channel, 408 668 with 12-bit samples. If a change makes the build stop with
+408 412 with effect sends per channel, 408 668 with 12-bit samples, 413 404 with the faster voice loop and the engine's own
+SEA decoder (SEA5 and SEA6). If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -51,6 +52,7 @@ node test_multitimbral.js     # 63 checks: channels, program change, volume, CC1
                               # RPN range, modulation wheel, sustain pedal, what the channel page reads, the effect sends. Uses dist/gm_32k.fm1b
 node test_fx.js               # reverb and chorus (sf2fx.c), master levels times sends
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
+node test_formats.js          # SEA5, SEA6, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices (the browser build), the device has 8. It does **not** cover
@@ -255,6 +257,20 @@ Lower bank rates (whole GM bank, of 466 944): 22 050 Hz SEA5 54 %, 8-bit 67 %, 1
 
 16 voices (`FM1B_VOICES 16U`, SRAM check passes), flute, notes 30 ms apart (fm1-emu drops MIDI when 16 notes come at once):
 SEA5 32 kHz 77-81 %, SEA5 22 kHz 71-76 %, 8-bit 32 kHz 57-62 %, 12-bit 22 kHz 58-63 %.
+
+**After the voice loop rewrite (413 404 bytes).** The loop runs in stretches up to the next envelope step with the voice in registers,
+one loop per format, Q4 interpolation and one 32 x 32 multiply per frame (output within about 100 dB of the old loop's). SEA is decoded
+by the engine's own decoder (any code size with a table; the SDK's reads one bit at a time): codes from a bit buffer, the LMS sum exactly
+in 32 bits. Flute, notes 30 ms apart (`test_emu/load8s.script`, `load16s.script`):
+
+| | 8 voices before | 8 voices after | 16 voices before | 16 voices after |
+| --- | --- | --- | --- | --- |
+| SEA5 32 kHz | 50 % | 33-35 % | 77-81 % | 52-57 % |
+| SEA6 32 kHz | | | | 52-59 % |
+| 8-bit 32 kHz | 42 % | 24-25 % | 57-62 % | 32-37 % |
+
+SEA6 costs the same as SEA5. With the SDK's decoder instead of the engine's, 8 voices SEA5 was 35-37 %. SEA6 against SEA5 (whole GM
+bank, 32 kHz): 397 532 bytes (85 %), noise 37 / 41 / 33 dB by level against 32 / 35 / 28 dB.
 
 ## 8. Open items
 

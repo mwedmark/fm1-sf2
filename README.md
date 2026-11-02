@@ -8,7 +8,7 @@ Turns a SoundFont (`.sf2`) into a sound bank for the M-VAVE FM-1, and plays it i
 - `simulator_wasm.js`: the simulator built from `fm1_open`, as base64 for `index.html`. Rebuild it with `fm1_open/tools/Build-Web.ps1 -LocalPreview` (downloads the WASI SDK on first use), then `node make_wasm_js.js`.
 - `RUNNING.md`: how to build the firmware, run the tests, serve the converter, and use the emulator and the device, with the paths on this machine. Start here.
 - `FIRMWARE.md`: what it takes to run the player on a real FM-1 (the hook in the audio interrupt, and what is still missing).
-- `test_core.js <sf2> [outdir]`: converter checks (every note of every preset resolves, SEA5 round trip). `test_sim.js <simulator.wasm> <bank.bin>`: plays a bank through the simulator and measures pitch, loop and release. `test_sea_equiv.js <sf2> <simulator.wasm>`: every program on five notes, SEA5 against the same samples as plain PCM, sample for sample.
+- `test_core.js <sf2> [outdir]`: converter checks (every note of every preset resolves, SEA5 round trip). `test_sim.js <simulator.wasm> <bank.bin>`: plays a bank through the simulator and measures pitch, loop and release. `test_sea_equiv.js <sf2> <simulator.wasm>`: every program on five notes, SEA5 against the same samples as plain PCM, sample for sample. `test_formats.js [sf2]`: the firmware engine plays SEA5, SEA6, 8-, 12- and 16-bit banks exactly as their decoded samples. `make_dqt.js`: writes the engine's SEA6 quantizer table from `index.html`.
 - `convert.py`: the original command-line converter, no longer maintained.
 
 `.sf2` and `.bin` files are not committed.

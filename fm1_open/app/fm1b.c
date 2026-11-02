@@ -3,8 +3,9 @@
 #include "fm1_sea.h"
 #include "engine.h"
 #include <string.h>
+#include "fm1b_dqt6.inc"
 
-enum { CHUNK_BYTES = 228, GROUPS_PER_CHUNK = 16, ENGINE_RATE = 44100, ENV_STEP = 32, ENV_ONE = 1 << 24, ENV_END = 256 };
+enum { GROUPS_PER_CHUNK = 16, ENGINE_RATE = 44100, ENV_STEP = 32, ENV_ONE = 1 << 24, ENV_END = 256 };
 enum { ATTACK, HOLD, DECAY, SUSTAIN, RELEASE };
 /* The envelope used when a bank has none (FORMAT.md, "Envelopes"): 2 ms attack, full sustain, a 15 ms release. */
 static const uint8_t default_env[12] = {2, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x00, 0xb9 /* 0xb900 = 0.72 per step */, 0, 0};
@@ -18,14 +19,14 @@ struct voice {
     uint8_t note, active, phase, fixed, drum, channel;
     uint8_t held;                             /* released while the channel's sustain pedal was down: releases with the pedal */
     uint16_t lfo;                             /* vibrato phase, moved on only while the channel's modulation wheel is up */
-    /* SEA5 zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
+    /* SEA zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
 };
 static struct {
     const uint8_t *image;
     const int16_t *dqt;
-    uint32_t bytes, rate, bits16, bits12, sea;
+    uint32_t bytes, rate, format, sea_bits, chunk_bytes;   /* format: FORMAT_*; SEA: code bits and 28 + 40 * bits bytes per chunk */
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
@@ -35,6 +36,7 @@ static struct {
     const uint8_t *last_zone_record, *last_env;
 } bank;
 static struct voice voices[FM1B_VOICES];
+enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA };
 
 /* One state per MIDI channel plus the panel's: the preset a note plays (-1: bank.preset), and the channel's volume and
  * expression with their product, a Q14 gain on the General MIDI curve, which the voices apply as the envelope ramps. */
@@ -93,14 +95,18 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     channels_reset();                                         /* preset numbers belong to a bank */
     if (!image)
         return 0;
-    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (rd16(image + 6) & ~7U) || __builtin_popcount(rd16(image + 6)) > 1 ||
-        rd32(image + 40) != bytes || ((rd16(image + 6) & 2U) && !dqt))
+    /* flags: bit 0 16-bit, bit 1 SEA chunks, bit 2 12-bit (at most one of them; none: 8-bit), bits 8..11 the SEA code bits (0: 5) */
+    uint32_t flags = bytes < 48 ? 0 : rd16(image + 6), sea_bits = (flags >> 8) & 15U;
+    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (flags & ~0x0f07U) || __builtin_popcount(flags & 7U) > 1 ||
+        rd32(image + 40) != bytes || (sea_bits && !(flags & 2U)))
+        return -1;
+    bank.format = flags & 1U ? FORMAT_PCM16 : flags & 4U ? FORMAT_PCM12 : flags & 2U ? FORMAT_SEA : FORMAT_PCM8;
+    bank.sea_bits = sea_bits ? sea_bits : 5U;
+    bank.chunk_bytes = 28U + FM1_SEA_FRAMES * bank.sea_bits / 8U;
+    bank.dqt = bank.sea_bits == 5U ? dqt : bank.sea_bits == 6U ? fm1b_dqt6 : NULL;   /* the caller has the SEA5 table, the engine the others */
+    if (bank.format == FORMAT_SEA && !bank.dqt)
         return -1;
     bank.bytes = bytes;
-    bank.dqt = dqt;
-    bank.bits16 = rd16(image + 6) & 1U;
-    bank.sea = (rd16(image + 6) >> 1) & 1U; /* flag bit 1: zones are SEA5 chunks */
-    bank.bits12 = (rd16(image + 6) >> 2) & 1U; /* flag bit 2: 12-bit, two samples in three bytes */
     bank.rate = rd32(image + 8);
     bank.preset_count = rd16(image + 12);
     bank.zone_count = rd16(image + 14);
@@ -285,11 +291,16 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         return;
     const uint8_t *zone = bank.image + bank.zones + (first + key) * 24U;
     uint32_t data = rd32(zone), length = rd32(zone + 4), start = rd32(zone + 8), end = rd32(zone + 12);
-    uint64_t span = bank.sea ? (uint64_t)((length + 319U) / 320U) * CHUNK_BYTES
-                             : bank.bits12 ? ((uint64_t)length * 3U + 1U) / 2U
-                             : (uint64_t)length * (bank.bits16 ? 2U : 1U);
+    uint64_t span = bank.format == FORMAT_SEA ? (uint64_t)((length + 319U) / 320U) * bank.chunk_bytes
+                  : bank.format == FORMAT_PCM12 ? ((uint64_t)length * 3U + 1U) / 2U
+                  : (uint64_t)length * (bank.format == FORMAT_PCM16 ? 2U : 1U);
     if (!length || !region_ok(data, span))
         return;
+    if (bank.format == FORMAT_SEA) {                          /* the chunk header the decoder no longer checks per group */
+        const uint8_t *chunk = bank.image + data;
+        if (chunk[0] != 1U || chunk[1] != (0x40U | bank.sea_bits) || chunk[2] != FM1_SEA_GROUP)
+            return;
+    }
     if (!(zone[17] & 1U) || end <= start || end > length)
         end = start = 0; /* no loop */
     uint32_t env_number = rd16(zone + 18);
@@ -522,39 +533,73 @@ static FM1_DSP_CODE void control_apply(unsigned channel, unsigned controller, un
     }
 }
 
-/* Decode SEA5 group g (20 frames) of voice v. The LMS state carries from one group to the next inside a chunk, so
+static inline __attribute__((always_inline)) int32_t clamp16(int32_t x) { return x > 32767 ? 32767 : x < -32768 ? -32768 : x; }
+/* Decode SEA group g (20 frames) of voice v. The LMS state carries from one group to the next inside a chunk, so
  * a forward step costs one group; anything else (the first read, a loop jump, a chunk change) starts from the
- * chunk's own seed and costs up to one chunk. */
+ * chunk's own seed and costs up to one chunk. The arithmetic is fm1_sea_decode_groups()'s (web/synth/sea_decode.c) for
+ * any code size: the codes are read from a bit buffer instead of one bit at a time, and the state lives in registers. */
 static FM1_DSP_CODE void group_at(struct voice *v, uint32_t g, int16_t *out)
 {
-    const uint8_t *chunk = bank.image + v->data + (g / GROUPS_PER_CHUNK) * CHUNK_BYTES;
+    const unsigned bits = bank.sea_bits, mask = (1U << bits) - 1U;
+    const uint8_t *chunk = bank.image + v->data + (g / GROUPS_PER_CHUNK) * bank.chunk_bytes;
     unsigned first = 0, last = g % GROUPS_PER_CHUNK;
     if (v->state_group >= 0 && (uint32_t)v->state_group < g &&
         (uint32_t)v->state_group / GROUPS_PER_CHUNK == g / GROUPS_PER_CHUNK)
         first = (uint32_t)v->state_group % GROUPS_PER_CHUNK + 1U;
-    if (fm1_sea_decode_groups(chunk, CHUNK_BYTES, 5, bank.dqt, first, last, v->state, out)) {
-        memset(out, 0, FM1_SEA_GROUP * sizeof out[0]);
-        v->state_group = -1;
-        return;
+    int32_t s0, s1, s2, s3, w0, w1, w2, w3;
+    if (first) {
+        s0 = v->state[0]; s1 = v->state[1]; s2 = v->state[2]; s3 = v->state[3];
+        w0 = v->state[4]; w1 = v->state[5]; w2 = v->state[6]; w3 = v->state[7];
+    } else {
+        s0 = (int16_t)rd16(chunk + 4); s1 = (int16_t)rd16(chunk + 6); s2 = (int16_t)rd16(chunk + 8); s3 = (int16_t)rd16(chunk + 10);
+        w0 = (int16_t)rd16(chunk + 12); w1 = (int16_t)rd16(chunk + 14); w2 = (int16_t)rd16(chunk + 16); w3 = (int16_t)rd16(chunk + 18);
     }
+    for (unsigned group = first; group <= last; ++group) {
+        const int16_t *dqt = bank.dqt + (((chunk[20 + group / 2U] >> ((group & 1U) ? 0 : 4)) & 15U) << bits);
+        unsigned at = group * FM1_SEA_GROUP * bits;
+        const uint8_t *p = chunk + 28 + (at >> 3);
+        uint32_t buffer = *p++ & (0xffU >> (at & 7U));
+        int have = 8 - (int)(at & 7U);
+        for (unsigned i = 0; i < FM1_SEA_GROUP; ++i) {
+            if (have < (int)bits) { buffer = buffer << 8 | *p++; have += 8; }
+            have -= (int)bits;
+            int32_t residual = dqt[(buffer >> have) & mask];
+            /* (s0 w0 + ... + s3 w3) >> 13 in 32 bits, exactly: each product fits (|s|, |w| <= 32768), their sum may not, so
+             * the products' high parts (>> 13) and low parts (& 8191, at most 4 x 8191) are added apart. */
+            int32_t p0 = s0 * w0, p1 = s1 * w1, p2 = s2 * w2, p3 = s3 * w3;
+            int32_t sum = (p0 >> 13) + (p1 >> 13) + (p2 >> 13) + (p3 >> 13) + (((p0 & 8191) + (p1 & 8191) + (p2 & 8191) + (p3 & 8191)) >> 13);
+            int32_t value = clamp16(sum + residual), delta = residual >> 4;
+            w0 = clamp16(w0 + (s0 < 0 ? -delta : delta));
+            w1 = clamp16(w1 + (s1 < 0 ? -delta : delta));
+            w2 = clamp16(w2 + (s2 < 0 ? -delta : delta));
+            w3 = clamp16(w3 + (s3 < 0 ? -delta : delta));
+            s0 = s1; s1 = s2; s2 = s3; s3 = value;
+            out[i] = (int16_t)value;                          /* the last group's values are the ones left */
+        }
+    }
+    v->state[0] = s0; v->state[1] = s1; v->state[2] = s2; v->state[3] = s3;
+    v->state[4] = w0; v->state[5] = w1; v->state[6] = w2; v->state[7] = w3;
     v->state_group = (int32_t)g;
 }
-static FM1_DSP_CODE int sample_at(struct voice *v, const uint8_t *pcm, uint32_t at)
+/* One sample of the zone, as 16 bits. format is a constant at each call, so each voice loop below is built for one format. */
+static inline __attribute__((always_inline)) int sample_at(struct voice *v, const uint8_t *pcm, uint32_t at, const unsigned format)
 {
-    if (bank.sea) {
+    if (format == FORMAT_SEA) {
         uint32_t g = at / FM1_SEA_GROUP;
         unsigned slot = g & 1U;
         if (v->id[slot] != (int32_t)g) {
             group_at(v, g, v->pcm[slot]);
             v->id[slot] = (int32_t)g;
         }
-        return v->pcm[slot][at % FM1_SEA_GROUP];
+        return v->pcm[slot][at - g * FM1_SEA_GROUP];
     }
-    if (bank.bits12) { /* pair k is 3 bytes at 3k: s0 = b0 | b1 low nibble << 8, s1 = b1 high nibble | b2 << 4 */
+    if (format == FORMAT_PCM12) { /* pair k is 3 bytes at 3k: s0 = b0 | b1 low nibble << 8, s1 = b1 high nibble | b2 << 4 */
         const uint8_t *b = pcm + (at >> 1) * 3U;
         return (at & 1U) ? (int16_t)((b[1] & 0xf0U) | (unsigned)b[2] << 8) : (int16_t)((unsigned)b[0] << 4 | (b[1] & 0x0fU) << 12);
     }
-    return bank.bits16 ? (int16_t)rd16(pcm + at * 2U) : (int)(int8_t)pcm[at] * 256;
+    if (format == FORMAT_PCM16)
+        return (int16_t)rd16(pcm + at * 2U);
+    return (int)(int8_t)pcm[at] * 256;
 }
 
 /* Move the envelope one step on and ramp the voice's gain towards the level at the end of it. */
@@ -613,45 +658,77 @@ static FM1_DSP_CODE void queue_drain(void)
     }
 }
 /* One voice for one block. With bus (a constant at each call, so the plain path has no trace of it) the voice is also
- * added to the reverb and chorus buses, times its channel's sends rg and cg (Q7, 128 = all of it). */
+ * added to the reverb and chorus buses, times its channel's sends rg and cg (Q7, 128 = all of it). format is a constant
+ * too: each format gets its own loop. The loop runs in stretches up to the next envelope step, with the voice's state in
+ * registers; the sample between two frames is interpolated in Q4 and scaled by the level with one 32 x 32 multiply. */
 static inline __attribute__((always_inline)) void voice_run(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho,
-                                                           unsigned frames, int32_t rg, int32_t cg, const int bus)
+                                                           unsigned frames, int32_t rg, int32_t cg, const int bus, const unsigned format)
 {
     const uint8_t *pcm = bank.image + v->data;
-    uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
-    for (unsigned i = 0; i < frames; ++i) {
-        uint32_t position = v->position;
-        if (le && position >= le) {
-            position = ls + (position - le) % (le - ls);
-            v->position = position;
-        }
-        if (position >= length) {
-            v->active = 0;
-            break;
-        }
-        uint32_t next = position + 1;
-        if (le && next >= le)
-            next = ls;
-        if (!v->frames) {
+    const uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
+    uint32_t position = v->position, fraction = v->fraction, step = v->step;
+    int32_t level = v->level, level_step = v->level_step;
+    unsigned left = v->frames, i = 0;
+    while (i < frames) {
+        if (!left) {
+            v->level = level;                                 /* env_step ramps from here */
             env_step(v);
             if (!v->active)
                 break;
+            level_step = v->level_step;
+            step = v->step;                                   /* vibrato may have moved it */
+            left = v->frames;
         }
-        --v->frames;
-        v->level += v->level_step;
-        int a = sample_at(v, pcm, position), b = next < length ? sample_at(v, pcm, next) : 0;
-        int64_t mixed = (int64_t)a * 65536 + (int64_t)(b - a) * v->fraction;
-        int32_t y = (int32_t)((mixed * v->level) >> 37);
-        out[i] += y;
-        if (bus) {
-            if (rg) rev[i] += (y * rg) >> 7;
-            if (cg) cho[i] += (y * cg) >> 7;
+        unsigned n = frames - i < left ? frames - i : left;
+        left -= n;
+        for (unsigned end = i + n; i < end; ++i) {
+            if (le && position >= le)
+                position = ls + (position - le) % (le - ls);
+            if (position >= length) {
+                v->active = 0;
+                goto done;
+            }
+            uint32_t next = position + 1;
+            if (le && next >= le)
+                next = ls;
+            level += level_step;
+            int32_t a = sample_at(v, pcm, position, format), b = next < length ? sample_at(v, pcm, next, format) : 0;
+            int32_t x = a * 16 + (((b - a) * (int32_t)(fraction >> 1)) >> 11);   /* Q4; (b - a) * 15 bits stays in 32 */
+            int32_t y = (int32_t)(((int64_t)x * level) >> 25);
+            out[i] += y;
+            if (bus) {
+                if (rg) rev[i] += (y * rg) >> 7;
+                if (cg) cho[i] += (y * cg) >> 7;
+            }
+            fraction += step;
+            position += fraction >> 16;
+            fraction &= 65535U;
         }
-        uint32_t phase = v->fraction + v->step;
-        v->position += phase >> 16;
-        v->fraction = phase & 65535U;
-        if (!v->active)
-            break;
+    }
+done:
+    v->position = position;
+    v->fraction = fraction;
+    v->level = level;
+    v->frames = (uint16_t)left;
+}
+/* voice_run for the bank's format, without and with the effect buses: eight loops in all. */
+static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, int32_t *out, unsigned frames)
+{
+    switch (bank.format) {
+    case FORMAT_SEA: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_SEA); break;
+    case FORMAT_PCM16: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM16); break;
+    case FORMAT_PCM12: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM12); break;
+    default: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM8); break;
+    }
+}
+static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho,
+                                                                   unsigned frames, int32_t rg, int32_t cg)
+{
+    switch (bank.format) {
+    case FORMAT_SEA: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_SEA); break;
+    case FORMAT_PCM16: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM16); break;
+    case FORMAT_PCM12: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM12); break;
+    default: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM8); break;
     }
 }
 FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
@@ -661,7 +738,7 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
         return;
     for (unsigned n = 0; n < FM1B_VOICES; ++n)
         if (voices[n].active && voices[n].owner == owner)
-            voice_run(&voices[n], out, NULL, NULL, frames, 0, 0, 0);
+            voice_play(&voices[n], out, frames);
 }
 static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};                  /* the sends of the latest block that had voices: the tails keep them */
 FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, unsigned frames, uint8_t sends[2])
@@ -694,10 +771,10 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
         if (!v->active || v->owner != owner)
             continue;
         if (!buses)
-            voice_run(v, out, NULL, NULL, frames, 0, 0, 0);
+            voice_play(v, out, frames);
         else {
             int32_t r = channel_reverb[v->channel], c = channel_chorus[v->channel];
-            voice_run(v, out, rev, cho, frames, buses & 1U ? r + (r >> 6) : 0, buses & 2U ? c + (c >> 6) : 0, 1);
+            voice_play_buses(v, out, rev, cho, frames, buses & 1U ? r + (r >> 6) : 0, buses & 2U ? c + (c >> 6) : 0);
         }
     }
     return buses;

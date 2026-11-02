@@ -14,7 +14,7 @@ header (48) | pitch table | bank map | presets | key maps | zones | envelopes | 
 | --- | --- | --- |
 | 0 | char[4] | `FM1B` |
 | 4 | u16 | version, 1 |
-| 6 | u16 | flags, bit 0 = samples are 16-bit (otherwise 8-bit), bit 1 = samples are SEA5 chunks, bit 2 = samples are 12-bit (at most one bit is set) |
+| 6 | u16 | flags, bit 0 = samples are 16-bit (otherwise 8-bit), bit 1 = samples are SEA chunks, bit 2 = samples are 12-bit (at most one of bits 0-2 is set); bits 8..11 = the SEA code bits, 0 for 5 (set only with bit 1) |
 | 8 | u32 | sample rate of all sample data, in Hz |
 | 12 | u16 | number of presets |
 | 14 | u16 | number of zones |
@@ -32,10 +32,13 @@ for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k
 (an odd count ends with the first two bytes of a pair). A zone of `length` samples takes `ceil(length * 3 / 2)` bytes.
 The player reads a 12-bit sample as `(int16_t)(value << 4)`.
 
-### SEA5 samples (flags bit 1)
+### SEA samples (flags bit 1)
 
-The FM-1's own sample codec (`fm1_sea.h` in fm1_open): a chunk is 320 frames in 228 bytes (0.7125 bytes per sample), 20 frames
-per scale, 5-bit codes. A zone's data is `ceil(length / 320)` chunks in a row (the last one zero padded; `length` stays the real
+The FM-1's own sample codec (`fm1_sea.h` in fm1_open): a chunk is 320 frames in `28 + 40 * bits` bytes, 20 frames per scale.
+SEA5 (5-bit codes, flags bits 8..11 = 0) is 228 bytes a chunk, 0.7125 bytes per sample, with the fixed SEA5 quantizer table.
+SEA6 (flags bits 8..11 = 6) is 268 bytes, 0.8375 bytes per sample: the same 16 scales at twice the resolution (`seaDqt()` in
+`index.html`, which rebuilds the SEA5 table exactly; `make_dqt.js` writes the engine's copy, `fm1b_dqt6.inc`). Each chunk's
+second byte is `0x40 | bits`. A zone's data is `ceil(length / 320)` chunks in a row (the last one zero padded; `length` stays the real
 number of samples). Every chunk carries its own LMS seed, so a decoder can start in any chunk: a note starts at chunk 0 and a loop
 jump decodes just the chunk it lands in, so loop points need no alignment. The bank rate is free; 32 000 Hz is the codec's native one.
 The decoder is `fm1_sea_decode`; `index.html` has the encoder (`seaEncode`, bit-exact with `sea_encode.h`, checked in `test_core.js`).
