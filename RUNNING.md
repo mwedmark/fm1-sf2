@@ -37,7 +37,7 @@ Outputs, all under `fm1_open\build\dx7\`:
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
 and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
 408 412 with effect sends per channel, 408 668 with 12-bit samples, 413 404 with the faster voice loop and the engine's own
-SEA decoder (SEA5 and SEA6), 412 540 with 16 voices. If a change makes the build stop with
+SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 32 kHz (6 KB of it the resampling filter). If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -53,6 +53,7 @@ node test_multitimbral.js     # 63 checks: channels, program change, volume, CC1
 node test_fx.js               # reverb and chorus (sf2fx.c), master levels times sends
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 node test_formats.js          # SEA5, SEA6, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
+node test_rate.js             # the output stage at 32 kHz + resampler against 44.1 kHz: pitch, level, brightness, release, vibrato, reverb
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
@@ -278,6 +279,22 @@ The firmware now has 16 voices and `dist\gm_32k.fm1b` is the SEA6 bank. Whole GM
 Everything at once (`test_emu/load16_all.script`: 16 voices on two channels with different sends, so both effect buses run,
 modulation wheel at 127 and pitch bend up on both): 49-59 % (the higher figures while the notes start), against 49-51 % for the
 same notes plain (`load16_plain.script`).
+
+**The player at 32 kHz (2026-11-02).** The device renders voices and effects at `FM1B_RATE` 32 kHz (`fm1b.h`; the browser and the
+tests stay at 44.1 kHz) and `sf2out.c` resamples to 44.1 kHz: 92 or 93 player frames a block, a 12-tap Kaiser-windowed sinc at 256
+phases (`resample_table.inc`, from `make_resampler.js`: flat to 10 kHz, -1.1 dB at 12 kHz, images at -20 dB or lower), skipped while
+everything it reads is silent. The effects' delays and chorus rate scale with the rate and the reverb's damping is retuned; an envelope
+step is 23 frames (0.719 ms against 0.726 ms: envelopes run 1 % fast). `test_rate.js`: pitch within 1 cent, level within 0.01 dB,
+release, vibrato rate and reverb tail as at 44.1 kHz. fm1-emu, 16 voices, SEA6 GM bank:
+
+| | 44.1 kHz | 32 kHz |
+| --- | --- | --- |
+| idle | about 10 % | about 10 % |
+| `load16_plain.script` | 49-51 % | 44-48 % |
+| `load16_all.script` | 49-59 % | 45-56 % |
+
+About 5 points, not the 10 the rate alone suggests: SEA decoding is per bank sample, which does not change, and the filter costs a few.
+`mt.script` gives the flute as before (RMS 0.098, centroid 283 Hz).
 
 What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
 

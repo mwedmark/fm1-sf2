@@ -5,7 +5,10 @@
 #include <string.h>
 #include "fm1b_dqt6.inc"
 
-enum { GROUPS_PER_CHUNK = 16, ENGINE_RATE = 44100, ENV_STEP = 32, ENV_ONE = 1 << 24, ENV_END = 256 };
+/* An envelope step is ENV_STEP frames: 32 at 44.1 kHz (0.726 ms, the step the converter's envelope factors are made for), 23 at
+ * 32 kHz (0.719 ms: envelopes run 1 % fast there). ENV_STEPS_PER_S1000 is the steps in 1000 ms, for the attack and hold times. */
+enum { GROUPS_PER_CHUNK = 16, ENGINE_RATE = FM1B_RATE, ENV_STEP = FM1B_RATE == 44100U ? 32 : (int)((FM1B_RATE * 32U + 22050U) / 44100U),
+       ENV_STEPS_PER_S1000 = (int)((FM1B_RATE * 1000U / (unsigned)ENV_STEP + 500U) / 1000U), ENV_ONE = 1 << 24, ENV_END = 256 };
 enum { ATTACK, HOLD, DECAY, SUSTAIN, RELEASE };
 /* The envelope used when a bank has none (FORMAT.md, "Envelopes"): 2 ms attack, full sustain, a 15 ms release. */
 static const uint8_t default_env[12] = {2, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x00, 0xb9 /* 0xb900 = 0.72 per step */, 0, 0};
@@ -53,7 +56,7 @@ static uint8_t channel_mod[CHANNEL_SLOTS], channel_pedal[CHANNEL_SLOTS], channel
 static uint16_t channel_rpn[CHANNEL_SLOTS];
 /* Reverb and chorus sends (MIDI CC 91, CC 93; the panel's channel page), 0..127. The effects' master levels scale them. */
 static uint8_t channel_reverb[CHANNEL_SLOTS], channel_chorus[CHANNEL_SLOTS];
-enum { RPN_NULL = 0x3fff, VIBRATO_CENTS = 50, LFO_STEP = 262 /* 5.5 Hz in steps of ENV_STEP frames */ };
+enum { RPN_NULL = 0x3fff, VIBRATO_CENTS = 50, LFO_STEP = (int)((360448U * (unsigned)ENV_STEP + FM1B_RATE / 2U) / FM1B_RATE) /* 5.5 Hz: 65536 * 5.5 per second, in steps of ENV_STEP frames */ };
 
 static FM1_DSP_CODE void channel_rescale(unsigned channel)
 {
@@ -340,8 +343,8 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     if (channel_cents[channel] || channel_mod[channel])
         retune(v);
     v->gain = (int32_t)((int64_t)velocity * level * 1073741824LL / (127 * 127 * 4));
-    /* envelope: the attack starts from silence; a step is ENV_STEP frames at 44.1 kHz */
-    uint32_t attack_steps = (rd16(env) * 1378U + 500U) / 1000U, hold_steps = (rd16(env + 2) * 1378U + 500U) / 1000U;
+    /* envelope: the attack starts from silence; a step is ENV_STEP frames */
+    uint32_t attack_steps = (rd16(env) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U, hold_steps = (rd16(env + 2) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U;
     attack_steps = attack_steps ? attack_steps : 1U;
     v->attack_inc = ENV_ONE / attack_steps;
     v->left = hold_steps;

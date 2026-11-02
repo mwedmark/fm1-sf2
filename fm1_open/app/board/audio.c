@@ -5,16 +5,13 @@
 #include "audio_output.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
-#include "sf2fx.h"
+#include "sf2out.h"
 #include <string.h>
 
 #define DMA_ALIGNED __attribute__((aligned(32)))
 static int32_t receive[2][FM1_BLOCK_WORDS] DMA_ALIGNED;
 static int32_t transmit[2][FM1_BLOCK_WORDS] DMA_ALIGNED;
 static int32_t rendered[FM1_BLOCK_WORDS] DMA_ALIGNED;
-#if FM1B_IN_FIRMWARE
-static int32_t melodic[FM1_BLOCK_FRAMES], reverb_bus[FM1_BLOCK_FRAMES], chorus_bus[FM1_BLOCK_FRAMES];
-#endif
 static struct fm1_audio_stats statistics;
 static uint32_t block_ticks, previous_tick;
 static uint8_t initialized, previous_valid;
@@ -57,14 +54,8 @@ FM1_AUDIO_CODE __attribute__((interrupt(""))) void fm1_audio_irq(void)
 #endif
     /* The FM1B player sits beside the library's instrument: one channel of Q23, added to both. */
 #if FM1B_IN_FIRMWARE
-    if (fm1b_ready()) {
-        uint8_t sends[2];
-        for (unsigned i = 0; i < FM1_BLOCK_FRAMES; ++i) melodic[i] = 0;
-        unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, FM1_BLOCK_FRAMES, sends);
-        /* dry on both channels, plus reverb and chorus: from the dry mix while all channels send alike, else from the buses */
-        sf2fx_mix_sends(melodic, buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
-                        buses & 2U ? chorus_bus : melodic, buses & 2U ? 127U : sends[1], rendered, FM1_BLOCK_FRAMES);
-    }
+    if (fm1b_ready())
+        sf2out_render(rendered);                          /* voices, effects, and the resampling to 44.1 kHz (sf2out.c) */
 #endif
     fm1_output_mix(rendered);
     uint32_t flags = fm1_audio_irq_save();

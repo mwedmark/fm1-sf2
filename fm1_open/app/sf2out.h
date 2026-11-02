@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
+/* The SF2 player's output for one codec block: the voices (fm1b), the effects (sf2fx) and, when the player runs below 44.1 kHz,
+ * the resampling to it. */
+#ifndef SF2OUT_H
+#define SF2OUT_H
+#include <stdint.h>
+/* Add FM1_BLOCK_FRAMES stereo frames (interleaved, Q23, saturated) at 44.1 kHz to out. Called from the audio interrupt. */
+void sf2out_render(int32_t *out);
+#endif

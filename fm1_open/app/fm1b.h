@@ -12,6 +12,16 @@
 /* The same in the browser and on the device. Measured in fm1-emu at 240 MHz with the 32 kHz bank, flute, 16 voices held:
  * SEA5 52-57 %, SEA6 52-59 % (RUNNING.md, section 7b). Measure fm1_audio_irq's peak before raising this. */
 #define FM1B_VOICES 16U
+/* The rate the player renders at, voices and effects alike. The device renders at the bank's 32 kHz and board/audio.c resamples
+ * that to the codec's 44.1 kHz (a voice at its root key then reads one sample a frame); the browser and the tests render at
+ * 44.1 kHz. A test may set it (-DFM1B_RATE=32000U). */
+#ifndef FM1B_RATE
+#ifdef FM1_HOST_TEST
+#define FM1B_RATE 44100U
+#else
+#define FM1B_RATE 32000U
+#endif
+#endif
 
 /* Validate and bind a bank image, which must stay in place while bound. image NULL unbinds. dqt is the SEA5
  * quantizer table (512 entries); the engine has the SEA6 one. Returns 0, or -1 for a bank that is not FM1B version 1, does

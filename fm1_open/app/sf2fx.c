@@ -1,15 +1,19 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "sf2fx.h"
 #include "engine.h"
+#include "fm1b.h"                                        /* FM1B_RATE: the effects run at the player's rate */
 
 /* Samples are 16 bit (Q15) in the delay lines: 96 dB is plenty for a reverb tail. Everything lives in internal SRAM
  * (about 16 KB) and runs from the audio interrupt, so no tables in flash and no library calls. */
+/* Lengths at 44.1 kHz, scaled to the player's rate so the times stay. The damping filter's coefficient changes with the rate:
+ * 1 - (1 - 0.2747)^(44100 / 32000) = 0.3577 keeps its cutoff at 32 kHz. */
+#define AT_RATE(n) ((int)(((n) * FM1B_RATE + 22050U) / 44100U))
 enum {
-    COMB0 = 1116, COMB1 = 1188, COMB2 = 1277, COMB3 = 1356,        /* Freeverb's comb lengths at 44.1 kHz */
-    ALLPASS0 = 556, ALLPASS1 = 441, ALLPASS2 = 341, ALLPASS3 = 225, /* left chain 0,1; right chain 2,3 */
-    CHORUS_LENGTH = 2048, CHORUS_BASE = 700, CHORUS_DEPTH = 300,    /* 16 ms +- 6.8 ms */
-    CHORUS_RATE = 77900,                                            /* 0.8 Hz as a 32-bit phase step at 44.1 kHz */
-    REVERB_FEEDBACK = 28800, REVERB_DAMP = 9000,                    /* Q15: 0.88 and 0.27 */
+    COMB0 = AT_RATE(1116U), COMB1 = AT_RATE(1188U), COMB2 = AT_RATE(1277U), COMB3 = AT_RATE(1356U),   /* Freeverb's comb lengths */
+    ALLPASS0 = AT_RATE(556U), ALLPASS1 = AT_RATE(441U), ALLPASS2 = AT_RATE(341U), ALLPASS3 = AT_RATE(225U), /* left 0,1; right 2,3 */
+    CHORUS_LENGTH = 2048, CHORUS_BASE = AT_RATE(700U), CHORUS_DEPTH = AT_RATE(300U),               /* 16 ms +- 6.8 ms */
+    CHORUS_RATE = (int)(77900ULL * 44100U / FM1B_RATE),            /* 0.8 Hz as a 32-bit phase step */
+    REVERB_FEEDBACK = 28800, REVERB_DAMP = FM1B_RATE == 44100U ? 9000 : FM1B_RATE == 32000U ? 11722 : 9000,   /* Q15: 0.88; 0.27 at 44.1 kHz */
     QUIET_LEVEL = 48, QUIET_BLOCKS = 1100                           /* about 3.2 s of silence at 128 frames a block */
 };
 static struct {
