@@ -221,6 +221,8 @@ function presetZones(sf, p) {
         loop: !!mode && (mode.u & 3) !== 0 && (mode.u & 3) !== 2,
         loopOffStart: n(2) + n(45) * 32768,
         loopOffEnd: n(3) + n(50) * 32768,
+        // pan in 0.1 % (-500 left .. 500 right): instrument plus preset. The left half of a stereo pair plays as mono, centred.
+        pan: sh.type === 4 ? 0 : Math.max(-500, Math.min(500, n(17) + np(17))),
       });
     }
   }
@@ -508,7 +510,7 @@ function buildBank(sf, presetIdx, opt) {
     // Tuning (coarse, fine, the sample's own correction) is not baked into the data, which several zones share: whole
     // semitones move the root key, the rest is a signed fine tune in cents (-50..50) the player applies to the step.
     const semis = Math.round((z.cents || 0) / 100), fine = Math.round((z.cents || 0) - semis * 100);
-    out.push({ lo: z.lo, hi: z.hi, root: Math.max(0, Math.min(127, z.root - semis)), fine, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
+    out.push({ lo: z.lo, hi: z.hi, root: Math.max(0, Math.min(127, z.root - semis)), fine, pan: z.pan || 0, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
                env: envRecord(z.env, z.drum) });
   }
 }
@@ -593,6 +595,7 @@ function writeFm1(bank) {
     out[o + 16] = z.root; out[o + 17] = z.loop ? 1 : 0;
     dv.setUint16(o + 18, z.envIndex, true);
     dv.setInt16(o + 20, z.fine || 0, true);
+    dv.setInt16(o + 22, z.pan || 0, true);
   });
   envs.forEach((e, i) => {
     const o = offEnv + i * FM1B_ENV;
@@ -716,12 +719,13 @@ function writeSf2(bank, name) {
   const inst = records(22, pl.concat([null]), (dv, u8, o, p) => {
     if (p) { putName(u8, o, p.name); dv.setUint16(o + 20, p.first, true); } else { putName(u8, o, 'EOI'); dv.setUint16(o + 20, zones.length, true); }
   });
-  // generators per zone: keyRange, [sampleModes], overridingRootKey, sampleID (last)
+  // generators per zone: keyRange, [sampleModes], [pan], overridingRootKey, sampleID (last)
   const gens = [], bagStart = [];
   for (const z of zones) {
     bagStart.push(gens.length);
     gens.push({ op: 43, lo: z.lo, hi: z.hi });
     if (z.loop) gens.push({ op: 54, u: 1 });
+    if (z.pan) gens.push({ op: 17, u: z.pan & 0xffff });
     gens.push({ op: 58, u: z.root });
     gens.push({ op: 53, u: z.sample.index });
   }

@@ -57,7 +57,7 @@ node test_rate.js             # the output stage at 32 kHz + resampler against 4
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
-`transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the CC10 rule) or the panel (the `MULTI` line, the channel page).
+`transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the controllers per channel) or the panel (the `MULTI` line, the channel page).
 Those are only compiled, so test them in the emulator or on the device.
 
 ## 3. The converter and browser simulator (verified)
@@ -202,22 +202,29 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 | Pitch bend | Per channel, on sounding notes too. Range 2 semitones until RPN 0 sets it (CC101=0, CC100=0, CC6 semitones up to 24, CC38 cents) |
 | CC1 modulation wheel | Per channel: vibrato, 5.5 Hz, up to +-50 cents at 127 |
 | CC64 sustain pedal | Per channel: a note released while it is down sounds on until the pedal goes up |
-| CC120 / CC121 / CC123 | All sound off / reset volume, expression, bend, wheel and pedal / all notes off, **for that channel only** |
+| CC120 / CC121 / CC123 | All sound off / reset volume, expression, pan, bend, wheel and pedal / all notes off, **for that channel only** |
 | CC91 / CC93 | Reverb and chorus send **per channel**, 30 and 20 until set. The panel's KNOB3/KNOB4 master levels (127 by default) scale them |
-| CC10 pan | **Global** pan. Ignored as soon as any channel has its own program (otherwise channels would overwrite each other) |
+| CC10 pan | **Per channel**, live on sounding notes. Added to each zone's own pan from the SoundFont (generator 17), as an SF2 player does: at 64 (the default) the SoundFont's pan is heard as it is (the drum kit is spread), 0 moves the channel all the way left, 127 all the way right |
 
 Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received. **HOME** switches to the channel page:
 one row per MIDI channel with its program and name (grey: it follows the panel's program; white: a program of its own; orange: the kit on
-channel 10; green: it plays now), level (volume x expression), bend in semitones, modulation wheel and `P` while the pedal is down. HOME again goes back.
+channel 10; green: it plays now; the name is cut to 7 characters), level (volume x expression), pan (`L64`..` C `..`R64`), bend in semitones,
+modulation wheel and `P` while the pedal is down. HOME again goes back.
 The knobs are the same on both pages, only what they act on changes:
 
 | Knob | Program page (the start) | Channel page (HOME) |
 |---|---|---|
 | SELECT | The panel's program | The selected channel's program; below the first, the channel follows the panel again (channel 10 stays the kit) |
 | KNOB1 | - | Moves the cursor (the highlighted row) |
-| KNOB2 | Pan, global | - |
+| MASTER | Output level | The selected channel's volume (CC7) |
+| KNOB2 | Pan of the whole mix (a balance) | The selected channel's pan (CC10) |
 | KNOB3 | Master reverb, 0..127 | The selected channel's reverb send (CC91) |
 | KNOB4 | Master chorus, 0..127 | The selected channel's chorus send (CC93) |
+
+MASTER is a potentiometer, so it never jumps: the value moves with the knob, from where it is, so that both ends of the knob reach
+both ends of the value (turned up, the value covers what is left above it in what is left of the travel; the same downwards). While
+the channel page is never opened the output level is where the knob points, as before. Leaving the channel page leaves the output
+level where it was until MASTER is turned again.
 
 What a channel gets of an effect is master x send. The defaults (master 127, sends 30 and 20) sound bit for bit as the single global
 level of 30 and 20 did before (`test_fx.js` checks it). On the channel page the panel's keys play the selected channel.
@@ -231,7 +238,15 @@ a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275
 script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
 Limits: 24 voices in total on the device (oldest is stolen first; 8, then 16, until 2026-11-02), fewer while the CPU guard holds
-the limit down (the panel then shows `VOICES n/limit CPU`), no per-channel pan.
+the limit down (the panel then shows `VOICES n/limit CPU`).
+
+**Pan (2026-11-02).** Each voice's pan is its zone's (SF2 generator 17, stored in the zone record, FORMAT.md) plus its channel's CC10,
+with the same balance law as KNOB2: the near side keeps its level, the far side is sqrt(1 - |p| / 64). The engine still mixes one mono
+signal, which also feeds reverb and chorus (so the sends do not depend on the pan); a panned voice adds its far side's share (one more
+multiply) to a cut buffer for that side, and the mix takes it away from that channel. A centred voice costs nothing new and the output
+is bit exact as before (`test_multitimbral.js`, 11 pan checks). In fm1-emu at 240 MHz, 24 voices, the same session: `load24_all`
+(nothing panned) 74-79 %, `load24_pan` (every voice panned) 75-78 % with SEA6; 46-50 % and 49-53 % with BFP8. That session ran higher
+than the earlier tables (load24_all 57-62 % then), so compare within it: pan costs about 0-3 points. Firmware image 422 332 bytes.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
@@ -378,5 +393,5 @@ broadband tails). Scripts: the session's `noise.js` and `band.js` were not kept;
 - Run the multitimbral build on the real FM-1 with program changes on two channels (it has run in fm1-emu, section 4), and note the result here.
 - Check the channel page and bend, wheel and pedal from a real keyboard on the device.
 - Check the `MULTI` panel line, the channel page and the bank-select rule (CC0/CC32) on a screen: the emulator draws no LCD.
-- Per-channel pan needs a stereo `fm1b_render` and a changed `sf2fx_mix`.
+- Check pan per channel (CC10, KNOB2 on the channel page), the kit's spread and MASTER as channel volume on the device (FM1_TEST.md).
 - Fill in section 4 once the emulator has been started again.

@@ -1,7 +1,7 @@
 # Checklista: SF2-spelaren på en riktig FM-1
 
 Gäller firmwaren på `sf2-player` från 2026-11-02: 24 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
-SEA6 och BFP8. Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
+SEA6 och BFP8, pan per kanal och SF2-filens egen pan. Bygg om banken med dagens konverterare, annars saknar den pan. Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
 
 ## Det här behövs
 
@@ -53,6 +53,9 @@ USB-uppdateringsläge). Notera exakt vad som visades.
 | C5 | KNOB2 (pan), KNOB3 (master reverb), KNOB4 (master chorus) på huvudsidan. | Värdena ändras på rad 9 och hörs. | |
 | C6 | HOME: kanalsidan. KNOB1 flyttar markören, SELECT byter kanalens program, KNOB3/4 kanalens reverb/chorus. | Raden och kolumnerna REV/CHO ändras. Tangenterna spelar markerad kanal. | |
 | C7 | Titta på rubriken `CHANNELS n/24` och raden `VOICES n/24` medan du spelar. | Talet efter snedstrecket är 24. | |
+| C8 | Kanalsidan: vrid MASTER ned och upp medan du spelar. | Bara markerad kanals LVL ändras och hörs; ingen hoppande volym. Båda ändlägena ger 0 och 127. | |
+| C9 | Tillbaka till huvudsidan (HOME) utan att röra MASTER, vrid sedan lite. | Utnivån hoppar inte, den följer knappen därifrån. | |
+| C10 | Kanalsidan: KNOB2 åt båda hållen, med hörlurar. | Kolumnen PAN visar `L..`/` C `/`R..`, ljudet flyttar sig. | |
 
 ## D. MIDI in (USB, DIN, BLE)
 
@@ -64,6 +67,8 @@ Spela `test_emu\midi\mt.mid` och `drums.mid` från Windows till FM-1, en gång p
 | D2 | `drums.mid`: kanal 10. | Bastrumma, virvel, hihat, crash. | | | |
 | D3 | Pitch bend och modulationshjul från ett keyboard. | Tonhöjden böjs; vibrato. | | | |
 | D4 | Sustainpedal. | Toner ligger kvar tills pedalen släpps. | | | |
+| D5 | `pan.mid` (hörlurar): stråkar på kanal 1, CC10 sveper vänster, höger, mitten. | Ljudet glider jämnt utan knaster; PAN-kolumnen följer. | | | |
+| D6 | `drums.mid` igen, med hörlurar. | Trummorna sprids i stereo som i SoundFonten (t.ex. hihat och tom-trummor åt olika håll). | | | |
 
 ## E. Last och CPU-spärr (SEA6)
 
@@ -77,6 +82,7 @@ sänkt gränsen.
 | E3 | `load24_all.mid` | 57-62 %, topp 79 % | | |
 | E4 | `steal40.mid` (40 toner, 24 röster) | 60-66 %, de äldsta tonerna stjäls | | |
 | E5 | `release.mid` | Allt tystnar efter note off | | |
+| E6 | `load24_pan.mid` (alla röster panorerade) | Som E3, högst ett par procent mer | | |
 
 Täta ackord med 24 röster når full nivå (toppvärde 0,875 i emulatorn): lyssna efter distorsion i E3 och E4, det är nivån och inte CPU:n.
 

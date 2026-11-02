@@ -3,16 +3,21 @@
 #include "fm1b.h"
 #include "sf2fx.h"
 #include "engine.h"
+#include <stddef.h>
 
 #if FM1B_RATE == 44100U
 static int32_t melodic[FM1_BLOCK_FRAMES], reverb_bus[FM1_BLOCK_FRAMES], chorus_bus[FM1_BLOCK_FRAMES];
+static int32_t cut_left[FM1_BLOCK_FRAMES], cut_right[FM1_BLOCK_FRAMES];
 FM1_DSP_CODE void sf2out_render(int32_t *out)
 {
     uint8_t sends[2];
+    int32_t *sides[2] = {cut_left, cut_right};
     for (unsigned i = 0; i < FM1_BLOCK_FRAMES; ++i) melodic[i] = 0;
-    unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, FM1_BLOCK_FRAMES, sends);
-    /* dry on both channels, plus reverb and chorus: from the dry mix while all channels send alike, else from the buses */
-    sf2fx_mix_sends(melodic, buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
+    unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, sides, FM1_BLOCK_FRAMES, sends);
+    /* dry on both channels less what the panned voices take from each, plus reverb and chorus: from the dry mix while all
+     * channels send alike, else from the buses */
+    sf2fx_mix_sends(melodic, buses & 4U ? cut_left : NULL, buses & 8U ? cut_right : NULL,
+                    buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
                     buses & 2U ? chorus_bus : melodic, buses & 2U ? 127U : sends[1], out, FM1_BLOCK_FRAMES);
 }
 #else
@@ -24,6 +29,7 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
 enum { RESAMPLE_HISTORY = RESAMPLE_TAPS, PLAYER_FRAMES = FM1_BLOCK_FRAMES * FM1B_RATE / 44100U + 3U };
 #define RESAMPLE_STEP ((uint32_t)((((uint64_t)FM1B_RATE << 24) + 22050U) / 44100U))
 static int32_t melodic[PLAYER_FRAMES], reverb_bus[PLAYER_FRAMES], chorus_bus[PLAYER_FRAMES], stereo[PLAYER_FRAMES * 2];
+static int32_t cut_left[PLAYER_FRAMES], cut_right[PLAYER_FRAMES];
 static int16_t left_in[RESAMPLE_HISTORY + PLAYER_FRAMES], right_in[RESAMPLE_HISTORY + PLAYER_FRAMES];
 static uint32_t position = (uint32_t)(RESAMPLE_TAPS / 2 - 1) << 24;
 static unsigned silent = RESAMPLE_HISTORY;               /* frames of silence at the end of the arrays (counted up to the history) */
@@ -35,9 +41,11 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
     /* the last output frame reads up to sample floor(last) + TAPS / 2, which must be the newest one: HISTORY + n - 1 */
     const unsigned n = (last >> 24) + RESAMPLE_TAPS / 2 + 1U - RESAMPLE_HISTORY;
     uint8_t sends[2];
+    int32_t *sides[2] = {cut_left, cut_right};
     for (unsigned i = 0; i < n; ++i) { melodic[i] = 0; stereo[2 * i] = stereo[2 * i + 1] = 0; }
-    unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, n, sends);
-    sf2fx_mix_sends(melodic, buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
+    unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, sides, n, sends);
+    sf2fx_mix_sends(melodic, buses & 4U ? cut_left : NULL, buses & 8U ? cut_right : NULL,
+                    buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
                     buses & 2U ? chorus_bus : melodic, buses & 2U ? 127U : sends[1], stereo, n);
     int16_t *l = left_in + RESAMPLE_HISTORY, *r = right_in + RESAMPLE_HISTORY;
     for (unsigned i = 0; i < n; ++i) {                   /* Q23 (saturated) to Q15 */

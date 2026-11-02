@@ -10,7 +10,7 @@
 void sf2fx_set(unsigned reverb, unsigned chorus);
 unsigned sf2fx_reverb(void);
 unsigned sf2fx_chorus(void);
-/* Pan of the dry signal, 0 (left) .. 64 (centre, the default) .. 127 (right), MIDI CC 10. It is a balance: the side you turn
+/* Pan of the whole dry mix, 0 (left) .. 64 (centre, the default) .. 127 (right): the panel's KNOB2. It is a balance: the side you turn
  * away from is faded out and the other keeps its level, so the centre is the unpanned sound. Reverb and chorus stay stereo. */
 void sf2fx_set_pan(unsigned pan);
 unsigned sf2fx_pan(void);
@@ -18,7 +18,9 @@ unsigned sf2fx_pan(void);
  * the effects' return. After a few seconds of silence the effects stop costing anything. */
 void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames);
 /* The same with the effects fed from their own sends: rev and cho (mono, Q23; may be dry itself) times rev_send and cho_send
- * (0..127, 127 = all of it), then times the master levels. sf2fx_mix is all three dry at 127. */
-void sf2fx_mix_sends(const int32_t *dry, const int32_t *rev, unsigned rev_send, const int32_t *cho, unsigned cho_send,
-                     int32_t *out, unsigned frames);
+ * (0..127, 127 = all of it), then times the master levels, and with the voices' own pan: the left channel's dry signal is dry
+ * minus cut_left, the right's dry minus cut_right (fm1b_render_sends' sides; NULL: nothing to take). The effects get dry
+ * unpanned. sf2fx_mix is all three dry at 127, unpanned. */
+void sf2fx_mix_sends(const int32_t *dry, const int32_t *cut_left, const int32_t *cut_right, const int32_t *rev, unsigned rev_send,
+                     const int32_t *cho, unsigned cho_send, int32_t *out, unsigned frames);
 #endif

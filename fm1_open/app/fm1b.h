@@ -68,19 +68,22 @@ void fm1b_channel_bend(unsigned channel, unsigned value);
  * percussion bank, name); otherwise it plays the panel's preset. notes counts its note-ons (it wraps), voices sound now. */
 struct fm1b_channel {
     char name[21];
-    uint8_t own, kit, program, volume, expression, mod, pedal, voices, notes, reverb, chorus;
+    uint8_t own, kit, program, volume, expression, mod, pedal, voices, notes, reverb, chorus, pan;   /* pan: CC 10, 64 the centre */
     int16_t bend_cents;
 };
 void fm1b_channel_info(unsigned channel, struct fm1b_channel *info);
 /* How many channels have a preset of their own: 0 while a single preset plays on all of them. */
 unsigned fm1b_multitimbral(void);
-/* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several
+/* Add `frames` mono Q23 samples to out, unpanned. Only the voices started by `owner` sound: the browser simulator has several
  * sampler instances, each rendered once per block, and a voice must advance exactly once per block. */
 void fm1b_render(const void *owner, int32_t *out, unsigned frames);
-/* The same, with the effect sends. While all the sounding voices' channels have the same sends, sends[] gets them and the
- * buses are the dry mix times sends/127: nothing is written to rev or cho. Otherwise the result has bit 0 (reverb) and/or
- * bit 1 (chorus) set and that bus holds each voice times its channel's send (it is cleared first; out is added to). */
-unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, unsigned frames, uint8_t sends[2]);
+/* The same, with the effect sends and pan. While all the sounding voices' channels have the same sends, sends[] gets them and
+ * the buses are the dry mix times sends/127: nothing is written to rev or cho. Otherwise the result has bit 0 (reverb) and/or
+ * bit 1 (chorus) set and that bus holds each voice times its channel's send (it is cleared first; out is added to).
+ * Pan: out stays the unpanned mix (the effects' input). Bit 2 set: sides[0] holds what to take from it for the left channel;
+ * bit 3: sides[1] for the right (each cleared first). A clear bit means that channel is out itself. */
+unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
+                           uint8_t sends[2]);
 #define FM1B_REVERB_SEND 30U
 #define FM1B_CHORUS_SEND 20U
 /* What the panel shows: the selected preset, the zone the latest note hit (its sample and envelope) and the state of

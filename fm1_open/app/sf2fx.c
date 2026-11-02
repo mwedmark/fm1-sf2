@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "sf2fx.h"
+#include <stddef.h>
 #include "engine.h"
 #include "fm1b.h"                                        /* FM1B_RATE: the effects run at the player's rate */
 
@@ -88,10 +89,10 @@ static FM1_DSP_CODE void clear(void)
 
 FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
 {
-    sf2fx_mix_sends(dry, dry, 127, dry, 127, out, frames);
+    sf2fx_mix_sends(dry, NULL, NULL, dry, 127, dry, 127, out, frames);
 }
-FM1_DSP_CODE void sf2fx_mix_sends(const int32_t *dry, const int32_t *rev, unsigned rev_send, const int32_t *cho, unsigned cho_send,
-                                  int32_t *out, unsigned frames)
+FM1_DSP_CODE void sf2fx_mix_sends(const int32_t *dry, const int32_t *cut_left, const int32_t *cut_right, const int32_t *rev, unsigned rev_send,
+                                  const int32_t *cho, unsigned cho_send, int32_t *out, unsigned frames)
 {
     const int32_t rg = reverb_gain * (int32_t)rev_send / 127, cg = chorus_gain * (int32_t)cho_send / 127;   /* send 127: the master level exactly */
     const int32_t pl = pan_left, pr = pan_right;
@@ -104,8 +105,9 @@ FM1_DSP_CODE void sf2fx_mix_sends(const int32_t *dry, const int32_t *rev, unsign
         if (quiet_blocks >= QUIET_BLOCKS) {                  /* the tails are gone: dry only, no work */
             if (quiet_blocks == QUIET_BLOCKS) { clear(); ++quiet_blocks; }
             for (unsigned i = 0; i < frames; ++i) {
-                out[2 * i] = sat24(out[2 * i] + PAN(dry[i], pl));
-                out[2 * i + 1] = sat24(out[2 * i + 1] + PAN(dry[i], pr));
+                int32_t l = cut_left ? dry[i] - cut_left[i] : dry[i], r = cut_right ? dry[i] - cut_right[i] : dry[i];
+                out[2 * i] = sat24(out[2 * i] + PAN(l, pl));
+                out[2 * i + 1] = sat24(out[2 * i + 1] + PAN(r, pr));
             }
             return;
         }
@@ -113,7 +115,7 @@ FM1_DSP_CODE void sf2fx_mix_sends(const int32_t *dry, const int32_t *rev, unsign
     } else
         quiet_blocks = 0;
     for (unsigned i = 0; i < frames; ++i) {
-        int32_t x = dry[i], left = PAN(x, pl), right = PAN(x, pr);
+        int32_t x = dry[i], left = PAN(cut_left ? x - cut_left[i] : x, pl), right = PAN(cut_right ? x - cut_right[i] : x, pr);
         if (cg) {
             fx.chorus[fx.chorus_at] = (int16_t)(cho[i] >> 8);
             chorus_phase += CHORUS_RATE;

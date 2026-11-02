@@ -5,7 +5,7 @@
 #define EXPORT __attribute__((used, visibility("default")))
 enum { BLOCK = 128, BANK_MAX = 1 << 20 };
 static uint8_t bank_image[BANK_MAX];
-static int32_t out[BLOCK], rev[BLOCK], cho[BLOCK];
+static int32_t out[BLOCK], rev[BLOCK], cho[BLOCK], cut_left[BLOCK], cut_right[BLOCK];
 static uint8_t sends[2];
 EXPORT uint8_t *mt_bank(void) { return bank_image; }
 EXPORT unsigned mt_bank_capacity(void) { return BANK_MAX; }
@@ -40,7 +40,7 @@ EXPORT unsigned mt_status(unsigned field)                /* 0 channels, 1 progra
 EXPORT void mt_panel_drum(unsigned note, unsigned velocity) { fm1b_drum_note(0, note, velocity, 100); }
 EXPORT unsigned mt_has_drums(void) { return fm1b_has_drums(); }
 EXPORT void mt_bend(unsigned channel, unsigned value) { fm1b_channel_bend(channel, value); }
-EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 program, 3 bend cents, 4 mod, 5 pedal, 6 voices, 7 notes, 8 volume, 9 reverb, 10 chorus */
+EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 program, 3 bend cents, 4 mod, 5 pedal, 6 voices, 7 notes, 8 volume, 9 reverb, 10 chorus, 11 pan */
 {
     struct fm1b_channel c;
     fm1b_channel_info(channel, &c);
@@ -55,18 +55,21 @@ EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 progr
     case 7: return c.notes;
     case 9: return c.reverb;
     case 10: return c.chorus;
+    case 11: return c.pan;
     default: return c.volume;
     }
 }
 EXPORT void mt_follow(unsigned channel) { fm1b_channel_follow(channel); }
 EXPORT unsigned mt_has_program(unsigned bank, unsigned program) { return fm1b_has_program(bank, program); }
 EXPORT int32_t *mt_rev(void) { return rev; }
+EXPORT int32_t *mt_cut(unsigned right) { return right ? cut_right : cut_left; }   /* the pan sides of mt_block_sends */
 EXPORT int32_t *mt_cho(void) { return cho; }
 EXPORT unsigned mt_send(unsigned which) { return sends[which & 1U]; }
 EXPORT unsigned mt_block_sends(void)                     /* one block as board/audio.c renders it with the effect sends */
 {
     for (unsigned i = 0; i < BLOCK; ++i)
         out[i] = 0;
-    return fm1b_render_sends(0, out, rev, cho, BLOCK, sends);
+    int32_t *sides[2] = {cut_left, cut_right};
+    return fm1b_render_sends(0, out, rev, cho, sides, BLOCK, sends);
 }
 EXPORT unsigned mt_voice_max(void) { return FM1B_VOICES; }

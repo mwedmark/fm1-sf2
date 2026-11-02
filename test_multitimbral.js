@@ -1,5 +1,5 @@
 // Runs the SF2 player's real voice engine (fm1_open/app/fm1b.c) on WebAssembly and checks the multitimbral behaviour: program
-// change per channel, the mix of channels, note off per channel, volume/expression, the channel controllers, the percussion
+// change per channel, the mix of channels, note off per channel, volume/expression, pan, the channel controllers, the percussion
 // channel, and that a player which never sends a program change sounds exactly as it did before.
 //   node test_multitimbral.js [bank.fm1b]       (default: dist/gm_32k.fm1b, the SEA6 bank the firmware plays)
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
@@ -387,6 +387,83 @@ const want = add(c1.map(v => v * 65 / 128), fifth.map(v => v * 20 / 128));
 let err = 0, size = 0;
 for (let i = 0; i < want.length; ++i) { err += Math.abs(rs.c[i] - want[i]); size += Math.abs(want[i]); }
 check(rs.flags === 2 && err / size < 0.001, `the chorus bus is each channel times its send (relative error ${(err / size).toExponential(1)})`);
+
+// 17. Pan per channel (CC 10) on top of the zones' own (SF2 generator 17). The mono mix (the effects' input) never changes; a
+// panned voice puts its far side in a cut buffer, and a channel is that mix less its cut.
+function renderPan(blocks) {
+  const o = new Int32Array(blocks * BLOCK), l = new Int32Array(blocks * BLOCK), r = new Int32Array(blocks * BLOCK), rev = new Int32Array(blocks * BLOCK);
+  let flags = 0;
+  for (let b = 0; b < blocks; ++b) {
+    const f = w.mt_block_sends(), at = b * BLOCK;
+    flags |= f;
+    const out = new Int32Array(w.memory.buffer, w.mt_out(), BLOCK);
+    const cl = new Int32Array(w.memory.buffer, w.mt_cut(0), BLOCK), cr = new Int32Array(w.memory.buffer, w.mt_cut(1), BLOCK);
+    o.set(out, at);
+    for (let i = 0; i < BLOCK; ++i) { l[at + i] = out[i] - (f & 4 ? cl[i] : 0); r[at + i] = out[i] - (f & 8 ? cr[i] : 0); }
+    if (f & 1) rev.set(new Int32Array(w.memory.buffer, w.mt_rev(), BLOCK), at);
+  }
+  return { o, l, r, rev, flags };
+}
+const PAN_BLOCKS = 50, plain50 = plain.subarray(0, PAN_BLOCKS * BLOCK);
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+let pn = renderPan(PAN_BLOCKS);
+check(!(pn.flags & 12) && same(pn.l, plain50) && same(pn.r, plain50) && w.mt_info(0, 11) === 64, 'a centred zone at CC10 64: both sides are the mix, no cut');
+fresh(SUSTAIN);
+w.mt_control(0, 10, 0);
+w.mt_note(0, NOTE, 100);
+pn = renderPan(PAN_BLOCKS);
+check(pn.flags === 8 && same(pn.o, plain50) && same(pn.l, plain50) && pn.r.every(v => v === 0), 'CC10 0: all left, the right side silent, the mix unchanged');
+fresh(SUSTAIN);
+w.mt_control(0, 10, 127);
+w.mt_note(0, NOTE, 100);
+pn = renderPan(PAN_BLOCKS);
+check(pn.flags === 4 && same(pn.r, plain50) && pn.l.every(v => v === 0), 'CC10 127: all right');
+fresh(SUSTAIN);
+w.mt_control(0, 10, 32);
+w.mt_note(0, NOTE, 100);
+pn = renderPan(PAN_BLOCKS);
+const halfway = sumAbs(pn.r) / sumAbs(pn.l);
+check(same(pn.l, plain50) && Math.abs(halfway - Math.SQRT1_2) < 0.01, `CC10 32: the right side at sqrt(1/2) of the left (${halfway.toFixed(3)})`);
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+renderPan(10);
+w.mt_control(0, 10, 0);
+pn = renderPan(10);
+check(pn.r.slice(BLOCK).every(v => v === 0) && sumAbs(pn.l) > 0, 'CC10 pans a note that already sounds');
+check(w.mt_info(0, 11) === 0, 'the channel reports its pan');
+w.mt_control(0, 121, 0);
+pn = renderPan(10);
+check(w.mt_info(0, 11) === 64 && !(pn.flags & 12), 'CC121 centres the pan');
+fresh(SUSTAIN);
+w.mt_control(1, 10, 0);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+pn = renderPan(PAN_BLOCKS);
+check(same(pn.r, plain50) && same(pn.l, add(plain50, fifth)), 'channel 2 panned left leaves channel 1 in the middle');
+// The sends do not follow the pan: the reverb bus of a voice is the same panned or not.
+const reverbOf = pan => {
+  fresh(SUSTAIN);
+  w.mt_control(0, 91, 127); w.mt_control(1, 91, 0); w.mt_control(0, 10, pan);
+  w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+  return renderPan(PAN_BLOCKS);
+};
+const revCentre = reverbOf(64), revLeft = reverbOf(0);
+check(revCentre.flags === 1 && revLeft.flags === 9 && same(revCentre.rev, revLeft.rev), 'the reverb send is the same panned or not');
+// The kit's own pan from the SoundFont: with CC10 at 64 some keys sound left, some right; CC10 moves them all.
+let sides = 0, panned = -1;
+for (let key = 35; key <= 81; ++key) {
+  fresh(0);
+  w.mt_drum(9, key, 100);
+  const f = renderPan(4).flags & 12;
+  sides |= f;
+  if (f && panned < 0) panned = key;
+}
+check(sides === 12, 'the SoundFont pans the kit: keys to the left and to the right at CC10 64');
+fresh(0);
+w.mt_control(9, 10, 0);
+w.mt_drum(9, panned, 100);
+pn = renderPan(4);
+check(pn.flags === 8 && pn.r.every(v => v === 0), 'CC10 0 moves a panned drum all the way left');
 
 console.log(`${checks - failed}/${checks} checks passed`);
 process.exit(failed ? 1 : 0);

@@ -362,7 +362,6 @@ discard:
 #include "fm1.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
-#include "sf2fx.h"
 #include "sf2_upload.h"
 #include <stddef.h>
 
@@ -410,16 +409,13 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         case 38:
         case 100:
         case 101:
-        case 7:                                                /* volume and expression: per channel */
+        case 7:                                                /* volume, expression and pan: per channel */
         case 11:
+        case 10:
         case 120:                                              /* all sound off, reset all controllers, all notes off: the channel's */
         case 121:
         case 123:
             sf2player_channel_control(channel, message[1], value);
-            break;
-        case 10:                                               /* pan: one for all, so only while nothing is multitimbral */
-            if (channel != 9U && !fm1b_multitimbral())
-                sf2fx_set_pan(value);
             break;
         default:  break;
         }

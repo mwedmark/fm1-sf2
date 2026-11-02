@@ -17,5 +17,5 @@ EXPORT void fx_block_sends(unsigned reverb_send, unsigned chorus_send)   /* the 
 {
     for (unsigned i = 0; i < 256; ++i)
         out[i] = 0;
-    sf2fx_mix_sends(dry, dry, reverb_send, dry, chorus_send, out, 128);
+    sf2fx_mix_sends(dry, 0, 0, dry, reverb_send, dry, chorus_send, out, 128);
 }

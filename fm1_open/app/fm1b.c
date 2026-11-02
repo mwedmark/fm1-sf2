@@ -23,6 +23,11 @@ struct voice {
     uint8_t held;                             /* released while the channel's sustain pedal was down: releases with the pedal */
     uint8_t cut;                              /* fading out fast to make room (the voice limit): no longer counts as sounding */
     uint16_t lfo;                             /* vibrato phase, moved on only while the channel's modulation wheel is up */
+    /* Pan: the zone's own (SF2 generator 17, -64..64) plus the channel's CC 10. A panned voice fades its far side by side_gain
+     * (Q8): it is added to the side buffer (1: left, 2: right) that the mix takes away from that channel. 0: centred. */
+    int8_t zone_pan;
+    uint8_t side;
+    uint16_t side_gain;
     /* SEA zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
@@ -62,6 +67,14 @@ static uint8_t channel_mod[CHANNEL_SLOTS], channel_pedal[CHANNEL_SLOTS], channel
 static uint16_t channel_rpn[CHANNEL_SLOTS];
 /* Reverb and chorus sends (MIDI CC 91, CC 93; the panel's channel page), 0..127. The effects' master levels scale them. */
 static uint8_t channel_reverb[CHANNEL_SLOTS], channel_chorus[CHANNEL_SLOTS];
+/* Pan (MIDI CC 10; the panel's channel page), 0..127, 64 the centre: it moves the zones' own pan, as an SF2 player does. */
+static uint8_t channel_pan[CHANNEL_SLOTS];
+/* The balance law sf2fx uses for the whole mix: the near side keeps its level, the far one is sqrt(1 - |p| / 64), so a
+ * centred voice sounds as it did before pan existed. This is 256 minus that, in Q8, for |p| = 0..64. */
+static const uint16_t pan_far_cut[65] = {
+    0, 2, 4, 6, 8, 10, 12, 14, 17, 19, 21, 23, 25, 27, 30, 32, 34, 37, 39, 41, 44, 46, 49, 51, 54, 56, 59, 61, 64, 67, 69, 72,
+    75, 78, 81, 84, 87, 90, 93, 96, 99, 103, 106, 109, 113, 117, 120, 124, 128, 132, 136, 141, 145, 150, 155, 160, 165, 171, 178,
+    184, 192, 201, 211, 224, 256};
 enum { RPN_NULL = 0x3fff, VIBRATO_CENTS = 50, LFO_STEP = (int)((360448U * (unsigned)ENV_STEP + FM1B_RATE / 2U) / FM1B_RATE) /* 5.5 Hz: 65536 * 5.5 per second, in steps of ENV_STEP frames */ };
 
 static FM1_DSP_CODE void channel_rescale(unsigned channel)
@@ -70,6 +83,14 @@ static FM1_DSP_CODE void channel_rescale(unsigned channel)
     uint32_t y = (x * x) >> 14;                                                     /* (x / 16129)^2 in Q14, a little low: 15877 at the top */
     y += y >> 5;
     channel_scale[channel] = (uint16_t)(x == 127U * 127U ? SCALE_ONE : y > SCALE_ONE ? SCALE_ONE : y);
+}
+/* The voice's side and how much of it to take away, from its zone's pan and its channel's (127 is all the way right). */
+static FM1_DSP_CODE void voice_pan(struct voice *v)
+{
+    int32_t p = v->zone_pan + (channel_pan[v->channel] == 127U ? 64 : (int32_t)channel_pan[v->channel] - 64);
+    p = p < -64 ? -64 : p > 64 ? 64 : p;
+    v->side = p < 0 ? 2U : p > 0 ? 1U : 0U;                     /* panned left: the right side fades, and the other way */
+    v->side_gain = pan_far_cut[p < 0 ? -p : p];
 }
 static void channels_reset(void)
 {
@@ -83,6 +104,7 @@ static void channels_reset(void)
         channel_rpn[c] = RPN_NULL;
         channel_reverb[c] = FM1B_REVERB_SEND;
         channel_chorus[c] = FM1B_CHORUS_SEND;
+        channel_pan[c] = 64;
     }
     bank.last_program_channel = bank.last_program = -1;
 }
@@ -262,6 +284,12 @@ static FM1_DSP_CODE void channel_retune(unsigned channel)
         if (voices[i].active && voices[i].channel == channel)
             retune(&voices[i]);
 }
+static FM1_DSP_CODE void channel_repan(unsigned channel)
+{
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
+        if (voices[i].active && voices[i].channel == channel)
+            voice_pan(&voices[i]);
+}
 static FM1_DSP_CODE void bend_update(unsigned channel)
 {
     int32_t range = channel_bend_semis[channel] * 100 + channel_bend_extra[channel];
@@ -384,6 +412,10 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     v->loop_end = end;
     v->base_step = v->step = (uint32_t)(((uint64_t)pitch * bank.rate + ENGINE_RATE / 2U) / ENGINE_RATE);
     v->lfo = 16384;                                           /* the triangle's centre: vibrato starts at the note's own pitch */
+    int32_t zone_pan = (int16_t)rd16(zone + 22);              /* SF2 units, -500..500 (0.1 %); 0 in banks made before pan */
+    zone_pan = zone_pan < -500 ? -500 : zone_pan > 500 ? 500 : zone_pan;
+    v->zone_pan = (int8_t)((zone_pan * 64 + (zone_pan < 0 ? -250 : 250)) / 500);
+    voice_pan(v);
     if (channel_cents[channel] || channel_mod[channel])
         retune(v);
     v->gain = (int32_t)((int64_t)velocity * level * 1073741824LL / (127 * 127 * 4));
@@ -481,6 +513,7 @@ void fm1b_channel_info(unsigned channel, struct fm1b_channel *info)
     info->pedal = channel_pedal[channel];
     info->reverb = channel_reverb[channel];
     info->chorus = channel_chorus[channel];
+    info->pan = channel_pan[channel];
     info->notes = channel_notes[channel];
     for (unsigned i = 0; i < FM1B_VOICES; ++i)
         info->voices += voices[i].active && voices[i].channel == channel;
@@ -554,9 +587,15 @@ static FM1_DSP_CODE void control_apply(unsigned channel, unsigned controller, un
         channel_expression[channel] = (uint8_t)value;
         channel_rescale(channel);
         break;
-    case 121:                                                 /* reset all controllers: levels, bend, wheel, pedal, RPN */
+    case 10:
+        channel_pan[channel] = (uint8_t)value;
+        channel_repan(channel);
+        break;
+    case 121:                                                 /* reset all controllers: levels, pan, bend, wheel, pedal, RPN */
         channel_volume[channel] = channel_expression[channel] = 127;
         channel_rescale(channel);
+        channel_pan[channel] = 64;
+        channel_repan(channel);
         channel_bend[channel] = 0;
         channel_mod[channel] = 0;
         channel_pedal[channel] = 0;
@@ -710,11 +749,12 @@ static FM1_DSP_CODE void queue_drain(void)
     }
 }
 /* One voice for one block. With bus (a constant at each call, so the plain path has no trace of it) the voice is also
- * added to the reverb and chorus buses, times its channel's sends rg and cg (Q7, 128 = all of it). format is a constant
+ * added to the reverb and chorus buses, times its channel's sends rg and cg (Q7, 128 = all of it), and a panned voice to its
+ * side buffer times sg (Q8, voice_pan): the mix takes that from the far channel, so one product pans it. format is a constant
  * too: each format gets its own loop. The loop runs in stretches up to the next envelope step, with the voice's state in
  * registers; the sample between two frames is interpolated in Q4 and scaled by the level with one 32 x 32 multiply. */
-static inline __attribute__((always_inline)) void voice_run(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho,
-                                                           unsigned frames, int32_t rg, int32_t cg, const int bus, const unsigned format)
+static inline __attribute__((always_inline)) void voice_run(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
+                                                           unsigned frames, int32_t rg, int32_t cg, int32_t sg, const int bus, const unsigned format)
 {
     const uint8_t *pcm = bank.image + v->data;
     const uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
@@ -751,6 +791,7 @@ static inline __attribute__((always_inline)) void voice_run(struct voice *v, int
             if (bus) {
                 if (rg) rev[i] += (y * rg) >> 7;
                 if (cg) cho[i] += (y * cg) >> 7;
+                if (sg) side[i] += (y * sg) >> 8;             /* |y| < 2^23, sg <= 256: within 32 bits */
             }
             fraction += step;
             position += fraction >> 16;
@@ -767,22 +808,22 @@ done:
 static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, int32_t *out, unsigned frames)
 {
     switch (bank.format) {
-    case FORMAT_SEA: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_SEA); break;
-    case FORMAT_PCM16: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM16); break;
-    case FORMAT_PCM12: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM12); break;
-    case FORMAT_BFP8: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_BFP8); break;
-    default: voice_run(v, out, NULL, NULL, frames, 0, 0, 0, FORMAT_PCM8); break;
+    case FORMAT_SEA: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_SEA); break;
+    case FORMAT_PCM16: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM16); break;
+    case FORMAT_PCM12: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM12); break;
+    case FORMAT_BFP8: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_BFP8); break;
+    default: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM8); break;
     }
 }
-static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho,
-                                                                   unsigned frames, int32_t rg, int32_t cg)
+static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
+                                                                   unsigned frames, int32_t rg, int32_t cg, int32_t sg)
 {
     switch (bank.format) {
-    case FORMAT_SEA: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_SEA); break;
-    case FORMAT_PCM16: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM16); break;
-    case FORMAT_PCM12: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM12); break;
-    case FORMAT_BFP8: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_BFP8); break;
-    default: voice_run(v, out, rev, cho, frames, rg, cg, 1, FORMAT_PCM8); break;
+    case FORMAT_SEA: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_SEA); break;
+    case FORMAT_PCM16: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM16); break;
+    case FORMAT_PCM12: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM12); break;
+    case FORMAT_BFP8: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_BFP8); break;
+    default: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM8); break;
     }
 }
 FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
@@ -795,7 +836,8 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
             voice_play(&voices[n], out, frames);
 }
 static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};                  /* the sends of the latest block that had voices: the tails keep them */
-FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, unsigned frames, uint8_t sends[2])
+FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
+                                        uint8_t sends[2])
 {
     queue_drain();
     sends[0] = last_sends[0];
@@ -813,9 +855,12 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
         if (r0 < 0) { r0 = r; c0 = c; }
         if (r != r0) buses |= 1U;
         if (c != c0) buses |= 2U;
+        if (v->side) buses |= 2U << v->side;                  /* 4: something to take from the left, 8: from the right */
     }
     if (buses & 1U) memset(rev, 0, frames * sizeof *rev);
     if (buses & 2U) memset(cho, 0, frames * sizeof *cho);
+    if (buses & 4U) memset(sides[0], 0, frames * sizeof *sides[0]);
+    if (buses & 8U) memset(sides[1], 0, frames * sizeof *sides[1]);
     if (r0 >= 0) {
         last_sends[0] = sends[0] = (uint8_t)r0;
         last_sends[1] = sends[1] = (uint8_t)c0;
@@ -828,7 +873,8 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
             voice_play(v, out, frames);
         else {
             int32_t r = channel_reverb[v->channel], c = channel_chorus[v->channel];
-            voice_play_buses(v, out, rev, cho, frames, buses & 1U ? r + (r >> 6) : 0, buses & 2U ? c + (c >> 6) : 0);
+            voice_play_buses(v, out, rev, cho, v->side ? sides[v->side - 1U] : NULL, frames, buses & 1U ? r + (r >> 6) : 0,
+                             buses & 2U ? c + (c >> 6) : 0, v->side ? v->side_gain : 0);
         }
     }
     return buses;

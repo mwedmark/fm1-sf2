@@ -212,6 +212,18 @@ static char *put_bend(char *d, int32_t cents)
     for (char *s = tmp; s < t; ++s) *d++ = *s;
     return d;
 }
+/* A pan 0..127 in 3 characters: L64..L1, " C ", R1..R64 (127 is all the way right) */
+static char *put_pan(char *d, unsigned pan)
+{
+    int p = pan == 127U ? 64 : (int)pan - 64;
+    if (!p) return put_text(d, " C ");
+    char tmp[3], *t = tmp;
+    *t++ = p < 0 ? 'L' : 'R';
+    t = put_number(t, p < 0 ? -p : p, 0);
+    if (t - tmp < 3) *t++ = ' ';
+    for (char *x = tmp; x < t; ++x) *d++ = *x;
+    return d;
+}
 /* 0..127 right aligned in 3 characters; blank_zero leaves 0 blank */
 static char *put_value3(char *d, unsigned v, unsigned blank_zero)
 {
@@ -227,7 +239,7 @@ static char *put_padded(char *d, const char *s, unsigned width)
     for (; n < width; ++n) *d++ = ' ';
     return d;
 }
-/* CH PRG NAME LVL BEND MOD REV CHO P: green while it plays, white with a program of its own, grey while it follows the panel's,
+/* CH PRG NAME LVL PAN BEND MOD REV CHO P: green while it plays, white with a program of its own, grey while it follows the panel's,
  * orange for the kit on channel 10. */
 static void channels_update(const struct fm1b_status *st)
 {
@@ -239,7 +251,7 @@ static void channels_update(const struct fm1b_status *st)
     d = put_number(d, st->voice_limit, 0);              /* the CPU guard's limit: FM1B_VOICES unless it ran short */
     *d = 0;
     line_show(0, 8, line, 2, WHITE);
-    line_show(1, 28, "CH PRG NAME       LVL BEND MOD REV CHO P", 1, GREY);
+    line_show(1, 28, "CH PRG NAME    LVL PAN BEND MOD REV CHO P", 1, GREY);
     for (unsigned c = 0; c < FM1B_CHANNELS; ++c) {
         struct fm1b_channel info;
         fm1b_channel_info(c, &info);
@@ -252,22 +264,24 @@ static void channels_update(const struct fm1b_status *st)
         uint16_t color;
         if (c == 9U) {                                        /* transfer.c: channel 10 always plays the kit */
             d = put_text(d, "KIT ");
-            d = put_padded(d, st->drums ? st->drum_name : "-", 10);
+            d = put_padded(d, st->drums ? st->drum_name : "-", 7);
             color = ORANGE;
         } else if (info.own) {
             if (info.kit) d = put_text(d, "KIT");
             else d = put_number(d, info.program + 1, 3);
             *d++ = ' ';
-            d = put_padded(d, info.name, 10);
+            d = put_padded(d, info.name, 7);
             color = WHITE;
         } else {
             d = put_number(d, st->program + 1, 3);
             *d++ = ' ';
-            d = put_padded(d, st->name, 10);
+            d = put_padded(d, st->name, 7);
             color = GREY;
         }
         *d++ = ' ';
         d = put_value3(d, (unsigned)info.volume * info.expression / 127U, 0);
+        *d++ = ' ';
+        d = put_pan(d, info.pan);
         *d++ = ' ';
         d = put_bend(d, info.bend_cents);
         *d++ = ' ';
@@ -285,7 +299,7 @@ static void channels_update(const struct fm1b_status *st)
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
     }
-    line_show(18, 228, "HOME BACK K1 CH SEL PRG K3 REV K4 CHO", 1, GREY);
+    line_show(18, 228, "HOME K1 CH SEL PRG MST VOL K2 PAN K3/4 FX", 1, GREY);
 }
 
 static void screen_update(void)
@@ -468,15 +482,61 @@ void groove_screen_init(void)
     memset(shown_back, 0, sizeof shown_back);
     bar_drawn = 1000;
 }
+/* The MASTER knob: the output level on the program page, the selected channel's volume (CC 7) on the channel page. It is a
+ * potentiometer, so the value it sets moves with it instead of jumping to where it points: turned up, the value covers what
+ * is left above it in what is left of the knob's travel, and the same downwards. Both ends of the knob are both ends of the
+ * value, and while the channel page is never opened the output level is where the knob points, as before. The value is
+ * worked out from where the turn began (anchor), so rounding does not add up over the many small steps of one turn. */
+static unsigned knob_at = 0xffffU, master_at;            /* the knob's last position, the output level's as a knob position */
+static unsigned anchor_at, anchor_value, anchor_target = 0xffffU;
+static int anchor_dir;
+static unsigned knob_follow(unsigned value, unsigned top, unsigned from, unsigned to)
+{
+    if (to > from)
+        return value + ((top - value) * (to - from) + (1023U - from) / 2U) / (1023U - from);
+    return value - (value * (from - to) + from / 2U) / from;
+}
+static void master_knob(unsigned adc)
+{
+    if (adc > 1023U)
+        return;
+    if (knob_at > 1023U) {                                    /* the first reading */
+        knob_at = master_at = adc;
+        (void)groove_master_update(adc);
+        return;
+    }
+    unsigned distance = adc > knob_at ? adc - knob_at : knob_at - adc;
+    if (!distance || (distance < 4U && adc > 4U && adc < 1019U))   /* the ADC's noise, except at the ends */
+        return;
+    struct fm1b_channel info;
+    if (page)
+        fm1b_channel_info(cursor, &info);
+    unsigned current = page ? info.volume : master_at, target = page ? cursor : 255U;
+    int dir = adc > knob_at ? 1 : -1;
+    if (target != anchor_target || dir != anchor_dir) {      /* a new turn: from here */
+        anchor_target = target;
+        anchor_dir = dir;
+        anchor_at = knob_at;
+        anchor_value = current;
+    }
+    unsigned value = knob_follow(anchor_value, page ? 127U : 1023U, anchor_at, adc);
+    knob_at = adc;
+    if (!page) {
+        master_at = value;
+        (void)groove_master_update(value);
+    } else if (value != current)
+        sf2player_channel_control(cursor, 7U, value);
+}
 void groove_screen_control(void)
 {
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
     struct fm1_controls controls;
     fm1_controls_read(&controls);
-    (void)groove_master_update(controls.knob);               /* the volume knob; without it the output stays muted */
+    master_knob(controls.knob);                               /* the volume knob; without it the output stays muted */
     /* The knobs: SELECT (encoder 0) programs, KNOB1 (2) the channel page's cursor, KNOB2 (3) pan, KNOB3 (4) reverb and
-     * KNOB4 (5) chorus. On the program page SELECT picks the panel's program and KNOB3/KNOB4 set the effects' master levels;
-     * on the channel page SELECT picks the selected channel's program and KNOB3/KNOB4 set that channel's sends. */
+     * KNOB4 (5) chorus. On the program page SELECT picks the panel's program, KNOB2 pans the whole mix and KNOB3/KNOB4 set
+     * the effects' master levels; on the channel page SELECT picks the selected channel's program, KNOB2 sets its pan (CC 10)
+     * and KNOB3/KNOB4 its sends. MASTER: master_knob. */
     if (controls.encoders[0] && !page) {
         int step = controls.encoders[0] > 0 ? 1 : -1;
         for (int clicks = controls.encoders[0] * step; clicks > 0; --clicks)
@@ -505,9 +565,16 @@ void groove_screen_control(void)
         else
             sf2fx_set(sf2fx_reverb(), (unsigned)level);
     }
-    if (controls.encoders[3] && !page) {                      /* KNOB2: pan, for everything */
-        int pan = (int)sf2fx_pan() + controls.encoders[3] * 4;
-        sf2fx_set_pan((unsigned)(pan < 0 ? 0 : pan > 127 ? 127 : pan));
+    if (controls.encoders[3]) {                               /* KNOB2: pan, for everything or for the selected channel */
+        struct fm1b_channel info;
+        if (page)
+            fm1b_channel_info(cursor, &info);
+        int pan = (page ? (int)info.pan : (int)sf2fx_pan()) + controls.encoders[3] * 4;
+        pan = pan < 0 ? 0 : pan > 127 ? 127 : pan;
+        if (page)
+            sf2player_channel_control(cursor, 10U, (unsigned)pan);
+        else
+            sf2fx_set_pan((unsigned)pan);
     }
     uint32_t pressed = controls.buttons & ~previous_buttons;
     previous_buttons = controls.buttons;

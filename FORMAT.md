@@ -90,15 +90,14 @@ lowest-numbered zone wins, so the CPU never has to choose.
 | 17 | u8 | flags, bit 0 = loop (otherwise the sample plays once) |
 | 18 | u16 | envelope number (index into the envelope table) |
 | 20 | i16 | fine tune in cents (-50..50): the step of every note in the zone is multiplied by 2^(cents/1200) |
-| 22 | u16 | reserved, 0 |
-| 18 | u16 | reserved, 0 |
+| 22 | i16 | pan in 0.1 % (SF2 generator 17): -500 all left, 0 centre, 500 all right. Banks made before pan have 0 here |
 
 Zones that use the same sample point at the same data.
 
 ## Lookup in C
 
 ```c
-typedef struct { uint32_t off, len, loop_start, loop_end; uint8_t root, flags; uint16_t env; int16_t fine; uint16_t rsv; } fm1_zone;
+typedef struct { uint32_t off, len, loop_start, loop_end; uint8_t root, flags; uint16_t env; int16_t fine, pan; } fm1_zone;
 
 const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, uint32_t *step) {
     const uint32_t *h = (const uint32_t *)f;
