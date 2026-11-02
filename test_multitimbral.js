@@ -343,5 +343,50 @@ w.mt_follow(0);
 w.mt_note(0, NOTE, 100);
 check(same(render(LONG), panelPiano) && w.mt_multitimbral() === 0, 'a channel told to follow plays the panel preset again, bit exact');
 
+// 16. Effect sends per channel (CC 91, CC 93). While all sounding channels send alike there are no buses, only the sends.
+function renderSends(blocks) {
+  const o = new Int32Array(blocks * BLOCK), r = new Int32Array(blocks * BLOCK), c = new Int32Array(blocks * BLOCK);
+  let flags = 0;
+  for (let b = 0; b < blocks; ++b) {
+    const f = w.mt_block_sends();
+    flags |= f;
+    o.set(new Int32Array(w.memory.buffer, w.mt_out(), BLOCK), b * BLOCK);
+    if (f & 1) r.set(new Int32Array(w.memory.buffer, w.mt_rev(), BLOCK), b * BLOCK);
+    if (f & 2) c.set(new Int32Array(w.memory.buffer, w.mt_cho(), BLOCK), b * BLOCK);
+  }
+  return { o, r, c, flags };
+}
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+let rs = renderSends(BEND_BLOCKS);
+check(rs.flags === 0 && w.mt_send(0) === 30 && w.mt_send(1) === 20, 'default sends 30 and 20, no buses');
+check(same(rs.o, plain), 'rendering with sends leaves the dry mix bit exact');
+check(w.mt_info(0, 9) === 30 && w.mt_info(0, 10) === 20, 'the channel reports its default sends');
+fresh(SUSTAIN);
+w.mt_control(0, 91, 90); w.mt_control(1, 91, 90); w.mt_control(0, 93, 0); w.mt_control(1, 93, 0);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+rs = renderSends(50);
+check(rs.flags === 0 && w.mt_send(0) === 90 && w.mt_send(1) === 0, 'two channels with the same sends still need no buses');
+fresh(SUSTAIN);
+w.mt_note(1, NOTE + 7, 100);
+const fifth = render(50);
+fresh(SUSTAIN);
+w.mt_control(0, 91, 127); w.mt_control(1, 91, 0);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+rs = renderSends(50);
+const c1 = plain.subarray(0, 50 * BLOCK);
+let worst = 0;
+for (let i = 0; i < rs.r.length; ++i) worst = Math.max(worst, Math.abs(rs.r[i] - c1[i]));
+check(rs.flags === 1 && worst <= 2, `send 127 and 0: the reverb bus is channel 1 alone (off by at most ${worst})`);
+check(same(rs.o, add(c1, fifth)), 'the dry mix is both channels, as without sends');
+fresh(SUSTAIN);
+w.mt_control(0, 93, 64);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+rs = renderSends(50);
+const want = add(c1.map(v => v * 65 / 128), fifth.map(v => v * 20 / 128));
+let err = 0, size = 0;
+for (let i = 0; i < want.length; ++i) { err += Math.abs(rs.c[i] - want[i]); size += Math.abs(want[i]); }
+check(rs.flags === 2 && err / size < 0.001, `the chorus bus is each channel times its send (relative error ${(err / size).toExponential(1)})`);
+
 console.log(`${checks - failed}/${checks} checks passed`);
 process.exit(failed ? 1 : 0);

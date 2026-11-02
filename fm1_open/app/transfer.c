@@ -402,6 +402,8 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         switch (message[1]) {
         case 0:   bank_msb[channel] = (uint8_t)value; break;
         case 32:  bank_lsb[channel] = (uint8_t)value; break;
+        case 91:                                               /* reverb and chorus sends: per channel (the knobs set the master levels) */
+        case 93:
         case 1:                                                /* modulation wheel, sustain pedal, bend range (RPN): per channel */
         case 64:
         case 6:
@@ -415,8 +417,6 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         case 123:
             sf2player_channel_control(channel, message[1], value);
             break;
-        case 91:  sf2fx_set(value, sf2fx_chorus()); break;     /* reverb send */
-        case 93:  sf2fx_set(sf2fx_reverb(), value); break;     /* chorus send */
         case 10:                                               /* pan: one for all, so only while nothing is multitimbral */
             if (channel != 9U && !fm1b_multitimbral())
                 sf2fx_set_pan(value);

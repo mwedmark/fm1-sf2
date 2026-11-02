@@ -49,6 +49,8 @@ static int16_t channel_bend[CHANNEL_SLOTS], channel_cents[CHANNEL_SLOTS];
 static uint8_t channel_bend_semis[CHANNEL_SLOTS], channel_bend_extra[CHANNEL_SLOTS];
 static uint8_t channel_mod[CHANNEL_SLOTS], channel_pedal[CHANNEL_SLOTS], channel_program[CHANNEL_SLOTS], channel_notes[CHANNEL_SLOTS];
 static uint16_t channel_rpn[CHANNEL_SLOTS];
+/* Reverb and chorus sends (MIDI CC 91, CC 93; the panel's channel page), 0..127. The effects' master levels scale them. */
+static uint8_t channel_reverb[CHANNEL_SLOTS], channel_chorus[CHANNEL_SLOTS];
 enum { RPN_NULL = 0x3fff, VIBRATO_CENTS = 50, LFO_STEP = 262 /* 5.5 Hz in steps of ENV_STEP frames */ };
 
 static FM1_DSP_CODE void channel_rescale(unsigned channel)
@@ -68,6 +70,8 @@ static void channels_reset(void)
         channel_bend_semis[c] = 2;
         channel_bend_extra[c] = channel_mod[c] = channel_pedal[c] = channel_program[c] = channel_notes[c] = 0;
         channel_rpn[c] = RPN_NULL;
+        channel_reverb[c] = FM1B_REVERB_SEND;
+        channel_chorus[c] = FM1B_CHORUS_SEND;
     }
     bank.last_program_channel = bank.last_program = -1;
 }
@@ -415,6 +419,8 @@ void fm1b_channel_info(unsigned channel, struct fm1b_channel *info)
     info->bend_cents = channel_cents[channel];
     info->mod = channel_mod[channel];
     info->pedal = channel_pedal[channel];
+    info->reverb = channel_reverb[channel];
+    info->chorus = channel_chorus[channel];
     info->notes = channel_notes[channel];
     for (unsigned i = 0; i < FM1B_VOICES; ++i)
         info->voices += voices[i].active && voices[i].channel == channel;
@@ -450,6 +456,12 @@ static FM1_DSP_CODE void control_apply(unsigned channel, unsigned controller, un
         channel_mod[channel] = (uint8_t)value;
         if (!value)
             channel_retune(channel);                          /* back to the note's own pitch (and the bend) */
+        break;
+    case 91:                                                  /* reverb send */
+        channel_reverb[channel] = (uint8_t)value;
+        break;
+    case 93:                                                  /* chorus send */
+        channel_chorus[channel] = (uint8_t)value;
         break;
     case 64:                                                  /* sustain pedal */
         channel_pedal[channel] = value >= 64U;
@@ -576,7 +588,7 @@ static FM1_DSP_CODE void env_step(struct voice *v)
     v->frames = ENV_STEP;
 }
 
-FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
+static FM1_DSP_CODE void queue_drain(void)
 {
     while (queue_tail != queue_head) {
         uint32_t at = queue_tail % QUEUE_SIZE;
@@ -593,42 +605,94 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
         __asm__ volatile("" ::: "memory");
         queue_tail = queue_tail + 1U;
     }
+}
+/* One voice for one block. With bus (a constant at each call, so the plain path has no trace of it) the voice is also
+ * added to the reverb and chorus buses, times its channel's sends rg and cg (Q7, 128 = all of it). */
+static inline __attribute__((always_inline)) void voice_run(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho,
+                                                           unsigned frames, int32_t rg, int32_t cg, const int bus)
+{
+    const uint8_t *pcm = bank.image + v->data;
+    uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
+    for (unsigned i = 0; i < frames; ++i) {
+        uint32_t position = v->position;
+        if (le && position >= le) {
+            position = ls + (position - le) % (le - ls);
+            v->position = position;
+        }
+        if (position >= length) {
+            v->active = 0;
+            break;
+        }
+        uint32_t next = position + 1;
+        if (le && next >= le)
+            next = ls;
+        if (!v->frames) {
+            env_step(v);
+            if (!v->active)
+                break;
+        }
+        --v->frames;
+        v->level += v->level_step;
+        int a = sample_at(v, pcm, position), b = next < length ? sample_at(v, pcm, next) : 0;
+        int64_t mixed = (int64_t)a * 65536 + (int64_t)(b - a) * v->fraction;
+        int32_t y = (int32_t)((mixed * v->level) >> 37);
+        out[i] += y;
+        if (bus) {
+            if (rg) rev[i] += (y * rg) >> 7;
+            if (cg) cho[i] += (y * cg) >> 7;
+        }
+        uint32_t phase = v->fraction + v->step;
+        v->position += phase >> 16;
+        v->fraction = phase & 65535U;
+        if (!v->active)
+            break;
+    }
+}
+FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
+{
+    queue_drain();
     if (!bank.image)
         return;
+    for (unsigned n = 0; n < FM1B_VOICES; ++n)
+        if (voices[n].active && voices[n].owner == owner)
+            voice_run(&voices[n], out, NULL, NULL, frames, 0, 0, 0);
+}
+static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};                  /* the sends of the latest block that had voices: the tails keep them */
+FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, unsigned frames, uint8_t sends[2])
+{
+    queue_drain();
+    sends[0] = last_sends[0];
+    sends[1] = last_sends[1];
+    if (!bank.image)
+        return 0;
+    /* While every sounding voice's channel has the same send, the bus is the dry mix times that send: no bus needed. */
+    int r0 = -1, c0 = -1;
+    unsigned buses = 0;
+    for (unsigned n = 0; n < FM1B_VOICES; ++n) {
+        const struct voice *v = &voices[n];
+        if (!v->active || v->owner != owner)
+            continue;
+        int r = channel_reverb[v->channel], c = channel_chorus[v->channel];
+        if (r0 < 0) { r0 = r; c0 = c; }
+        if (r != r0) buses |= 1U;
+        if (c != c0) buses |= 2U;
+    }
+    if (buses & 1U) memset(rev, 0, frames * sizeof *rev);
+    if (buses & 2U) memset(cho, 0, frames * sizeof *cho);
+    if (r0 >= 0) {
+        last_sends[0] = sends[0] = (uint8_t)r0;
+        last_sends[1] = sends[1] = (uint8_t)c0;
+    }
     for (unsigned n = 0; n < FM1B_VOICES; ++n) {
         struct voice *v = &voices[n];
         if (!v->active || v->owner != owner)
             continue;
-        const uint8_t *pcm = bank.image + v->data;
-        uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
-        for (unsigned i = 0; i < frames; ++i) {
-            uint32_t position = v->position;
-            if (le && position >= le) {
-                position = ls + (position - le) % (le - ls);
-                v->position = position;
-            }
-            if (position >= length) {
-                v->active = 0;
-                break;
-            }
-            uint32_t next = position + 1;
-            if (le && next >= le)
-                next = ls;
-            if (!v->frames) {
-                env_step(v);
-                if (!v->active)
-                    break;
-            }
-            --v->frames;
-            v->level += v->level_step;
-            int a = sample_at(v, pcm, position), b = next < length ? sample_at(v, pcm, next) : 0;
-            int64_t mixed = (int64_t)a * 65536 + (int64_t)(b - a) * v->fraction;
-            out[i] += (int32_t)((mixed * v->level) >> 37);
-            uint32_t phase = v->fraction + v->step;
-            v->position += phase >> 16;
-            v->fraction = phase & 65535U;
-            if (!v->active)
-                break;
+        if (!buses)
+            voice_run(v, out, NULL, NULL, frames, 0, 0, 0);
+        else {
+            int32_t r = channel_reverb[v->channel], c = channel_chorus[v->channel];
+            voice_run(v, out, rev, cho, frames, buses & 1U ? r + (r >> 6) : 0, buses & 2U ? c + (c >> 6) : 0, 1);
         }
     }
+    return buses;
 }

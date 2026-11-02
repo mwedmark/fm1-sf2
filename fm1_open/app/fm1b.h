@@ -48,7 +48,7 @@ unsigned fm1b_has_program(unsigned program_bank, unsigned program);
 /* Controllers for one channel: 1 (modulation wheel: vibrato, 5.5 Hz, up to +-50 cents), 6/38 with 101/100 (RPN 0: the
  * pitch bend range, 2 semitones until set, at most 24), 7 (volume), 11 (expression; both follow the General MIDI curve,
  * 127 and 127 is unity), 64 (sustain pedal), 120 (all sound off), 121 (reset the levels, bend, wheel and pedal) and 123
- * (all notes off). */
+ * (all notes off), 91 and 93 (the reverb and chorus sends, FM1B_REVERB_SEND and FM1B_CHORUS_SEND until set). */
 void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value);
 /* Pitch bend, 0..16383 with 8192 the centre, on the notes that sound and the notes to come. */
 void fm1b_channel_bend(unsigned channel, unsigned value);
@@ -56,7 +56,7 @@ void fm1b_channel_bend(unsigned channel, unsigned value);
  * percussion bank, name); otherwise it plays the panel's preset. notes counts its note-ons (it wraps), voices sound now. */
 struct fm1b_channel {
     char name[21];
-    uint8_t own, kit, program, volume, expression, mod, pedal, voices, notes;
+    uint8_t own, kit, program, volume, expression, mod, pedal, voices, notes, reverb, chorus;
     int16_t bend_cents;
 };
 void fm1b_channel_info(unsigned channel, struct fm1b_channel *info);
@@ -65,6 +65,12 @@ unsigned fm1b_multitimbral(void);
 /* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several
  * sampler instances, each rendered once per block, and a voice must advance exactly once per block. */
 void fm1b_render(const void *owner, int32_t *out, unsigned frames);
+/* The same, with the effect sends. While all the sounding voices' channels have the same sends, sends[] gets them and the
+ * buses are the dry mix times sends/127: nothing is written to rev or cho. Otherwise the result has bit 0 (reverb) and/or
+ * bit 1 (chorus) set and that bus holds each voice times its channel's send (it is cleared first; out is added to). */
+unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, unsigned frames, uint8_t sends[2]);
+#define FM1B_REVERB_SEND 30U
+#define FM1B_CHORUS_SEND 20U
 /* What the panel shows: the selected preset, the zone the latest note hit (its sample and envelope) and the state of
  * the voice that plays it. Read from the control task; the audio interrupt may change a field while it is copied. */
 struct fm1b_status {

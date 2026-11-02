@@ -35,7 +35,8 @@ Outputs, all under `fm1_open\build\dx7\`:
 - `sdk.elf` is the linked image. `firmware-report.json` has the sizes.
 
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
-and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel. If a change makes the build stop with
+and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
+408 412 with effect sends per channel. If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -46,9 +47,9 @@ Each one compiles the real C source to WebAssembly with the WASI SDK on the firs
 
 ```bash
 cd D:/git/fm1-sf2
-node test_multitimbral.js     # 56 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
-                              # RPN range, modulation wheel, sustain pedal, what the channel page reads. Uses dist/gm_32k.fm1b
-node test_fx.js               # reverb and chorus (sf2fx.c)
+node test_multitimbral.js     # 63 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
+                              # RPN range, modulation wheel, sustain pedal, what the channel page reads, the effect sends. Uses dist/gm_32k.fm1b
+node test_fx.js               # reverb and chorus (sf2fx.c), master levels times sends
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 ```
 
@@ -175,7 +176,8 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 
 - Flash the package with the M-VAVE workbench (<https://open.m-vave.com/fm1-workbench>). Back up first and keep the device powered.
 - Send a bank over USB MIDI from the converter page ("Skicka till FM-1"). The panel shows `UPLOAD n Rx` and then the program.
-- Panel: encoder 1 program, OCT-/OCT+ octave, SCL drums, KNOB1 reverb, KNOB2 chorus, KNOB3 pan. Pan (KNOB3 and CC10) was reported working after it was added.
+- Panel: SELECT program, OCT-/OCT+ octave, SCL drums, HOME channel page, KNOB2 pan, KNOB3 reverb, KNOB4 chorus (see section 7).
+  Pan (then on KNOB3, and CC10) was reported working after it was added.
 
 ## 6. Playing it from Windows
 
@@ -189,7 +191,7 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 
 | Message | Effect |
 |---|---|
-| Note on/off, channels 1-9, 11-16 | Plays the channel's preset. A channel that never had a program change plays the panel's preset (encoder 1) |
+| Note on/off, channels 1-9, 11-16 | Plays the channel's preset. A channel that never had a program change plays the panel's preset (SELECT) |
 | Note on/off, channel 10 | The percussion kit (the first kit in the bank), same as the SCL button |
 | Program change | Per channel. Bank select first (CC0/CC32): CC0=120, or CC0=1 and CC32=0, is the percussion bank, anything else melodic. A preset the bank lacks is ignored. Ignored on channel 10 |
 | CC7 volume, CC11 expression | Per channel, General MIDI curve, live on sounding notes. 127/127 is unity |
@@ -197,17 +199,32 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 | CC1 modulation wheel | Per channel: vibrato, 5.5 Hz, up to +-50 cents at 127 |
 | CC64 sustain pedal | Per channel: a note released while it is down sounds on until the pedal goes up |
 | CC120 / CC121 / CC123 | All sound off / reset volume, expression, bend, wheel and pedal / all notes off, **for that channel only** |
-| CC91 / CC93 | Reverb and chorus send, global |
+| CC91 / CC93 | Reverb and chorus send **per channel**, 30 and 20 until set. The panel's KNOB3/KNOB4 master levels (127 by default) scale them |
 | CC10 pan | **Global** pan. Ignored as soon as any channel has its own program (otherwise channels would overwrite each other) |
 
 Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received. **HOME** switches to the channel page:
 one row per MIDI channel with its program and name (grey: it follows the panel's program; white: a program of its own; orange: the kit on
 channel 10; green: it plays now), level (volume x expression), bend in semitones, modulation wheel and `P` while the pedal is down. HOME again goes back.
-On the channel page **KNOB1** moves the cursor (the highlighted row) and **KNOB2** steps that channel through the programs the bank has,
-the same as a program change on it; turned below the first program the channel follows the panel again. Channel 10 stays the kit.
-The panel's keys then play the selected channel. Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on KNOB2 for channel 2, then
-a MIDI note on it) and `knobkey.script` (the same, then a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz).
-The emulator loses clicks when many come in one script event (`e3:73`), so the scripts send one click every 30 ms.
+The knobs are the same on both pages, only what they act on changes:
+
+| Knob | Program page (the start) | Channel page (HOME) |
+|---|---|---|
+| SELECT | The panel's program | The selected channel's program; below the first, the channel follows the panel again (channel 10 stays the kit) |
+| KNOB1 | - | Moves the cursor (the highlighted row) |
+| KNOB2 | Pan, global | - |
+| KNOB3 | Master reverb, 0..127 | The selected channel's reverb send (CC91) |
+| KNOB4 | Master chorus, 0..127 | The selected channel's chorus send (CC93) |
+
+What a channel gets of an effect is master x send. The defaults (master 127, sends 30 and 20) sound bit for bit as the single global
+level of 30 and 20 did before (`test_fx.js` checks it). On the channel page the panel's keys play the selected channel.
+
+Cost of the sends: while all sounding channels have the same sends the effects are fed from the dry mix as before; only when they differ
+does each voice also go to a reverb and a chorus bus. In fm1-emu at 240 MHz, 8 flute voices on two channels: same sends
+(`test_emu/load8_same.script`) 53-55 %, different sends (`load8_sends.script`) 55-57 %.
+
+Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on SELECT for channel 2, then a MIDI note on it) and `knobkey.script` (the same, then
+a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz). The emulator loses clicks when many come in one
+script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
 Limits: 8 voices in total on the device (oldest is stolen first), no per-channel pan.
 
