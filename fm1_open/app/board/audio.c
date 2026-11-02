@@ -73,6 +73,10 @@ FM1_AUDIO_CODE __attribute__((interrupt(""))) void fm1_audio_irq(void)
     }
     used = elapsed(start, FM1_AUDIO_TIMER_COUNT);
     if (used > statistics.peak_ticks) statistics.peak_ticks = used;
+#if FM1B_IN_FIRMWARE
+    if (fm1b_ready())
+        sf2out_load(used, block_ticks);                   /* the CPU guard: fewer voices when the interrupt runs short */
+#endif
     ++statistics.blocks;
 }
 void fm1_audio_suspend(void)

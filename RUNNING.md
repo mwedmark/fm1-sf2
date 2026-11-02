@@ -37,7 +37,7 @@ Outputs, all under `fm1_open\build\dx7\`:
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
 and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel,
 408 412 with effect sends per channel, 408 668 with 12-bit samples, 413 404 with the faster voice loop and the engine's own
-SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 32 kHz (6 KB of it the resampling filter). If a change makes the build stop with
+SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 32 kHz (6 KB of it the resampling filter), 420 604 with 24 voices and the CPU guard. If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -230,7 +230,8 @@ Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on SELECT for channel 2,
 a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz). The emulator loses clicks when many come in one
 script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
-Limits: 16 voices in total on the device (oldest is stolen first; 8 until 2026-11-02), no per-channel pan.
+Limits: 24 voices in total on the device (oldest is stolen first; 8, then 16, until 2026-11-02), fewer while the CPU guard holds
+the limit down (the panel then shows `VOICES n/limit CPU`), no per-channel pan.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
@@ -304,6 +305,14 @@ More voices at 32 kHz (test builds with `FM1B_VOICES` 24 and 32, both pass the S
 | 16 | 44-48 % | 45-56 % | up to 56 % |
 | 24 | 59-62 % | 57-61 % | up to 76 % |
 | 32 | 70-74 % | 74-78 % | up to 88 % |
+
+**24 voices and the CPU guard.** `FM1B_VOICES` is 24. After each block the audio interrupt passes its own time to `sf2out_load()`
+(`sf2out.c`): over 80 % of the block the voice limit (`fm1b_voice_limit()`) drops to one under the voices sounding (two over 95 %),
+and the oldest fade out in about 5 ms; it then waits 8 blocks, and never goes under 4. After 0.25 s under 60 % the limit rises by
+one, up to 24. `test_rate.js` checks the limit and the guard (31 checks). In fm1-emu with `load24_all.script`: 240 MHz 62-63 %, the
+guard never acts; at 160 and 120 MHz it cuts voices and the load settles at 57-61 % and 40-45 % (the RMS falls with the voices).
+fm1-emu's load and the firmware's timer may not scale alike with `&mhz=`, so the thresholds are only checked on WebAssembly; the
+first block of a sudden overload is not caught (the guard reacts after it).
 
 What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
 

@@ -217,9 +217,9 @@ check(same(render(LONG), kit), 'a program change on a drum channel does not chan
 // 10. Many voices at once: more notes than voices must steal, not crash.
 fresh(0);
 w.mt_channel_program(1, 0, program);
-for (let n = 0; n < 24; ++n) w.mt_note(n % 2, 40 + n, 100);
+for (let n = 0; n < 32; ++n) w.mt_note(n % 2, 40 + n, 100);   // more than FM1B_VOICES (24)
 const chord = render(100);
-check(sumAbs(chord) > 0 && w.mt_voices() <= 16, 'a dense chord on two channels sounds and never uses more voices than there are');
+check(sumAbs(chord) > 0 && w.mt_voices() <= w.mt_voice_max(), 'a dense chord on two channels sounds and never uses more voices than there are');
 
 // 11. Pitch bend. The period by autocorrelation (parabolic peak), for comparing pitches across notes and zones.
 function period(a, from = 20000, n = 4096) {

@@ -21,6 +21,7 @@ struct voice {
     uint16_t decay, release, frames;          /* Q16 factors per step; frames left in this step */
     uint8_t note, active, phase, fixed, drum, channel;
     uint8_t held;                             /* released while the channel's sustain pedal was down: releases with the pedal */
+    uint8_t cut;                              /* fading out fast to make room (the voice limit): no longer counts as sounding */
     uint16_t lfo;                             /* vibrato phase, moved on only while the channel's modulation wheel is up */
     /* SEA zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
@@ -39,6 +40,10 @@ static struct {
     const uint8_t *last_zone_record, *last_env;
 } bank;
 static struct voice voices[FM1B_VOICES];
+/* The voices that may sound at once (fm1b_voice_limit): FM1B_VOICES unless the audio interrupt runs short of time. Over it, the
+ * oldest voices fade out in about 5 ms (CUT_RELEASE per envelope step, from full level to -96 dB in 7 steps). */
+static unsigned voice_limit = FM1B_VOICES, voices_cut;
+enum { CUT_RELEASE = 13500 };
 enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA };
 
 /* One state per MIDI channel plus the panel's: the preset a note plays (-1: bank.preset), and the channel's volume and
@@ -185,6 +190,8 @@ void fm1b_status(struct fm1b_status *status)
         }
     for (unsigned i = 0; i < FM1B_VOICES; ++i)
         status->voices += voices[i].active;
+    status->voice_limit = (uint8_t)voice_limit;
+    status->voices_cut = voices_cut;
     if (bank.last_note < 0 || !bank.last_zone_record)
         return;
     const uint8_t *zone = bank.last_zone_record, *env = bank.last_env;
@@ -270,6 +277,39 @@ static FM1_DSP_CODE void pedal_release(unsigned channel)
         }
 }
 
+static FM1_DSP_CODE unsigned voices_sounding(void)
+{
+    unsigned n = 0;
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
+        n += voices[i].active && !voices[i].cut;
+    return n;
+}
+/* Fade out the oldest sounding voices until at most room sound. */
+static FM1_DSP_CODE void voices_fit(unsigned room)
+{
+    for (unsigned n = voices_sounding(); n > room; --n) {
+        int oldest = -1;
+        for (unsigned i = 0; i < FM1B_VOICES; ++i)
+            if (voices[i].active && !voices[i].cut &&
+                (oldest < 0 || (uint32_t)(bank.age - voices[i].age) > (uint32_t)(bank.age - voices[oldest].age)))
+                oldest = (int)i;
+        if (oldest < 0)
+            return;
+        struct voice *v = &voices[oldest];
+        v->cut = 1;
+        v->held = 0;
+        v->phase = RELEASE;
+        v->release = CUT_RELEASE;
+        ++voices_cut;
+    }
+}
+FM1_DSP_CODE void fm1b_voice_limit(unsigned limit)
+{
+    voice_limit = limit < 1U ? 1U : limit > FM1B_VOICES ? FM1B_VOICES : limit;
+    voices_fit(voice_limit);
+}
+FM1_DSP_CODE unsigned fm1b_voices_sounding(void) { return voices_sounding(); }
+
 static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigned note, unsigned velocity, unsigned level, unsigned drum)
 {
     if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127 || (drum && bank.drum_preset < 0))
@@ -317,6 +357,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         pitch = (uint32_t)(((uint64_t)pitch * (uint32_t)(65536 + t + ((t * t) >> 17))) >> 16);
     }
 
+    voices_fit(voice_limit - 1U);                             /* room for this one under the limit */
     unsigned slot = FM1B_VOICES, oldest = 0;
     for (unsigned i = 0; i < FM1B_VOICES; ++i) {
         if (!voices[i].active) { slot = i; break; }

@@ -68,3 +68,31 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
     }
 }
 #endif
+
+enum { GUARD_HIGH = 80, GUARD_LOW = 60, GUARD_HOLD = 8 /* blocks after a cut: the faded voices' load leaves over 5 ms */,
+       GUARD_CALM = 86 /* blocks under GUARD_LOW before a voice comes back: 0.25 s */, GUARD_FLOOR = 4 };
+static unsigned guard_limit = FM1B_VOICES, guard_hold, guard_calm;
+FM1_DSP_CODE void sf2out_load(uint32_t used, uint32_t block)
+{
+    uint64_t percent = block ? (uint64_t)used * 100U / block : 0;
+    if (guard_hold) {
+        --guard_hold;
+        return;
+    }
+    if (percent > GUARD_HIGH) {
+        unsigned sounding = fm1b_voices_sounding();
+        unsigned limit = (sounding < guard_limit ? sounding : guard_limit) - (percent > 95U ? 2U : 1U);   /* far over: two at once */
+        if (sounding > 2U && limit >= GUARD_FLOOR && limit < guard_limit) {
+            guard_limit = limit;
+            fm1b_voice_limit(limit);
+            guard_hold = GUARD_HOLD;
+        }
+        guard_calm = 0;
+    } else if (percent < GUARD_LOW && guard_limit < FM1B_VOICES) {
+        if (++guard_calm >= GUARD_CALM) {
+            fm1b_voice_limit(++guard_limit);
+            guard_calm = 0;
+        }
+    } else
+        guard_calm = 0;
+}

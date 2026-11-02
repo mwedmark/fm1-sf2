@@ -69,3 +69,4 @@ EXPORT unsigned mt_block_sends(void)                     /* one block as board/a
         out[i] = 0;
     return fm1b_render_sends(0, out, rev, cho, BLOCK, sends);
 }
+EXPORT unsigned mt_voice_max(void) { return FM1B_VOICES; }

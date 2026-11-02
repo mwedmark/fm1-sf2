@@ -236,7 +236,7 @@ static void channels_update(const struct fm1b_status *st)
     d = put_text(line, "CHANNELS ");
     d = put_number(d, st->voices, 0);
     *d++ = '/';
-    d = put_number(d, FM1B_VOICES, 0);
+    d = put_number(d, st->voice_limit, 0);              /* the CPU guard's limit: FM1B_VOICES unless it ran short */
     *d = 0;
     line_show(0, 8, line, 2, WHITE);
     line_show(1, 28, "CH PRG NAME       LVL BEND MOD REV CHO P", 1, GREY);
@@ -387,7 +387,8 @@ static void screen_update(void)
     d = put_text(line, "VOICES ");
     d = put_number(d, st.voices, 0);
     d = put_text(d, "/");
-    d = put_number(d, FM1B_VOICES, 0);
+    d = put_number(d, st.voice_limit, 0);
+    if (st.voice_limit < FM1B_VOICES) d = put_text(d, " CPU");   /* the guard holds the limit down */
     if (st.level) { d = put_text(d, "   PHASE "); *d++ = phases[st.phase < 5 ? st.phase : 4]; }
     *d = 0;
     line_show(6, 140, line, 1, GREY);

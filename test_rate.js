@@ -96,5 +96,39 @@ for (const [program, note] of [[73, 69], [0, 60], [0, 84], [40, 55]]) {
   const la = rms(a, 22050, off), lb = rms(b, 22050, off);
   check(Math.abs(db(lb / la)) < 0.5, `level with reverb and chorus within 0.5 dB (${db(lb / la).toFixed(2)} dB)`);
 }
+// The voice limit and the CPU guard (sf2out_load), on the 32 kHz build as the device runs it.
+{
+  const w = engines[1], blocks = n => { for (let i = 0; i < n; ++i) w.rt_block(); };
+  if (w.rt_bind(bank.length) !== 0 || w.rt_program(73) !== 0) throw new Error('bank');
+  w.rt_fx(0, 0);
+  const notes = [48, 52, 55, 60, 64, 67, 72, 76, 79, 84];
+  for (const n of notes) { w.rt_note(0, n, 100); blocks(2); }
+  check(w.rt_sounding() === 10, `ten notes held sound on ten voices (${w.rt_sounding()})`);
+  w.rt_limit(6);
+  check(w.rt_sounding() === 6, `a limit of 6 leaves 6 sounding at once (${w.rt_sounding()})`);
+  blocks(10);                                             // 29 ms: the four oldest have faded out
+  check(w.rt_status(0) === 6 && w.rt_status(1) === 6 && w.rt_status(2) === 4, `29 ms later 6 voices are left, 4 cut (${w.rt_status(0)}, ${w.rt_status(2)})`);
+  let peak = 0; blocks(1); for (const v of new Int32Array(w.memory.buffer, w.rt_out(), 256)) peak = Math.max(peak, Math.abs(v));
+  check(peak > 0, 'the six newest still sound');
+  w.rt_note(0, 88, 100); blocks(10);
+  check(w.rt_status(0) === 6 && w.rt_sounding() === 6, `a new note under the limit fades the oldest out: still 6 (${w.rt_status(0)})`);
+  w.rt_limit(24);
+  w.rt_note(0, 91, 100); blocks(2);
+  check(w.rt_sounding() === 7, `the limit back up: a new note adds a voice (${w.rt_sounding()})`);
+  // the guard: over 80 % it takes voices away, never below 4; a quarter second under 60 % gives one back
+  for (let i = 0; i < 9; ++i) { w.rt_load(85, 100); blocks(1); }
+  check(w.rt_status(1) === 6 && w.rt_sounding() === 6, `85 % load: the limit drops to one under the voices sounding (${w.rt_status(1)}, ${w.rt_sounding()})`);
+  for (let i = 0; i < 9; ++i) { w.rt_load(99, 100); blocks(1); }
+  check(w.rt_status(1) === 4, `99 % load: two at once (${w.rt_status(1)})`);
+  for (let i = 0; i < 40; ++i) { w.rt_load(99, 100); blocks(1); }
+  check(w.rt_status(1) === 4 && w.rt_sounding() === 4, `never under 4 voices (${w.rt_status(1)})`);
+  for (let i = 0; i < 85; ++i) { w.rt_load(50, 100); blocks(1); }
+  const before = w.rt_status(1); w.rt_load(50, 100);
+  check(before === 4 && w.rt_status(1) === 5, `86 blocks (0.25 s) under 60 %: one voice back (${before} -> ${w.rt_status(1)})`);
+  for (let i = 0; i < 86 * 30; ++i) w.rt_load(70, 100);
+  check(w.rt_status(1) === 5, 'between 60 and 80 % the limit stays');
+  for (let i = 0; i < 86 * 30; ++i) w.rt_load(10, 100);
+  check(w.rt_status(1) === 24, `a calm interrupt gets every voice back (${w.rt_status(1)})`);
+}
 console.log(failed ? `${failed} of ${checks} checks FAILED` : `${checks}/${checks} checks passed`);
 process.exitCode = failed ? 1 : 0;

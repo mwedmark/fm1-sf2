@@ -9,9 +9,10 @@
 #define FM1B_H
 #include <stdint.h>
 
-/* The same in the browser and on the device. Measured in fm1-emu at 240 MHz with the 32 kHz bank, flute, 16 voices held:
- * SEA5 52-57 %, SEA6 52-59 % (RUNNING.md, section 7b). Measure fm1_audio_irq's peak before raising this. */
-#define FM1B_VOICES 16U
+/* The same in the browser and on the device. Measured in fm1-emu at 240 MHz, player at 32 kHz, SEA6 bank, flute: 16 voices
+ * 44-56 %, 24 voices 57-62 % (76 % while 24 notes start), 32 voices 70-78 % (88 %): RUNNING.md, section 7b. On the device the
+ * audio interrupt's own time lowers fm1b_voice_limit() when it runs short (sf2out_load), so this is a ceiling. */
+#define FM1B_VOICES 24U
 /* The rate the player renders at, voices and effects alike. The device renders at the bank's 32 kHz and board/audio.c resamples
  * that to the codec's 44.1 kHz (a voice at its root key then reads one sample a frame); the browser and the tests render at
  * 44.1 kHz. A test may set it (-DFM1B_RATE=32000U). */
@@ -57,6 +58,10 @@ unsigned fm1b_has_program(unsigned program_bank, unsigned program);
  * 127 and 127 is unity), 64 (sustain pedal), 120 (all sound off), 121 (reset the levels, bend, wheel and pedal) and 123
  * (all notes off), 91 and 93 (the reverb and chorus sends, FM1B_REVERB_SEND and FM1B_CHORUS_SEND until set). */
 void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value);
+/* The voices that may sound at once, 1..FM1B_VOICES (the default). Lowering it fades the oldest out in about 5 ms; a note over
+ * it fades the oldest out. Audio interrupt only, like the render. */
+void fm1b_voice_limit(unsigned limit);
+unsigned fm1b_voices_sounding(void);
 /* Pitch bend, 0..16383 with 8192 the centre, on the notes that sound and the notes to come. */
 void fm1b_channel_bend(unsigned channel, unsigned value);
 /* One channel, for the panel's channel page. own: a program change gave it a preset of its own (program, kit: from the
@@ -84,6 +89,8 @@ struct fm1b_status {
     char name[21], drum_name[21];
     uint8_t ready, drums, last_drum, program, note, zone, zones, root, loop, voices, phase, level;  /* level 0..255, phase 0..4 = A H D S R */
     uint8_t channels, program_channel, program_number;  /* channels with a preset of their own; the latest program change (channel 0..15, 255: none) */
+    uint8_t voice_limit;                       /* fm1b_voice_limit(): FM1B_VOICES unless the CPU guard has lowered it */
+    uint32_t voices_cut;                       /* voices faded out to keep under the limit, since start */
     int8_t fine;
     uint8_t lo, hi, sustain_percent;
     uint16_t attack_ms, hold_ms;
