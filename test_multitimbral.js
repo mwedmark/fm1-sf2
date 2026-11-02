@@ -335,5 +335,13 @@ check(w.mt_info(3, 0) === 1 && w.mt_info(3, 2) === program && w.mt_info(3, 1) ==
 check(w.mt_info(3, 4) === 64 && w.mt_info(3, 7) === 2 && w.mt_info(3, 6) === 2, 'the channel reports its wheel, note count and voices');
 check(w.mt_info(4, 0) === 0 && w.mt_info(4, 6) === 0 && w.mt_info(4, 8) === 127, 'a silent channel follows the panel at full volume');
 
+// 15. The channel page's KNOB2: back to following the panel.
+check(w.mt_has_program(0, 0) === 1 && w.mt_has_program(0, program) === 1, 'the bank has program 1 and the flute');
+fresh(0);
+w.mt_channel_program(0, 0, program);
+w.mt_follow(0);
+w.mt_note(0, NOTE, 100);
+check(same(render(LONG), panelPiano) && w.mt_multitimbral() === 0, 'a channel told to follow plays the panel preset again, bit exact');
+
 console.log(`${checks - failed}/${checks} checks passed`);
 process.exit(failed ? 1 : 0);

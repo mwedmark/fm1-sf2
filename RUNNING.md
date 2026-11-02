@@ -35,7 +35,7 @@ Outputs, all under `fm1_open\build\dx7\`:
 - `sdk.elf` is the linked image. `firmware-report.json` has the sizes.
 
 App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
-and the channel page (+3.8 kB). If a change makes the build stop with
+and the channel page (+3.8 kB), 407 452 with program choice per channel on the panel. If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -46,7 +46,7 @@ Each one compiles the real C source to WebAssembly with the WASI SDK on the firs
 
 ```bash
 cd D:/git/fm1-sf2
-node test_multitimbral.js     # 54 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
+node test_multitimbral.js     # 56 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
                               # RPN range, modulation wheel, sustain pedal, what the channel page reads. Uses dist/gm_32k.fm1b
 node test_fx.js               # reverb and chorus (sf2fx.c)
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
@@ -203,6 +203,11 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received. **HOME** switches to the channel page:
 one row per MIDI channel with its program and name (grey: it follows the panel's program; white: a program of its own; orange: the kit on
 channel 10; green: it plays now), level (volume x expression), bend in semitones, modulation wheel and `P` while the pedal is down. HOME again goes back.
+On the channel page **KNOB1** moves the cursor (the highlighted row) and **KNOB2** steps that channel through the programs the bank has,
+the same as a program change on it; turned below the first program the channel follows the panel again. Channel 10 stays the kit.
+The panel's keys then play the selected channel. Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on KNOB2 for channel 2, then
+a MIDI note on it) and `knobkey.script` (the same, then a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz).
+The emulator loses clicks when many come in one script event (`e3:73`), so the scripts send one click every 30 ms.
 
 Limits: 8 voices in total on the device (oldest is stolen first), no per-channel pan.
 

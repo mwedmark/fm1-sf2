@@ -61,6 +61,12 @@ void sf2player_channel_control(unsigned channel, unsigned controller, unsigned v
     fm1b_channel_control(channel, controller, value);
     fm1_device_irq_restore(flags);
 }
+void sf2player_channel_follow(unsigned channel)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_channel_follow(channel);
+    fm1_device_irq_restore(flags);
+}
 void sf2player_channel_bend(unsigned channel, unsigned value)
 {
     uint32_t flags = fm1_device_irq_save();
@@ -97,13 +103,14 @@ enum { WHITE = 0xffff, GREY = 0x8410, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 
        LINE_CHARS = 41, LINES = 20, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
 static char shown[LINES][LINE_CHARS + 1];
-static uint16_t shown_color[LINES];
+static uint16_t shown_color[LINES], shown_back[LINES];
+static uint16_t line_back = BACKGROUND;                  /* the background of the next line drawn (the channel page's cursor) */
 
 static void text_line(unsigned y, const char *s, unsigned scale, uint16_t color)
 {
     unsigned h = 7U * scale, cell = 6U * scale;
     for (unsigned i = 0; i < FM1_SCREEN_WIDTH * h; ++i)
-        row_pixels[i] = BACKGROUND;
+        row_pixels[i] = line_back;
     for (unsigned c = 0; s[c] && (c + 1U) * cell <= FM1_SCREEN_WIDTH; ++c) {
         char ch = s[c] >= 'a' && s[c] <= 'z' ? (char)(s[c] - 'a' + 'A') : s[c];
         static const uint8_t blank[5] = {0};
@@ -123,12 +130,13 @@ static void text_line(unsigned y, const char *s, unsigned scale, uint16_t color)
 /* Draw line `n` at y only when its text or colour is not what is on the screen. */
 static void line_show(unsigned n, unsigned y, const char *s, unsigned scale, uint16_t color)
 {
-    if (!strncmp(shown[n], s, LINE_CHARS) && shown_color[n] == color)
+    if (!strncmp(shown[n], s, LINE_CHARS) && shown_color[n] == color && shown_back[n] == line_back)
         return;
     text_line(y, s, scale, color);
     strncpy(shown[n], s, LINE_CHARS);
     shown[n][LINE_CHARS] = 0;
     shown_color[n] = color;
+    shown_back[n] = line_back;
 }
 static char *put_text(char *d, const char *s) { while (*s) *d++ = *s++; return d; }
 static char *put_number(char *d, int32_t v, unsigned min_digits)
@@ -170,6 +178,8 @@ static void upload_line(void)
 
 /* ---- the channel page (HOME): what each MIDI channel plays and its controllers ----------------------------------- */
 static unsigned page;                                     /* 0: the program and its zone, 1: the 16 channels */
+static unsigned cursor;                                   /* the channel page's selected channel, 0..15: KNOB1 moves it */
+enum { CURSOR_BACK = 0x3a6b };                            /* the selected row's background: slate blue */
 static unsigned bar_drawn = 1000;                         /* the level bar's width on the screen (1000: not drawn) */
 static uint8_t channel_notes_seen[FM1B_CHANNELS];
 static uint32_t channel_hit[FM1B_CHANNELS];               /* fm1_millis() of the latest note-on seen on the channel */
@@ -179,6 +189,7 @@ static void page_clear(void)
     fm1_screen_fill(0, 0, FM1_SCREEN_WIDTH, FM1_SCREEN_HEIGHT, BACKGROUND);
     memset(shown, 0, sizeof shown);
     memset(shown_color, 0, sizeof shown_color);
+    memset(shown_back, 0, sizeof shown_back);
     bar_drawn = 1000;
 }
 /* Bend in semitones with one decimal, right aligned in 5 characters; blank at the centre. */
@@ -262,9 +273,11 @@ static void channels_update(const struct fm1b_status *st)
         *d = 0;
         if (info.voices || now - channel_hit[c] < 250U)
             color = GREEN;
+        line_back = c == cursor ? CURSOR_BACK : BACKGROUND;
         line_show(2 + c, 40 + c * 11, line, 1, color);
+        line_back = BACKGROUND;
     }
-    line_show(18, 228, "HOME BACK  ENC1 PRG  K1 K2 K3 FX", 1, GREY);
+    line_show(18, 228, "HOME BACK  K1 CHANNEL  K2 PROGRAM", 1, GREY);
 }
 
 static void screen_update(void)
@@ -396,7 +409,36 @@ static void screen_update(void)
     line_show(7, 228, "ENC1 PRG  SCL DRUM  HOME CH  K1 K2 K3 FX", 1, GREY);
 }
 
+/* KNOB2 on the channel page: the next or previous program the bank has, from the channel's own or (while it follows the
+ * panel) the panel's. Below the first one the channel follows the panel again. Channel 10 always plays the kit (transfer.c). */
+static void channel_program_step(unsigned channel, int clicks)
+{
+    struct fm1b_channel info;
+    struct fm1b_status st;
+    if (channel == 9U)
+        return;
+    fm1b_channel_info(channel, &info);
+    fm1b_status(&st);
+    if (!st.ready)
+        return;
+    int step = clicks > 0 ? 1 : -1, own = info.own, current = info.own ? info.program : st.program;
+    for (int n = clicks * step; n > 0; --n) {
+        int next = current + step;
+        while (next >= 0 && next < 128 && !fm1b_has_program(0, (unsigned)next))
+            next += step;
+        if (next < 0) { own = 0; break; }
+        if (next > 127) break;
+        current = next;
+        own = 1;
+    }
+    if (own)
+        sf2player_channel_program(channel, 0, (unsigned)current);
+    else if (info.own)
+        sf2player_channel_follow(channel);
+}
+
 static uint32_t previous_keys, previous_buttons;
+static uint8_t sounding_channel[KEYS];                     /* per key: the MIDI channel it started a note on, 255: the panel's */
 static uint8_t sounding[KEYS];                           /* the note each key started, so a release stops that one */
 static unsigned program;
 
@@ -411,6 +453,7 @@ void groove_screen_init(void)
     sounding_drum = 0;
     program = 0;
     page = 0;
+    cursor = 0;
     memset(shown, 0, sizeof shown);
     memset(shown_color, 0, sizeof shown_color);
     bar_drawn = 1000;
@@ -427,7 +470,13 @@ void groove_screen_control(void)
             for (int next = (int)program + step; next >= 0 && next < 128; next += step)
                 if (fm1b_program(0, (unsigned)next) == 0) { program = (unsigned)next; break; }
     }
-    for (unsigned which = 2; which <= 3; ++which) {            /* KNOB1 (encoder 2): reverb send, KNOB2 (encoder 3): chorus send */
+    if (page) {                                               /* channel page: KNOB1 picks the channel, KNOB2 its program */
+        int moved = (int)cursor + controls.encoders[2];
+        cursor = (unsigned)(moved < 0 ? 0 : moved > (int)FM1B_CHANNELS - 1 ? (int)FM1B_CHANNELS - 1 : moved);
+        if (controls.encoders[3])
+            channel_program_step(cursor, controls.encoders[3]);
+    }
+    for (unsigned which = 2; which <= 3 && !page; ++which) {   /* KNOB1 (encoder 2): reverb send, KNOB2 (encoder 3): chorus send */
         if (!controls.encoders[which])
             continue;
         int level = (int)(which == 2 ? sf2fx_reverb() : sf2fx_chorus()) + controls.encoders[which] * 4;
@@ -460,8 +509,14 @@ void groove_screen_control(void)
             int note = FIRST_NOTE + (int)key + 12 * octave;
             sounding[key] = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
             sounding_drum = (sounding_drum & ~(1U << key)) | (drum_mode << key);
+            sounding_channel[key] = (uint8_t)(page ? cursor : 255U);   /* the channel page: the keys play the selected channel */
         }
-        if ((sounding_drum >> key) & 1U)
+        if (sounding_channel[key] != 255U) {
+            if (sounding_channel[key] == 9U)
+                sf2player_channel_drum(9U, sounding[key], on ? 100U : 0U);
+            else
+                sf2player_channel_play(sounding_channel[key], sounding[key], on ? 100U : 0U);
+        } else if ((sounding_drum >> key) & 1U)
             sf2player_drum(sounding[key], on ? 100U : 0U);
         else
             sf2player_play(sounding[key], on ? 100U : 0U);

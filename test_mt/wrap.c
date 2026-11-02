@@ -55,3 +55,5 @@ EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 progr
     default: return c.volume;
     }
 }
+EXPORT void mt_follow(unsigned channel) { fm1b_channel_follow(channel); }
+EXPORT unsigned mt_has_program(unsigned bank, unsigned program) { return fm1b_has_program(bank, program); }

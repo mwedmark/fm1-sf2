@@ -41,6 +41,10 @@ void fm1b_channel_drum_note(unsigned channel, unsigned note, unsigned velocity, 
 /* Program change: program_bank 0 melodic or 128 percussion (a kit may be played on any channel), program 0..127. A preset
  * the bank does not have leaves the channel as it was. */
 void fm1b_channel_program(unsigned channel, unsigned program_bank, unsigned program);
+/* Forget the channel's program change: it follows the preset fm1b_program() selected again. */
+void fm1b_channel_follow(unsigned channel);
+/* 1 if the bank has a preset for program_bank 0 or 128, program 0..127. */
+unsigned fm1b_has_program(unsigned program_bank, unsigned program);
 /* Controllers for one channel: 1 (modulation wheel: vibrato, 5.5 Hz, up to +-50 cents), 6/38 with 101/100 (RPN 0: the
  * pitch bend range, 2 semitones until set, at most 24), 7 (volume), 11 (expression; both follow the General MIDI curve,
  * 127 and 127 is unity), 64 (sustain pedal), 120 (all sound off), 121 (reset the levels, bend, wheel and pedal) and 123

@@ -347,6 +347,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
  * b is 1 for the percussion bank; for a controller a is its number and b its value. */
 enum { QUEUE_SIZE = 32 };
 enum { EVENT_NOTE, EVENT_PROGRAM, EVENT_CONTROL, EVENT_BEND };   /* a bend: a is the low 7 bits, b the high 7 */
+enum { PROGRAM_FOLLOW = 2 };                                       /* a program event's b: back to the panel's preset */
 static struct { const void *owner; uint8_t kind, channel, a, b, level, drum; } queue[QUEUE_SIZE];
 static volatile uint32_t queue_head, queue_tail;
 static void queue_event(unsigned kind, const void *owner, unsigned channel, unsigned a, unsigned b, unsigned level, unsigned drum)
@@ -381,6 +382,12 @@ void fm1b_channel_program(unsigned channel, unsigned program_bank, unsigned prog
     if (channel < FM1B_CHANNELS && (program_bank == 0 || program_bank == 128))
         queue_event(EVENT_PROGRAM, NULL, channel, program, program_bank != 0, 0, 0);
 }
+void fm1b_channel_follow(unsigned channel)
+{
+    if (channel < FM1B_CHANNELS)
+        queue_event(EVENT_PROGRAM, NULL, channel, 0, PROGRAM_FOLLOW, 0, 0);
+}
+unsigned fm1b_has_program(unsigned program_bank, unsigned program) { return preset_of(program_bank, program) >= 0; }
 void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value)
 {
     if (channel < FM1B_CHANNELS)
@@ -423,6 +430,11 @@ unsigned fm1b_multitimbral(void)
 
 static FM1_DSP_CODE void program_apply(unsigned channel, unsigned program_bank, unsigned program)
 {
+    if (program_bank == PROGRAM_FOLLOW) {
+        channel_preset[channel] = -1;
+        channel_program[channel] = 0;
+        return;
+    }
     int32_t p = preset_of(program_bank ? 128U : 0U, program);
     if (p < 0)
         return;
