@@ -237,7 +237,7 @@ Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on SELECT for channel 2,
 a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz). The emulator loses clicks when many come in one
 script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
-Limits: 24 voices in total on the device (oldest is stolen first; 8, then 16, until 2026-11-02), fewer while the CPU guard holds
+Limits: 32 voices in total on the device (oldest is stolen first; 8, then 16, then 24 until 2026-11-02), fewer while the CPU guard holds
 the limit down (the panel then shows `VOICES n/limit CPU`).
 
 **Pan (2026-11-02).** Each voice's pan is its zone's (SF2 generator 17, stored in the zone record, FORMAT.md) plus its channel's CC10,
@@ -247,6 +247,17 @@ multiply) to a cut buffer for that side, and the mix takes it away from that cha
 is bit exact as before (`test_multitimbral.js`, 11 pan checks). In fm1-emu at 240 MHz, 24 voices, the same session: `load24_all`
 (nothing panned) 74-79 %, `load24_pan` (every voice panned) 75-78 % with SEA6; 46-50 % and 49-53 % with BFP8. That session ran higher
 than the earlier tables (load24_all 57-62 % then), so compare within it: pan costs about 0-3 points. Firmware image 422 332 bytes.
+
+**32 voices (2026-11-02).** `FM1B_VOICES` is 32, for the BFP8 bank. fm1-emu, 240 MHz, silent (`&mute=1`: tap.js keeps the
+emulator from the speakers), one session, which again read about 7 points over the BFP8 table above:
+
+| | load24_all (24-voice build) | load32_all (32-voice build) |
+| --- | --- | --- |
+| BFP8 | 45-49 % (66 % as the notes start) | 50-55 % (69 %) |
+| SEA6 | - | 84-98 % (111 %): the guard has to cut |
+
+So the 32-voice firmware is for BFP8 banks: `dist\sf2player_32v_32k.fwsc`. For SEA6 the 24-voice one is kept,
+`dist\sf2player_24v_32k.fwsc` (built with `FM1B_VOICES 24U`). Image 422 588 bytes; the SRAM check passes.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
@@ -321,7 +332,7 @@ More voices at 32 kHz (test builds with `FM1B_VOICES` 24 and 32, both pass the S
 | 24 | 59-62 % | 57-61 % | up to 76 % |
 | 32 | 70-74 % | 74-78 % | up to 88 % |
 
-**24 voices and the CPU guard.** `FM1B_VOICES` is 24. After each block the audio interrupt passes its own time to `sf2out_load()`
+**24 voices and the CPU guard.** `FM1B_VOICES` was 24 (32 since 2026-11-02, below). After each block the audio interrupt passes its own time to `sf2out_load()`
 (`sf2out.c`): over 80 % of the block the voice limit (`fm1b_voice_limit()`) drops to one under the voices sounding (two over 95 %),
 and the oldest fade out in about 5 ms; it then waits 8 blocks, and never goes under 4. After 0.25 s under 60 % the limit rises by
 one, up to 24. `test_rate.js` checks the limit and the guard (31 checks). In fm1-emu with `load24_all.script`: 240 MHz 62-63 %, the

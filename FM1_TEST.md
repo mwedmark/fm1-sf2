@@ -7,7 +7,8 @@ SEA6 och BFP8, pan per kanal och SF2-filens egen pan. Bygg om banken med dagens 
 
 | Vad | Var |
 | --- | --- |
-| SF2-firmwaren | `dist\sf2player_24v_32k.fwsc` (samma som `fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc`) |
+| SF2-firmwaren | `dist\sf2player_24v_32k.fwsc` (24 röster, för SEA6 och BFP8) |
+| SF2-firmwaren med 32 röster | `dist\sf2player_32v_32k.fwsc` (för BFP8-banken, avsnitt F2) |
 | Originalfirmwaren (V15) | `fm1_open\sdk\firmware\FM-1_015.fwsc` |
 | Workbench för att flasha | <https://open.m-vave.com/fm1-workbench> (Chrome eller Edge, USB-kabel) |
 | Konverteraren som skickar banken | `index.html` via `python -m http.server 8765`, sedan <http://localhost:8765/index.html> (RUNNING.md avsnitt 3) |
@@ -93,6 +94,21 @@ Täta ackord med 24 röster når full nivå (toppvärde 0,875 i emulatorn): lyss
 | F1 | Konvertera om med **Kodning: BFP8** och skicka. | Cirka 455 KB (97 %), ryms. | |
 | F2 | Upprepa C1-C2 och E1-E5. | Samma ljud; lägre last (emulatorn: 24 röster 38-42 %, 40 toner 37-41 %). | |
 | F3 | Jämför svaga partier (utklingande piano, mjuka toner) med SEA6. | BFP8 bör brusa mindre. | |
+
+## F2. 32 röster med BFP8
+
+Gör detta först när A-F gått bra. BFP8-banken från F ligger kvar i flash när firmwaren byts.
+
+| # | Steg | Väntat | Resultat |
+| --- | --- | --- | --- |
+| F2-1 | Flasha `dist\sf2player_32v_32k.fwsc`. | Startar, programnamnet visas (banken finns kvar). | |
+| F2-2 | Kanalsidan: rubriken `CHANNELS n/32`. | Talet efter snedstrecket är 32. | |
+| F2-3 | `load32_plain.mid` och `load32_all.mid`. | Inget knaster; `CPU` visas inte (emulatorn: 50-55 %, topp 69 %). | |
+| F2-4 | `steal40.mid`. | 40 toner in i 32 röster, de äldsta stjäls, inget knaster. | |
+| F2-5 | Om det knastrar: flasha `dist\sf2player_24v_32k.fwsc` igen. | Som förut. | |
+
+En SEA6-bank med 32-röstersfirmwaren går också, men i emulatorn når lasten över 100 % när 32 toner startar samtidigt, så spärren
+får ta bort röster. Använd 24-röstersfirmwaren till SEA6.
 
 ## G. Avsluta
 
