@@ -337,6 +337,25 @@ fm1-emu, 240 MHz (32-voice figures from a test build with `FM1B_VOICES 32U`):
 
 `mt.script` with the BFP8 bank: the flute, RMS 0.099, centroid 284 Hz.
 
+**Emulator round before the device (2026-11-02, 24 voices, 240 MHz), SEA6 and BFP8 banks.** Nothing clipped past full scale, nothing
+non-finite in any run.
+
+| Script | What it checks | SEA6 | BFP8 |
+| --- | --- | --- | --- |
+| `programs.script` | programs 0, 24, 40, 56, 73, 80, 118 one after another | all sound, each its own centroid (94-1328 Hz) | the same centroids |
+| `drums.script` | kick, snare, hats, crash on channel 10 | all five heard, quiet after | the same |
+| `release.script` | 24 notes, then note off | silent within 1 s, load back to 13 % | silent, 10-11 % |
+| `steal40.script` | 40 notes into 24 voices | 60-66 % (83 % as they start), steady sound | 37-41 % (46 %) |
+| `load24_all.script` | wheel, bend, both effect buses | 57-62 % | 39-43 % (54 %) |
+| `mt.script` | program change on channel 2 | the flute, 0.099 / 283 Hz | 0.099 / 284 Hz |
+
+Dense chords (24 voices) reach the output's full level (peak 0.875 in the tap): loud enough to clip; a matter of level, not CPU.
+In `programs.script` the BFP8 windows read 2-4 dB lower than SEA6 in fm1-emu, but the engine on WebAssembly gives both banks the
+same level within 0.4 dB per program: the short windows right at the note starts are timing-sensitive in the emulator.
+
+The checklist for the device is `FM1_TEST.md`; `node make_midi.js` turns these scripts into `test_emu\midi\*.mid` to play from
+Windows (each file ends by resetting the controllers and sends and turning all notes off).
+
 What SEA matches in plain PCM (every SF2 sample at 32 kHz, noise against 16-bit, per 20 ms block by level):
 
 | Coding | > -20 dBFS | -20..-40 | -40..-60 | Bytes per sample |
