@@ -122,15 +122,14 @@ Use the same note owner for `fm1b_note()` as for `fm1b_render()`.
 
 ## What is still missing
 
-1. **Flashing and a device to test on.** `-FirmwareOnly` stops at `sdk.elf`; the packaged firmware that the web workbench flashes comes from
-   the full `build.bat --package` (needs `FM1_SOURCE_URL`, see `fm1_open/README.md`). Not tried.
-2. **Notes into the player.** The keyboard and MIDI input go into the engine inside the library. `fm1b_note()` must be called with the same
-   notes, from wherever the app sees them (the track/key code in `app/`; `midi_router.c` only handles MIDI *output*). Not investigated yet.
-3. **The bank in flash.** `app/samples.c` and `app/project.c` both treat the sample region as the 8-slot SEA bank
-   (magic `0x53314d46`, 32 000 Hz). An FM1B bank needs its own magic check (`FM1B`) and an upload path (`app/transfer.c`, the workbench).
-4. **The quantizer table.** `fm1b_bind()` takes the 512-entry SEA5 table. The firmware needs its own copy (the same numbers as
-   `fm1_open/web/synth/sample_metadata.inc`, `sdk/Samples.js`).
-5. **CPU budget.** Unknown until measured. The audio interrupt has `statistics.peak_ticks` against `block_ticks` (2.9 ms per block).
-   Each SEA5 voice costs one decoded sample per output sample at the original pitch, more when played higher, plus a jump
-   back to the chunk start on every loop wrap (up to 320 samples). Start with `FM1B_VOICES` at 4 or 8 and raise it while the peak stays low.
-6. **Program selection and the level control** on the panel (`fm1b_program()`, the `level` argument).
+The six items that stood here (flashing, notes into the player, the bank in flash, the quantizer table, the CPU budget, program selection)
+are done; RUNNING.md has how each is built, tested and run. What is left is in RUNNING.md, section 8.
+
+### Pitch bend, modulation wheel, sustain pedal, channel page
+
+Per MIDI channel in `fm1b.c`. A voice keeps the step of its note (`base_step`) and plays `step`, which is `base_step` times 2^(cents/1200)
+(`cents_factor`: an octave shift, a 12-entry semitone table, the rest to second order). The bend (range from RPN 0, 2 semitones by default)
+recomputes the step of the channel's voices when it arrives; the wheel adds a triangle vibrato (5.5 Hz, +-50 cents at 127), moved on in
+`env_step` once per 32 frames, and only while the wheel is up. The sustain pedal marks a released note `held` instead of releasing it, and
+pedal up releases those. `fm1b_channel_info()` gives the panel's channel page (HOME) each channel's program, levels, bend, wheel, pedal,
+voices and a note counter. The sample loop itself is unchanged.

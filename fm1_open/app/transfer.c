@@ -370,6 +370,7 @@ void sf2player_channel_play(unsigned channel, unsigned note, unsigned velocity);
 void sf2player_channel_drum(unsigned channel, unsigned note, unsigned velocity);
 void sf2player_channel_program(unsigned channel, unsigned program_bank, unsigned program);
 void sf2player_channel_control(unsigned channel, unsigned controller, unsigned value);
+void sf2player_channel_bend(unsigned channel, unsigned value);
 
 /* The bank select (CC 0 and 32) of each channel, which the next program change on it uses. */
 static uint8_t bank_msb[16], bank_lsb[16];
@@ -401,6 +402,12 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         switch (message[1]) {
         case 0:   bank_msb[channel] = (uint8_t)value; break;
         case 32:  bank_lsb[channel] = (uint8_t)value; break;
+        case 1:                                                /* modulation wheel, sustain pedal, bend range (RPN): per channel */
+        case 64:
+        case 6:
+        case 38:
+        case 100:
+        case 101:
         case 7:                                                /* volume and expression: per channel */
         case 11:
         case 120:                                              /* all sound off, reset all controllers, all notes off: the channel's */
@@ -417,6 +424,8 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         default:  break;
         }
     }
+    else if (bytes == 3 && type == 0xe0U)                     /* pitch bend, per channel */
+        sf2player_channel_bend(channel, (unsigned)message[1] | (unsigned)message[2] << 7);
 }
 void fm1_app_sysex(const uint8_t *message, size_t bytes) { sf2_upload_offer(message, bytes); }
 

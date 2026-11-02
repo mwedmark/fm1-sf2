@@ -41,9 +41,21 @@ void fm1b_channel_drum_note(unsigned channel, unsigned note, unsigned velocity, 
 /* Program change: program_bank 0 melodic or 128 percussion (a kit may be played on any channel), program 0..127. A preset
  * the bank does not have leaves the channel as it was. */
 void fm1b_channel_program(unsigned channel, unsigned program_bank, unsigned program);
-/* Controllers 7 (volume), 11 (expression; both follow the General MIDI curve, 127 and 127 is unity), 120 (all sound off),
- * 121 (reset the two levels) and 123 (all notes off) for one channel. */
+/* Controllers for one channel: 1 (modulation wheel: vibrato, 5.5 Hz, up to +-50 cents), 6/38 with 101/100 (RPN 0: the
+ * pitch bend range, 2 semitones until set, at most 24), 7 (volume), 11 (expression; both follow the General MIDI curve,
+ * 127 and 127 is unity), 64 (sustain pedal), 120 (all sound off), 121 (reset the levels, bend, wheel and pedal) and 123
+ * (all notes off). */
 void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value);
+/* Pitch bend, 0..16383 with 8192 the centre, on the notes that sound and the notes to come. */
+void fm1b_channel_bend(unsigned channel, unsigned value);
+/* One channel, for the panel's channel page. own: a program change gave it a preset of its own (program, kit: from the
+ * percussion bank, name); otherwise it plays the panel's preset. notes counts its note-ons (it wraps), voices sound now. */
+struct fm1b_channel {
+    char name[21];
+    uint8_t own, kit, program, volume, expression, mod, pedal, voices, notes;
+    int16_t bend_cents;
+};
+void fm1b_channel_info(unsigned channel, struct fm1b_channel *info);
 /* How many channels have a preset of their own: 0 while a single preset plays on all of them. */
 unsigned fm1b_multitimbral(void);
 /* Add `frames` mono Q23 samples to out. Only the voices started by `owner` sound: the browser simulator has several

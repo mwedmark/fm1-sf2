@@ -34,7 +34,8 @@ Outputs, all under `fm1_open\build\dx7\`:
 - `generated\FM1_OFFICIAL_OPEN.fwsc` is **the package**: for fm1-emu (section 4) and the M-VAVE workbench.
 - `sdk.elf` is the linked image. `firmware-report.json` has the sizes.
 
-App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB). If a change makes the build stop with
+App image history: 401 020 bytes before multitimbral, 403 260 after (+2 kB), 407 068 with pitch bend, modulation wheel, sustain pedal
+and the channel page (+3.8 kB). If a change makes the build stop with
 "Application does not fit the FM1 layout.", the image has outgrown its room (see `FIRMWARE.md`).
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
@@ -45,13 +46,14 @@ Each one compiles the real C source to WebAssembly with the WASI SDK on the firs
 
 ```bash
 cd D:/git/fm1-sf2
-node test_multitimbral.js     # 35 checks: channels, program change, volume, CC120/121/123, channel 10. Uses dist/gm_32k.fm1b
+node test_multitimbral.js     # 54 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
+                              # RPN range, modulation wheel, sustain pedal, what the channel page reads. Uses dist/gm_32k.fm1b
 node test_fx.js               # reverb and chorus (sf2fx.c)
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices (the browser build), the device has 8. It does **not** cover
-`transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the CC10 rule) or the `MULTI` panel line.
+`transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the CC10 rule) or the panel (the `MULTI` line, the channel page).
 Those are only compiled, so test them in the emulator or on the device.
 
 ## 3. The converter and browser simulator (verified)
@@ -191,19 +193,28 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 | Note on/off, channel 10 | The percussion kit (the first kit in the bank), same as the SCL button |
 | Program change | Per channel. Bank select first (CC0/CC32): CC0=120, or CC0=1 and CC32=0, is the percussion bank, anything else melodic. A preset the bank lacks is ignored. Ignored on channel 10 |
 | CC7 volume, CC11 expression | Per channel, General MIDI curve, live on sounding notes. 127/127 is unity |
-| CC120 / CC121 / CC123 | All sound off / reset volume and expression / all notes off, **for that channel only** |
+| Pitch bend | Per channel, on sounding notes too. Range 2 semitones until RPN 0 sets it (CC101=0, CC100=0, CC6 semitones up to 24, CC38 cents) |
+| CC1 modulation wheel | Per channel: vibrato, 5.5 Hz, up to +-50 cents at 127 |
+| CC64 sustain pedal | Per channel: a note released while it is down sounds on until the pedal goes up |
+| CC120 / CC121 / CC123 | All sound off / reset volume, expression, bend, wheel and pedal / all notes off, **for that channel only** |
 | CC91 / CC93 | Reverb and chorus send, global |
 | CC10 pan | **Global** pan. Ignored as soon as any channel has its own program (otherwise channels would overwrite each other) |
 
-Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received.
+Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received. **HOME** switches to the channel page:
+one row per MIDI channel with its program and name (grey: it follows the panel's program; white: a program of its own; orange: the kit on
+channel 10; green: it plays now), level (volume x expression), bend in semitones, modulation wheel and `P` while the pedal is down. HOME again goes back.
 
-Limits: 8 voices in total on the device (oldest is stolen first), no pitch bend, no sustain pedal, no per-channel pan.
+Limits: 8 voices in total on the device (oldest is stolen first), no per-channel pan.
+
+Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
+that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
+(`test_emu/load8.script`): load 53 %; the same with the wheel at 127, the bend full up and the pedal down (`load8_bend.script`): 55-59 %.
+Bending up costs most, as the samples are read faster.
 
 ## 8. Open items
 
 - Run the multitimbral build on the real FM-1 with program changes on two channels (it has run in fm1-emu, section 4), and note the result here.
-- Measure the audio interrupt load with notes sounding (the emulator's status line shows `load`; only idle values, 12-20 % at 240 MHz, were seen).
-  The multitimbral build adds one multiply per voice per 32 frames.
-- Check the `MULTI` panel line and the bank-select rule (CC0/CC32) on a screen: the emulator draws no LCD.
+- Check the channel page and bend, wheel and pedal from a real keyboard on the device.
+- Check the `MULTI` panel line, the channel page and the bank-select rule (CC0/CC32) on a screen: the emulator draws no LCD.
 - Per-channel pan needs a stereo `fm1b_render` and a changed `sf2fx_mix`.
 - Fill in section 4 once the emulator has been started again.

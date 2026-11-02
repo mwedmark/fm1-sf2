@@ -221,5 +221,119 @@ for (let n = 0; n < 24; ++n) w.mt_note(n % 2, 40 + n, 100);
 const chord = render(100);
 check(sumAbs(chord) > 0 && w.mt_voices() <= 16, 'a dense chord on two channels sounds and never uses more voices than there are');
 
+// 11. Pitch bend. The period by autocorrelation (parabolic peak), for comparing pitches across notes and zones.
+function period(a, from = 20000, n = 4096) {
+  const x = Array.from(a.subarray(from, from + n + 1200));
+  let best = 0, lag = 0;
+  const r = [];
+  for (let l = 40; l < 1200; ++l) {
+    let s = 0;
+    for (let i = 0; i < n; ++i) s += x[i] * x[i + l];
+    r[l] = s;
+  }
+  const top = Math.max(...r.slice(40));
+  for (let l = 41; l < 1199; ++l)                     // the first peak near the top, not a multiple of the period
+    if (r[l] > 0.9 * top && r[l] >= r[l - 1] && r[l] >= r[l + 1]) { lag = l; break; }
+  const y0 = r[lag - 1], y1 = r[lag], y2 = r[lag + 1];
+  return lag + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2);
+}
+const cents = (pa, pb) => 1200 * Math.log2(pb / pa);   // how much higher a sounds than b, from their periods
+const BEND_BLOCKS = 260;
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+const plain = render(BEND_BLOCKS);
+fresh(SUSTAIN);
+w.mt_bend(0, 8192);
+w.mt_note(0, NOTE, 100);
+check(same(render(BEND_BLOCKS), plain), 'bend at the centre is bit exact no bend');
+fresh(SUSTAIN);
+w.mt_bend(0, 0);
+w.mt_note(0, NOTE + 2, 100);
+let d = cents(period(render(BEND_BLOCKS)), period(plain));
+check(Math.abs(d) < 8, `bend fully down (2 semitones) on D4 sounds as C4 (off by ${d.toFixed(1)} cents)`);
+check(w.mt_info(0, 3) === -200, 'the channel reports -200 cents of bend');
+fresh(SUSTAIN);
+[[101, 0], [100, 0], [6, 12], [38, 0]].forEach(([c, v]) => w.mt_control(0, c, v));
+w.mt_bend(0, 0);
+w.mt_note(0, NOTE + 12, 100);
+d = cents(period(render(BEND_BLOCKS)), period(plain));
+check(Math.abs(d) < 8, `RPN 0 sets the range: 12 semitones down on C5 sounds as C4 (off by ${d.toFixed(1)} cents)`);
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+render(100);
+w.mt_bend(0, 16383);
+const bent = render(BEND_BLOCKS);
+d = cents(period(bent), period(plain));
+check(Math.abs(d - 200) < 8, `a bend reaches a note that already sounds (+${d.toFixed(1)} cents, want 200)`);
+fresh(SUSTAIN);
+w.mt_note(1, NOTE, 100);
+const ch2 = render(BEND_BLOCKS);
+fresh(SUSTAIN);
+w.mt_bend(0, 0);
+w.mt_note(1, NOTE, 100);
+check(same(render(BEND_BLOCKS), ch2), 'a bend on channel 1 leaves channel 2 alone');
+fresh(SUSTAIN);
+w.mt_bend(0, 0);
+w.mt_control(0, 121, 0);
+w.mt_note(0, NOTE, 100);
+check(same(render(BEND_BLOCKS), plain), 'CC121 resets the bend');
+
+// 12. Modulation wheel: vibrato around the note's pitch, nothing at 0.
+fresh(SUSTAIN);
+w.mt_control(0, 1, 0);
+w.mt_note(0, NOTE, 100);
+check(same(render(BEND_BLOCKS), plain), 'modulation wheel at 0 is bit exact without it');
+fresh(SUSTAIN);
+w.mt_control(0, 1, 127);
+w.mt_note(0, NOTE, 100);
+const vib = render(BEND_BLOCKS);
+check(!same(vib, plain), 'modulation wheel up changes the sound');
+const periods = [];
+for (let at = 8000; at + 6000 < vib.length; at += 1000) periods.push(period(vib, at, 1024));
+const spread = cents(Math.min(...periods), Math.max(...periods));
+check(spread > 40 && spread < 120, `the vibrato swings about +-50 cents (${spread.toFixed(0)} cents peak to peak)`);
+fresh(SUSTAIN);
+w.mt_control(0, 1, 127);
+w.mt_note(1, NOTE, 100);
+check(same(render(BEND_BLOCKS), ch2), 'the wheel on channel 1 leaves channel 2 alone');
+
+// 13. Sustain pedal: a note released while it is down sounds on, and releases with the pedal.
+fresh(SUSTAIN);
+w.mt_control(0, 64, 127);
+w.mt_note(0, NOTE, 100);
+render(20);
+w.mt_note(0, NOTE, 0);
+render(2000);
+check(w.mt_voices() === 1, 'with the pedal down a released note keeps sounding');
+check(w.mt_info(0, 5) === 1, 'the channel reports the pedal');
+w.mt_control(0, 64, 0);
+render(2000);
+check(w.mt_voices() === 0, 'pedal up releases it');
+fresh(SUSTAIN);
+w.mt_control(0, 64, 127);
+w.mt_note(1, NOTE, 100);
+render(20);
+w.mt_note(1, NOTE, 0);
+render(2000);
+check(w.mt_voices() === 0, 'the pedal of channel 1 does not hold channel 2');
+fresh(SUSTAIN);
+w.mt_control(0, 64, 127);
+w.mt_note(0, NOTE, 100);
+w.mt_note(0, NOTE, 0);
+w.mt_control(0, 121, 0);
+render(2000);
+check(w.mt_voices() === 0, 'CC121 lifts the pedal');
+
+// 14. What the channel page reads.
+fresh(0);
+w.mt_channel_program(3, 0, program);
+w.mt_control(3, 1, 64);
+w.mt_note(3, NOTE, 100);
+w.mt_note(3, NOTE + 4, 100);
+w.mt_block();
+check(w.mt_info(3, 0) === 1 && w.mt_info(3, 2) === program && w.mt_info(3, 1) === 0, 'the channel reports its own program');
+check(w.mt_info(3, 4) === 64 && w.mt_info(3, 7) === 2 && w.mt_info(3, 6) === 2, 'the channel reports its wheel, note count and voices');
+check(w.mt_info(4, 0) === 0 && w.mt_info(4, 6) === 0 && w.mt_info(4, 8) === 127, 'a silent channel follows the panel at full volume');
+
 console.log(`${checks - failed}/${checks} checks passed`);
 process.exit(failed ? 1 : 0);

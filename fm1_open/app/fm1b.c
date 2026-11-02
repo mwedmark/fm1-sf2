@@ -10,12 +10,14 @@ enum { ATTACK, HOLD, DECAY, SUSTAIN, RELEASE };
 static const uint8_t default_env[12] = {2, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x00, 0xb9 /* 0xb900 = 0.72 per step */, 0, 0};
 
 struct voice {
-    uint32_t position, fraction, step, age, data, length, loop_start, loop_end;
+    uint32_t position, fraction, step, base_step, age, data, length, loop_start, loop_end;   /* step: base_step with bend and vibrato */
     int32_t gain, level, level_step;          /* gain: the voice's peak; level: the gain now, with the envelope, ramped per frame */
     const void *owner;
     uint32_t env, attack_inc, sustain, left;  /* envelope level Q24 at the start of a step, the attack's rise per step, sustain Q24 */
     uint16_t decay, release, frames;          /* Q16 factors per step; frames left in this step */
     uint8_t note, active, phase, fixed, drum, channel;
+    uint8_t held;                             /* released while the channel's sustain pedal was down: releases with the pedal */
+    uint16_t lfo;                             /* vibrato phase, moved on only while the channel's modulation wheel is up */
     /* SEA5 zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
@@ -40,6 +42,14 @@ enum { PANEL_CHANNEL = FM1B_CHANNELS, CHANNEL_SLOTS = FM1B_CHANNELS + 1, SCALE_O
 static int32_t channel_preset[CHANNEL_SLOTS];
 static uint8_t channel_volume[CHANNEL_SLOTS], channel_expression[CHANNEL_SLOTS];
 static uint16_t channel_scale[CHANNEL_SLOTS];
+/* Pitch bend (-8192..8191), its range from RPN 0 (semitones, cents) and the bend in cents; the modulation wheel (vibrato
+ * depth), the sustain pedal, the RPN selected with CC 101/100, and what the panel's channel page shows. All zero while a
+ * channel never gets these messages, and then nothing in the audio path looks at them but one test per envelope step. */
+static int16_t channel_bend[CHANNEL_SLOTS], channel_cents[CHANNEL_SLOTS];
+static uint8_t channel_bend_semis[CHANNEL_SLOTS], channel_bend_extra[CHANNEL_SLOTS];
+static uint8_t channel_mod[CHANNEL_SLOTS], channel_pedal[CHANNEL_SLOTS], channel_program[CHANNEL_SLOTS], channel_notes[CHANNEL_SLOTS];
+static uint16_t channel_rpn[CHANNEL_SLOTS];
+enum { RPN_NULL = 0x3fff, VIBRATO_CENTS = 50, LFO_STEP = 262 /* 5.5 Hz in steps of ENV_STEP frames */ };
 
 static FM1_DSP_CODE void channel_rescale(unsigned channel)
 {
@@ -54,6 +64,10 @@ static void channels_reset(void)
         channel_preset[c] = -1;
         channel_volume[c] = channel_expression[c] = 127;
         channel_rescale(c);
+        channel_bend[c] = channel_cents[c] = 0;
+        channel_bend_semis[c] = 2;
+        channel_bend_extra[c] = channel_mod[c] = channel_pedal[c] = channel_program[c] = channel_notes[c] = 0;
+        channel_rpn[c] = RPN_NULL;
     }
     bank.last_program_channel = bank.last_program = -1;
 }
@@ -196,6 +210,52 @@ void fm1b_panic(void)
         voices[i].active = 0;
 }
 
+/* 2^(cents / 1200) in Q16, for -3600..3600 cents: an octave shift, a semitone from the table, and the cents left over
+ * to second order (at most 0.05 cent off). */
+static const uint32_t semitone_q16[12] = {65536, 69433, 73562, 77936, 82570, 87480, 92682, 98193, 104032, 110218, 116772, 123715};
+static FM1_DSP_CODE uint32_t cents_factor(int32_t cents)
+{
+    int32_t octave = cents >= 0 ? cents / 1200 : -((1199 - cents) / 1200);
+    int32_t rest = cents - octave * 1200;                    /* 0..1199 */
+    int32_t t = rest % 100 * 3785 / 100;                      /* x * ln 2 in Q16 */
+    uint32_t f = (uint32_t)(((uint64_t)semitone_q16[rest / 100] * (uint32_t)(65536 + t + ((t * t) >> 17))) >> 16);
+    return octave >= 0 ? f << octave : f >> -octave;
+}
+/* The voice's step with its channel's bend and, while the modulation wheel is up, the vibrato: a triangle of +-50 cents
+ * at full depth. A channel without either plays base_step untouched. */
+static FM1_DSP_CODE void retune(struct voice *v)
+{
+    int32_t cents = channel_cents[v->channel];
+    unsigned mod = channel_mod[v->channel];
+    if (mod) {
+        int32_t tri = v->lfo < 32768U ? (int32_t)v->lfo : 65535 - (int32_t)v->lfo;   /* 0..32767 */
+        cents += (tri - 16384) * (int32_t)mod * VIBRATO_CENTS / (16384 * 127);
+    }
+    v->step = cents ? (uint32_t)(((uint64_t)v->base_step * cents_factor(cents)) >> 16) : v->base_step;
+}
+static FM1_DSP_CODE void channel_retune(unsigned channel)
+{
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
+        if (voices[i].active && voices[i].channel == channel)
+            retune(&voices[i]);
+}
+static FM1_DSP_CODE void bend_update(unsigned channel)
+{
+    int32_t range = channel_bend_semis[channel] * 100 + channel_bend_extra[channel];
+    channel_cents[channel] = (int16_t)(channel_bend[channel] * range / 8192);
+    channel_retune(channel);
+}
+/* Pedal up: every note released while it was down releases now. */
+static FM1_DSP_CODE void pedal_release(unsigned channel)
+{
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
+        if (voices[i].active && voices[i].channel == channel && voices[i].held) {
+            voices[i].held = 0;
+            if (voices[i].phase != RELEASE)
+                voices[i].phase = RELEASE;
+        }
+}
+
 static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigned note, unsigned velocity, unsigned level, unsigned drum)
 {
     if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127 || (drum && bank.drum_preset < 0))
@@ -204,10 +264,15 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     if (!velocity) {
         /* A zone with the fixed flag (percussion) plays to its end like a struck drum. */
         for (unsigned i = 0; i < FM1B_VOICES; ++i)
-            if (voices[i].active && voices[i].owner == owner && voices[i].channel == channel && voices[i].note == note && voices[i].drum == drum && !voices[i].fixed && voices[i].phase != RELEASE)
-                voices[i].phase = RELEASE;
+            if (voices[i].active && voices[i].owner == owner && voices[i].channel == channel && voices[i].note == note && voices[i].drum == drum && !voices[i].fixed && voices[i].phase != RELEASE) {
+                if (channel_pedal[channel])
+                    voices[i].held = 1;                       /* the pedal holds it */
+                else
+                    voices[i].phase = RELEASE;
+            }
         return;
     }
+    ++channel_notes[channel];
     uint32_t key = bank.image[bank.keymaps + (uint32_t)preset_index * 128U + note];
     const uint8_t *preset = bank.image + bank.presets + (uint32_t)preset_index * 24U;
     uint32_t first = rd16(preset), count = rd16(preset + 2);
@@ -253,7 +318,10 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     v->length = length;
     v->loop_start = start;
     v->loop_end = end;
-    v->step = (uint32_t)(((uint64_t)pitch * bank.rate + ENGINE_RATE / 2U) / ENGINE_RATE);
+    v->base_step = v->step = (uint32_t)(((uint64_t)pitch * bank.rate + ENGINE_RATE / 2U) / ENGINE_RATE);
+    v->lfo = 16384;                                           /* the triangle's centre: vibrato starts at the note's own pitch */
+    if (channel_cents[channel] || channel_mod[channel])
+        retune(v);
     v->gain = (int32_t)((int64_t)velocity * level * 1073741824LL / (127 * 127 * 4));
     /* envelope: the attack starts from silence; a step is ENV_STEP frames at 44.1 kHz */
     uint32_t attack_steps = (rd16(env) * 1378U + 500U) / 1000U, hold_steps = (rd16(env + 2) * 1378U + 500U) / 1000U;
@@ -278,7 +346,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
  * and fm1b_render() applies it. For a note, a is the note and b the velocity; for a program change a is the program and
  * b is 1 for the percussion bank; for a controller a is its number and b its value. */
 enum { QUEUE_SIZE = 32 };
-enum { EVENT_NOTE, EVENT_PROGRAM, EVENT_CONTROL };
+enum { EVENT_NOTE, EVENT_PROGRAM, EVENT_CONTROL, EVENT_BEND };   /* a bend: a is the low 7 bits, b the high 7 */
 static struct { const void *owner; uint8_t kind, channel, a, b, level, drum; } queue[QUEUE_SIZE];
 static volatile uint32_t queue_head, queue_tail;
 static void queue_event(unsigned kind, const void *owner, unsigned channel, unsigned a, unsigned b, unsigned level, unsigned drum)
@@ -318,6 +386,32 @@ void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value)
     if (channel < FM1B_CHANNELS)
         queue_event(EVENT_CONTROL, NULL, channel, controller, value, 0, 0);
 }
+void fm1b_channel_bend(unsigned channel, unsigned value)
+{
+    if (channel < FM1B_CHANNELS && value < 16384U)
+        queue_event(EVENT_BEND, NULL, channel, value & 127U, value >> 7, 0, 0);
+}
+void fm1b_channel_info(unsigned channel, struct fm1b_channel *info)
+{
+    memset(info, 0, sizeof *info);
+    if (channel >= FM1B_CHANNELS || !bank.image)
+        return;
+    int32_t p = channel_preset[channel];
+    if (p >= 0) {
+        info->own = 1;
+        info->program = channel_program[channel] & 127U;
+        info->kit = channel_program[channel] >> 7;
+        memcpy(info->name, bank.image + bank.presets + (uint32_t)p * 24U + 4, 20);
+    }
+    info->volume = channel_volume[channel];
+    info->expression = channel_expression[channel];
+    info->bend_cents = channel_cents[channel];
+    info->mod = channel_mod[channel];
+    info->pedal = channel_pedal[channel];
+    info->notes = channel_notes[channel];
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
+        info->voices += voices[i].active && voices[i].channel == channel;
+}
 unsigned fm1b_has_drums(void) { return bank.image && bank.drum_preset >= 0; }
 unsigned fm1b_multitimbral(void)
 {
@@ -333,12 +427,41 @@ static FM1_DSP_CODE void program_apply(unsigned channel, unsigned program_bank, 
     if (p < 0)
         return;
     channel_preset[channel] = p;
+    channel_program[channel] = (uint8_t)(program | (program_bank ? 128U : 0U));
     bank.last_program_channel = (int32_t)channel;
     bank.last_program = (int32_t)program;
 }
 static FM1_DSP_CODE void control_apply(unsigned channel, unsigned controller, unsigned value)
 {
     switch (controller) {
+    case 1:                                                   /* modulation wheel: vibrato depth */
+        channel_mod[channel] = (uint8_t)value;
+        if (!value)
+            channel_retune(channel);                          /* back to the note's own pitch (and the bend) */
+        break;
+    case 64:                                                  /* sustain pedal */
+        channel_pedal[channel] = value >= 64U;
+        if (!channel_pedal[channel])
+            pedal_release(channel);
+        break;
+    case 101:
+        channel_rpn[channel] = (uint16_t)((channel_rpn[channel] & 127U) | value << 7);
+        break;
+    case 100:
+        channel_rpn[channel] = (uint16_t)((channel_rpn[channel] & ~127U) | value);
+        break;
+    case 6:                                                   /* data entry: RPN 0 is the bend range, up to 24 semitones */
+        if (channel_rpn[channel] == 0) {
+            channel_bend_semis[channel] = (uint8_t)(value > 24U ? 24U : value);
+            bend_update(channel);
+        }
+        break;
+    case 38:
+        if (channel_rpn[channel] == 0) {
+            channel_bend_extra[channel] = (uint8_t)(value > 99U ? 99U : value);
+            bend_update(channel);
+        }
+        break;
     case 7:
         channel_volume[channel] = (uint8_t)value;
         channel_rescale(channel);
@@ -347,14 +470,21 @@ static FM1_DSP_CODE void control_apply(unsigned channel, unsigned controller, un
         channel_expression[channel] = (uint8_t)value;
         channel_rescale(channel);
         break;
-    case 121:
+    case 121:                                                 /* reset all controllers: levels, bend, wheel, pedal, RPN */
         channel_volume[channel] = channel_expression[channel] = 127;
         channel_rescale(channel);
+        channel_bend[channel] = 0;
+        channel_mod[channel] = 0;
+        channel_pedal[channel] = 0;
+        channel_rpn[channel] = RPN_NULL;
+        pedal_release(channel);
+        bend_update(channel);
         break;
     case 120:
     case 123:
         for (unsigned i = 0; i < FM1B_VOICES; ++i)
             if (voices[i].active && voices[i].channel == channel) {
+                voices[i].held = 0;
                 if (controller == 120)
                     voices[i].active = 0;
                 else if (!voices[i].fixed && voices[i].phase != RELEASE)
@@ -425,6 +555,10 @@ static FM1_DSP_CODE void env_step(struct voice *v)
         v->active = 0;
         return;
     }
+    if (channel_mod[v->channel]) {                            /* vibrato: the step follows the LFO, once per envelope step */
+        v->lfo = (uint16_t)(v->lfo + LFO_STEP);
+        retune(v);
+    }
     int32_t next = (int32_t)((((int64_t)v->gain * target >> 24) * channel_scale[v->channel]) >> 14);   /* the channel's volume applies live */
     v->level_step = (next - v->level) / ENV_STEP;
     v->frames = ENV_STEP;
@@ -438,6 +572,10 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
             program_apply(queue[at].channel, queue[at].b, queue[at].a);
         else if (queue[at].kind == EVENT_CONTROL)
             control_apply(queue[at].channel, queue[at].a, queue[at].b);
+        else if (queue[at].kind == EVENT_BEND) {
+            channel_bend[queue[at].channel] = (int16_t)(((int32_t)queue[at].b << 7 | queue[at].a) - 8192);
+            bend_update(queue[at].channel);
+        }
         else
             note_apply(queue[at].owner, queue[at].channel, queue[at].a, queue[at].b, queue[at].level, queue[at].drum);
         __asm__ volatile("" ::: "memory");

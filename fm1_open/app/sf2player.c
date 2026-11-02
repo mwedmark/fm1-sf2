@@ -61,6 +61,12 @@ void sf2player_channel_control(unsigned channel, unsigned controller, unsigned v
     fm1b_channel_control(channel, controller, value);
     fm1_device_irq_restore(flags);
 }
+void sf2player_channel_bend(unsigned channel, unsigned value)
+{
+    uint32_t flags = fm1_device_irq_save();
+    fm1b_channel_bend(channel, value);
+    fm1_device_irq_restore(flags);
+}
 
 /* ---- the panel: F3..G5 are 27 keys, bit 0 = F3 (MIDI 53) -------------------------------------------------- */
 enum { FIRST_NOTE = 53, KEYS = 27, BACKGROUND = 0x0210 /* dark teal */ };
@@ -88,9 +94,10 @@ static const uint8_t punctuation[][6] = {
     {'.', 0, 0x60, 0x60, 0, 0}, {':', 0, 0x36, 0x36, 0, 0}, {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'(', 0, 0x1c, 0x22, 0x41, 0},
     {')', 0, 0x41, 0x22, 0x1c, 0}};
 enum { WHITE = 0xffff, GREY = 0x8410, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
-       LINE_CHARS = 41, LINES = 11, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
+       LINE_CHARS = 41, LINES = 20, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
 static char shown[LINES][LINE_CHARS + 1];
+static uint16_t shown_color[LINES];
 
 static void text_line(unsigned y, const char *s, unsigned scale, uint16_t color)
 {
@@ -113,14 +120,15 @@ static void text_line(unsigned y, const char *s, unsigned scale, uint16_t color)
     }
     (void)fm1_screen_blit(0, y, FM1_SCREEN_WIDTH, h, row_pixels, FM1_SCREEN_WIDTH * h);
 }
-/* Draw line `n` at y only when its text is not what is on the screen. */
+/* Draw line `n` at y only when its text or colour is not what is on the screen. */
 static void line_show(unsigned n, unsigned y, const char *s, unsigned scale, uint16_t color)
 {
-    if (!strncmp(shown[n], s, LINE_CHARS))
+    if (!strncmp(shown[n], s, LINE_CHARS) && shown_color[n] == color)
         return;
     text_line(y, s, scale, color);
     strncpy(shown[n], s, LINE_CHARS);
     shown[n][LINE_CHARS] = 0;
+    shown_color[n] = color;
 }
 static char *put_text(char *d, const char *s) { while (*s) *d++ = *s++; return d; }
 static char *put_number(char *d, int32_t v, unsigned min_digits)
@@ -160,14 +168,118 @@ static void upload_line(void)
     line_show(8, 184, line, 2, GREY);
 }
 
+/* ---- the channel page (HOME): what each MIDI channel plays and its controllers ----------------------------------- */
+static unsigned page;                                     /* 0: the program and its zone, 1: the 16 channels */
+static unsigned bar_drawn = 1000;                         /* the level bar's width on the screen (1000: not drawn) */
+static uint8_t channel_notes_seen[FM1B_CHANNELS];
+static uint32_t channel_hit[FM1B_CHANNELS];               /* fm1_millis() of the latest note-on seen on the channel */
+
+static void page_clear(void)
+{
+    fm1_screen_fill(0, 0, FM1_SCREEN_WIDTH, FM1_SCREEN_HEIGHT, BACKGROUND);
+    memset(shown, 0, sizeof shown);
+    memset(shown_color, 0, sizeof shown_color);
+    bar_drawn = 1000;
+}
+/* Bend in semitones with one decimal, right aligned in 5 characters; blank at the centre. */
+static char *put_bend(char *d, int32_t cents)
+{
+    char tmp[8], *t = tmp;
+    if (cents) {
+        int32_t tenths = (cents < 0 ? cents - 5 : cents + 5) / 10;   /* rounded to 0.1 semitone */
+        *t++ = cents < 0 ? '-' : '+';
+        if (tenths < 0) tenths = -tenths;
+        t = put_number(t, tenths / 10, 0);
+        *t++ = '.';
+        *t++ = (char)('0' + tenths % 10);
+    }
+    for (unsigned pad = (unsigned)(t - tmp); pad < 5; ++pad) *d++ = ' ';
+    for (char *s = tmp; s < t; ++s) *d++ = *s;
+    return d;
+}
+static char *put_padded(char *d, const char *s, unsigned width)
+{
+    unsigned n = 0;
+    for (; n < width && s[n]; ++n) *d++ = s[n];
+    for (; n < width; ++n) *d++ = ' ';
+    return d;
+}
+/* CH PRG NAME LVL BEND MOD P: green while it plays, white with a program of its own, grey while it follows the panel's,
+ * orange for the kit on channel 10. */
+static void channels_update(const struct fm1b_status *st)
+{
+    char line[LINE_CHARS + 1], *d;
+    uint32_t now = fm1_millis();
+    d = put_text(line, "CHANNELS ");
+    d = put_number(d, st->voices, 0);
+    *d++ = '/';
+    d = put_number(d, FM1B_VOICES, 0);
+    *d = 0;
+    line_show(0, 8, line, 2, WHITE);
+    line_show(1, 28, "CH PRG NAME           LVL  BEND MOD P", 1, GREY);
+    for (unsigned c = 0; c < FM1B_CHANNELS; ++c) {
+        struct fm1b_channel info;
+        fm1b_channel_info(c, &info);
+        if (info.notes != channel_notes_seen[c]) {
+            channel_notes_seen[c] = info.notes;
+            channel_hit[c] = now;
+        }
+        d = put_number(line, (int32_t)c + 1, 2);
+        *d++ = ' ';
+        uint16_t color;
+        if (c == 9U) {                                        /* transfer.c: channel 10 always plays the kit */
+            d = put_text(d, "KIT ");
+            d = put_padded(d, st->drums ? st->drum_name : "-", 14);
+            color = ORANGE;
+        } else if (info.own) {
+            if (info.kit) d = put_text(d, "KIT");
+            else d = put_number(d, info.program + 1, 3);
+            *d++ = ' ';
+            d = put_padded(d, info.name, 14);
+            color = WHITE;
+        } else {
+            d = put_number(d, st->program + 1, 3);
+            *d++ = ' ';
+            d = put_padded(d, st->name, 14);
+            color = GREY;
+        }
+        *d++ = ' ';
+        unsigned level = (unsigned)info.volume * info.expression / 127U;
+        if (level < 100) *d++ = ' ';
+        if (level < 10) *d++ = ' ';
+        d = put_number(d, (int32_t)level, 0);
+        *d++ = ' ';
+        d = put_bend(d, info.bend_cents);
+        *d++ = ' ';
+        if (info.mod) {
+            if (info.mod < 100) *d++ = ' ';
+            if (info.mod < 10) *d++ = ' ';
+            d = put_number(d, info.mod, 0);
+        } else
+            d = put_text(d, "   ");
+        *d++ = ' ';
+        *d++ = info.pedal ? 'P' : ' ';
+        *d = 0;
+        if (info.voices || now - channel_hit[c] < 250U)
+            color = GREEN;
+        line_show(2 + c, 40 + c * 11, line, 1, color);
+    }
+    line_show(18, 228, "HOME BACK  ENC1 PRG  K1 K2 K3 FX", 1, GREY);
+}
+
 static void screen_update(void)
 {
     struct fm1b_status st;
     char line[LINE_CHARS + 1], *d;
     fm1b_status(&st);
     if (!st.ready) {
+        if (page) { page = 0; page_clear(); }
         line_show(0, 8, "NO BANK", 2, ORANGE);
         upload_line();
+        return;
+    }
+    if (page) {
+        channels_update(&st);
         return;
     }
     if (drum_mode) {
@@ -245,7 +357,6 @@ static void screen_update(void)
 
     /* the voice's level, A H D S R, and how many voices sound */
     static const char phases[5] = {'A', 'H', 'D', 'S', 'R'};
-    static unsigned bar_drawn = 1000;
     unsigned bar = (unsigned)st.level * 220U / 255U;
     if (bar != bar_drawn) {
         fm1_screen_fill(10, 124, 220, 10, BAR_BACK);
@@ -282,7 +393,7 @@ static void screen_update(void)
     } else
         *line = 0;
     line_show(10, 172, line, 1, CYAN);
-    line_show(7, 228, "ENC1 PROG SCL DRUMS K1 REV K2 CHO K3 PAN", 1, GREY);
+    line_show(7, 228, "ENC1 PRG  SCL DRUM  HOME CH  K1 K2 K3 FX", 1, GREY);
 }
 
 static uint32_t previous_keys, previous_buttons;
@@ -299,7 +410,10 @@ void groove_screen_init(void)
     drum_mode = 0;
     sounding_drum = 0;
     program = 0;
+    page = 0;
     memset(shown, 0, sizeof shown);
+    memset(shown_color, 0, sizeof shown_color);
+    bar_drawn = 1000;
 }
 void groove_screen_control(void)
 {
@@ -329,6 +443,10 @@ void groove_screen_control(void)
     previous_buttons = controls.buttons;
     if ((pressed & 8U) && fm1b_has_drums())                  /* SCL: button 3 switches between the program and the drum kit */
         drum_mode ^= 1U;
+    if (pressed & (1U << 8)) {                                /* HOME: the program page or the channel page */
+        page ^= 1U;
+        page_clear();
+    }
     if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */
         octave += (int)((pressed >> 1) & 1U) - (int)(pressed & 1U);
         octave = octave < -2 ? -2 : octave > 2 ? 2 : octave;

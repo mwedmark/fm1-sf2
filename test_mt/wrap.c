@@ -38,3 +38,20 @@ EXPORT unsigned mt_status(unsigned field)                /* 0 channels, 1 progra
 }
 EXPORT void mt_panel_drum(unsigned note, unsigned velocity) { fm1b_drum_note(0, note, velocity, 100); }
 EXPORT unsigned mt_has_drums(void) { return fm1b_has_drums(); }
+EXPORT void mt_bend(unsigned channel, unsigned value) { fm1b_channel_bend(channel, value); }
+EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 program, 3 bend cents, 4 mod, 5 pedal, 6 voices, 7 notes, 8 volume */
+{
+    struct fm1b_channel c;
+    fm1b_channel_info(channel, &c);
+    switch (field) {
+    case 0: return c.own;
+    case 1: return c.kit;
+    case 2: return c.program;
+    case 3: return c.bend_cents;
+    case 4: return c.mod;
+    case 5: return c.pedal;
+    case 6: return c.voices;
+    case 7: return c.notes;
+    default: return c.volume;
+    }
+}
