@@ -54,6 +54,11 @@ struct voice {
     int16_t fc, fc_env, fc_lfo;
     int32_t fc_now;                            /* the cutoff the coefficients are for, cents */
     uint32_t inv2q, fgain;
+    /* How a cutoff that holds still runs (FILTER_*): in 64 bits, or in 32 bits with q0 (b0 in Q(13 + qk)), q1, q2 (a1, a2 in Q13)
+     * on the signal over 2^qs (as the voice's level allows: 13 bits for its loudest). qerr: the remainder of the output's shift,
+     * carried to the next frame. */
+    uint8_t fmode, qk, qs;
+    int32_t q0, q1, q2, qerr;
     int32_t b0, a1, a2, x1, x2, y1, y2;
     /* SEA zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
@@ -88,6 +93,10 @@ enum { MENV_DELAY, MENV_ATTACK, MENV_HOLD, MENV_DECAY, MENV_SUSTAIN, MENV_RELEAS
 static const uint32_t FILTER_BASE = (uint32_t)((8176ULL * 4294967296ULL + 500ULL * FM1B_RATE) / (1000ULL * FM1B_RATE));
 /* The filter's top, 0.45 of the rate (as FluidSynth), Q30; a filtered voice is rendered this many frames at a time. */
 enum { FILTER_TOP = 483183821, FILTER_CHUNK = 128 };
+/* From 1/50 to 1/4 of the rate (640 Hz to 8 kHz at 32 kHz) a still filter runs in 32 bits: its poles are far enough from 1 that
+ * coefficients in Q13 put the cutoff within 1 %, and far enough from -1 that the rounding's noise, which the error feedback moves up,
+ * is not lifted by a peak near the top. Elsewhere, and while the cutoff moves, it runs in 64 bits. */
+enum { FILTER_FAST = 21474836, FILTER_FAST_TOP = 268435456, FILTER_SLOW = 0, FILTER_32 = 1 };
 /* An LFO at 0 timecents (8.176 Hz, the SF2 default) moves its phase this much per envelope step. */
 static const uint32_t LFO_BASE = (uint32_t)((8176ULL * 4294967296ULL * (unsigned)ENV_STEP + 500ULL * FM1B_RATE) / (1000ULL * FM1B_RATE));
 
@@ -431,11 +440,9 @@ static inline __attribute__((always_inline)) int32_t filter_cents(const struct v
     int32_t fc = v->fc + (int32_t)(((int64_t)v->menv * v->fc_env) >> 24) + ((v->lfo_m * v->fc_lfo) >> 15);
     return fc < 1500 ? 1500 : fc > 13500 ? 13500 : fc;
 }
-static FM1_DSP_CODE void filter_coefs(const struct voice *v, int32_t fc, int32_t *b0, int32_t *a1, int32_t *a2)
+static FM1_DSP_CODE void filter_coefs_at(const struct voice *v, uint32_t turn, int32_t *b0, int32_t *a1, int32_t *a2)
 {
-    const int32_t half_pi = 1686629713;                       /* pi / 2 in Q30 */
-    uint32_t turn = scale_tc(FILTER_BASE, fc) >> 2;           /* the cutoff over the rate, Q30 */
-    turn = turn > (uint32_t)FILTER_TOP ? (uint32_t)FILTER_TOP : turn;
+    const int32_t half_pi = 1686629713;
     int64_t w = (int64_t)(((uint64_t)turn * (uint32_t)half_pi) >> 28);   /* 2 pi times it, Q30 radians: up to 0.9 pi */
     int32_t s = sin_q30((int32_t)(w > half_pi ? 2LL * half_pi - w : w)), h = sin_q30((int32_t)(w >> 1));
     int64_t omc = ((int64_t)h * h) >> 29;                     /* 1 - cos w */
@@ -447,34 +454,93 @@ static FM1_DSP_CODE void filter_coefs(const struct voice *v, int32_t fc, int32_t
     *a2 = (int32_t)((((1LL << 30) - alpha) * inv) >> 30);
     *b0 = (int32_t)((((omc * inv) >> 31) * v->fgain) >> 16);
 }
+static FM1_DSP_CODE uint32_t filter_coefs(const struct voice *v, int32_t fc, int32_t *b0, int32_t *a1, int32_t *a2)
+{
+    uint32_t turn = scale_tc(FILTER_BASE, fc) >> 2;           /* the cutoff over the rate, Q30 */
+    turn = turn > (uint32_t)FILTER_TOP ? (uint32_t)FILTER_TOP : turn;
+    filter_coefs_at(v, turn, b0, a1, a2);
+    return turn;
+}
 /* The voice's block x through its filter, added to out; with keep also written back to x (for the buses). While the cutoff moves
  * the coefficients go from where they were to their value now across the block (glide); otherwise they stay in registers. */
 static inline __attribute__((always_inline)) void filter_loop(struct voice *v, int32_t *x, int32_t *out, unsigned n, int32_t c0, int32_t c1,
                                                              int32_t c2, int32_t d0, int32_t d1, int32_t d2, const int glide, const int keep)
 {
-    int32_t x1 = v->x1, x2 = v->x2, y1 = v->y1, y2 = v->y2;
+    int32_t x1 = v->x1, x2 = v->x2, y1 = v->y1, y2 = v->y2, e = v->qerr;
     for (unsigned i = 0; i < n; ++i) {
         int32_t in = x[i];
-        int64_t acc = (int64_t)c0 * (in + 2 * x1 + x2) - (int64_t)c1 * y1 - (int64_t)c2 * y2;
+        int64_t acc = (int64_t)c0 * (in + 2 * x1 + x2) - (int64_t)c1 * y1 - (int64_t)c2 * y2 + e;
         int32_t y = (int32_t)(acc >> 30);
+        e = (int32_t)(acc & ((1 << 30) - 1));                /* what the shift drops, to the next frame: no DC from rounding */
         y = y > (1 << 28) ? (1 << 28) : y < -(1 << 28) ? -(1 << 28) : y;
         x2 = x1; x1 = in; y2 = y1; y1 = y;
         out[i] += y;
         if (keep) x[i] = y;
         if (glide) { c0 += d0; c1 += d1; c2 += d2; }
     }
-    v->x1 = x1; v->x2 = x2; v->y1 = y1; v->y2 = y2;
+    v->x1 = x1; v->x2 = x2; v->y1 = y1; v->y2 = y2; v->qerr = e;
 }
-static FM1_DSP_CODE __attribute__((noinline)) void filter_run(struct voice *v, int32_t *x, int32_t *out, unsigned n, int keep)
+/* The same filter in 32 bits, for a cutoff that holds still at 1/50 of the rate or more. The signal is shifted so that the voice's
+ * loudest possible frame (peak, from its level) has 13 bits: as many for a soft note as for a loud one, and 12 dB of room under the
+ * 15-bit limit for the resonance. b0 has qk more bits than a1, a2, and what the shift to the output drops is carried to the next frame
+ * (error feedback), so the rounding's noise does not pile up where the poles are. */
+static inline __attribute__((always_inline)) void filter_loop32(struct voice *v, int32_t *x, int32_t *out, unsigned n, int32_t peak,
+                                                               const int keep)
+{
+    /* the shift that takes the voice's loudest possible frame to 13 bits; the remainder belongs to the shift it was made with */
+    int32_t sh = 0;
+    while ((peak >> sh) >= (1 << 13)) ++sh;
+    if (sh != v->qs) { v->qerr = 0; v->qs = (uint8_t)sh; }
+    const int32_t q0 = v->q0, q1 = v->q1, q2 = v->q2, k = v->qk;
+    int32_t x1 = v->x1 >> sh, x2 = v->x2 >> sh, y1 = v->y1 >> sh, y2 = v->y2 >> sh, e = v->qerr;
+    for (unsigned i = 0; i < n; ++i) {
+        int32_t in = x[i] >> sh;
+        int32_t acc = ((q0 * (in + 2 * x1 + x2)) >> k) - q1 * y1 - q2 * y2 + e;
+        int32_t y = acc >> 13;
+        e = acc - (y << 13);
+        y = y > (1 << 15) ? (1 << 15) : y < -(1 << 15) ? -(1 << 15) : y;
+        x2 = x1; x1 = in; y2 = y1; y1 = y;
+        out[i] += y << sh;
+        if (keep) x[i] = y << sh;
+    }
+    v->x1 = x1 << sh; v->x2 = x2 << sh; v->y1 = y1 << sh; v->y2 = y2 << sh; v->qerr = e;
+}
+/* The 32-bit coefficients from the 64-bit ones: a1, a2 in Q13, b0 with as many more bits as keep it under 2^13. The 64-bit ones
+ * become exactly what the 32-bit ones are, so that the block that glides to them in 64 bits ends where the 32-bit blocks start. */
+static FM1_DSP_CODE void filter_quantize(struct voice *v, int32_t *b0, int32_t *a1, int32_t *a2)
+{
+    int32_t k = 0, b = *b0;
+    while (k < 16 && (b >> (17 - k - 1)) < (1 << 13)) ++k;
+    int32_t q1 = ((*a1 >> 16) + 1) >> 1;
+    q1 = q1 > 16383 ? 16383 : q1 < -16383 ? -16383 : q1;
+    v->qk = (uint8_t)k;
+    v->q0 = ((b >> (16 - k)) + 1) >> 1;
+    v->q1 = q1;
+    v->q2 = ((*a2 >> 16) + 1) >> 1;
+    *b0 = v->q0 << (17 - k);
+    *a1 = v->q1 * (1 << 17);
+    *a2 = v->q2 * (1 << 17);
+}
+static FM1_DSP_CODE __attribute__((noinline)) void filter_run(struct voice *v, int32_t *x, int32_t *out, unsigned n, int32_t peak, int keep)
 {
     int32_t fc = filter_cents(v);
     if (v->filtered == 1 && fc == v->fc_now) {
-        if (keep) filter_loop(v, x, out, n, v->b0, v->a1, v->a2, 0, 0, 0, 0, 1);
-        else filter_loop(v, x, out, n, v->b0, v->a1, v->a2, 0, 0, 0, 0, 0);
+        switch (v->fmode) {
+        case FILTER_32:
+            if (keep) filter_loop32(v, x, out, n, peak, 1); else filter_loop32(v, x, out, n, peak, 0);
+            break;
+        default:
+            if (keep) filter_loop(v, x, out, n, v->b0, v->a1, v->a2, 0, 0, 0, 0, 1);
+            else filter_loop(v, x, out, n, v->b0, v->a1, v->a2, 0, 0, 0, 0, 0);
+            break;
+        }
         return;
     }
     int32_t b0, a1, a2;
-    filter_coefs(v, fc, &b0, &a1, &a2);
+    uint32_t turn = filter_coefs(v, fc, &b0, &a1, &a2);
+    int fast = turn >= (uint32_t)FILTER_FAST && turn < (uint32_t)FILTER_FAST_TOP;
+    if (fast)
+        filter_quantize(v, &b0, &a1, &a2);
     v->fc_now = fc;
     if (v->filtered == 2) { v->b0 = b0; v->a1 = a1; v->a2 = a2; v->filtered = 1; }
     /* a1 goes from about -2 to 2 (Q30): its change needs 33 bits. A step is the change times 1 / n (Q16). */
@@ -484,6 +550,10 @@ static FM1_DSP_CODE __attribute__((noinline)) void filter_run(struct voice *v, i
     if (keep) filter_loop(v, x, out, n, c0, c1, c2, d0, d1, d2, 1, 1);
     else filter_loop(v, x, out, n, c0, c1, c2, d0, d1, d2, 1, 0);
     v->b0 = b0; v->a1 = a1; v->a2 = a2;
+    /* the next blocks, while the cutoff stays here: in 32 bits, or in 64. The remainder is in this block's (64-bit) scale. */
+    v->fmode = fast ? FILTER_32 : FILTER_SLOW;
+    if (fast)
+        v->qerr = 0;
 }
 static FM1_DSP_CODE void channel_retune(unsigned channel)
 {
@@ -1149,8 +1219,11 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_filtered(struct voice *
     for (unsigned at = 0; at < frames && v->active; at += FILTER_CHUNK) {
         unsigned n = frames - at < FILTER_CHUNK ? frames - at : FILTER_CHUNK;
         memset(filter_block, 0, n * sizeof *filter_block);
+        int32_t before = v->level;
         voice_play(v, filter_block, n);
-        filter_run(v, filter_block, out + at, n, rg || cg || sg);
+        /* a frame is a sample (Q4, under 2^19) times the level over 2^25: at most the level over 64, and the level only ramps */
+        int32_t level = before > v->level ? before : v->level;
+        filter_run(v, filter_block, out + at, n, (level < 0 ? -level : level) >> 6, rg || cg || sg);
         if (rg) for (unsigned i = 0; i < n; ++i) rev[at + i] += (filter_block[i] * rg) >> 7;
         if (cg) for (unsigned i = 0; i < n; ++i) cho[at + i] += (filter_block[i] * cg) >> 7;
         if (sg) for (unsigned i = 0; i < n; ++i) side[at + i] += (filter_block[i] * sg) >> 8;

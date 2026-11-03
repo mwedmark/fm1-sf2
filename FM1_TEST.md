@@ -94,8 +94,8 @@ sänkt gränsen.
 | E4 | `steal40.mid` (40 toner, 32 röster) | de äldsta tonerna stjäls | | |
 | E5 | `release.mid` | Allt tystnar efter note off | | |
 | E6 | `load24_pan.mid` (alla röster panorerade) | Som E1, högst ett par procent mer | | |
-| E7 | `load32_lfo.mid` (32 toner på violin och Organ 3, alla med LFO och filter) | 75-80 %, topp 87 %: `CPU` kan visas | | |
-| E8 | `load32_filter.mid` (32 toner på Saw Wave, Warm Pad, Organ 2, Synth Bass 1, alla med filter) | 73-78 %, topp 86 %: `CPU` kan visas | | |
+| E7 | `load32_lfo.mid` (32 toner på violin och Organ 3, alla med LFO och filter) | 61-64 %, topp 77 % | | |
+| E8 | `load32_filter.mid` (32 toner på Saw Wave, Warm Pad, Organ 2, Synth Bass 1, alla med filter) | 60-63 %, topp 76 % | | |
 
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 Om det knastrar eller `CPU` visas ofta: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).

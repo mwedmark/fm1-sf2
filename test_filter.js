@@ -61,11 +61,11 @@ function to64(bin) {
 const BLOCK = 128;
 for (const rate of [44100, 32000]) {
   const w = engine(rate), tag = `${rate / 1000} kHz:`, f0 = rate / 64;
-  function play(image, note, seconds, offAt) {
+  function play(image, note, seconds, offAt, velocity = 127) {
     new Uint8Array(w.memory.buffer, w.mt_bank(), image.length).set(image);
     if (w.mt_bind(image.length) !== 0) throw new Error('bank rejected');
     w.mt_program(0, 0);
-    w.mt_note(0, note, 127);
+    w.mt_note(0, note, velocity);
     const blocks = Math.ceil(seconds * rate / BLOCK), all = new Float64Array(blocks * BLOCK);
     for (let k = 0; k < blocks; ++k) {
       if (offAt !== undefined && k === Math.round(offAt * rate / BLOCK)) w.mt_note(0, note, 0);
@@ -88,7 +88,51 @@ for (const rate of [44100, 32000]) {
       worst = Math.max(worst, Math.abs(have - want) / (want < -40 ? 5 : 1));
       return `${Math.round(f)} Hz ${have.toFixed(2)} (${want.toFixed(2)})`;
     });
-    check(worst < 0.1, `${tag} ${fc / 1000} kHz low-pass, Q ${q} cB: ${got.join(', ')} dB`);
+    // 64 bits within 0.01 dB; a cutoff that holds still at 1/50 of the rate or more runs in 32 bits, its coefficients in Q13: 0.2 dB
+    check(worst < 0.2, `${tag} ${fc / 1000} kHz low-pass, Q ${q} cB: ${got.join(', ')} dB`);
+  }
+  // 1b. Sample by sample against the same filter in floating point on the voice's own unfiltered output, at full level: what the
+  // integer coefficients change (64 bits: nothing to speak of; 32 bits, Q13: under 1 %, some 0.1 dB). Then the noise alone: a note
+  // 30 dB down (velocity 23), scaled up, against the loud one; the unfiltered voice's own rounding the same way is the yardstick.
+  // 0.24 of the rate, with all of the resonance, is just under where the 32 bits stop.
+  {
+    const float = (input, fcCents, q) => {
+      const f0 = Math.min(8.176 * Math.pow(2, fcCents / 1200), 0.45 * rate), w0 = 2 * Math.PI * f0 / rate;
+      const ql = Math.pow(10, (q / 10 - 3.01) / 20), alpha = Math.sin(w0) / (2 * ql), a0 = 1 + alpha;
+      const b0 = (1 - Math.cos(w0)) / 2 / a0 / Math.sqrt(ql), a1 = -2 * Math.cos(w0) / a0, a2 = (1 - alpha) / a0;
+      const y = new Float64Array(input.length);
+      let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+      for (let i = 0; i < input.length; ++i) { y[i] = b0 * (input[i] + 2 * x1 + x2) - a1 * y1 - a2 * y2; x2 = x1; x1 = input[i]; y2 = y1; y1 = y[i]; }
+      return y;
+    };
+    const snr = (ref, got, scale = 1) => { let sig = 0, err = 0;
+      for (let i = Math.round(0.15 * rate); i < ref.length; ++i) { sig += ref[i] * ref[i]; err += (got[i] * scale - ref[i]) ** 2; } return 10 * Math.log10(sig / err); };
+    const rows = [], noise = [];
+    let bad = 0;
+    for (const [hz, q, note, need] of [[100, 60, 48, 70], [1000, 0, 72, 40], [1000, 190, 72, 40], [4000, 100, 84, 40], [Math.round(rate * 0.24), 190, 84, 40]]) {
+      const bank = sineBank(rate, { filterFc: hzCents(hz), filterQ: q });
+      const dry = play(sineBank(rate, null), note, 0.4), wet = play(bank, note, 0.4);
+      const dryQ = play(sineBank(rate, null), note, 0.4, undefined, 23), wetQ = play(bank, note, 0.4, undefined, 23);
+      const k = Math.sqrt(dry.reduce((s, v) => s + v * v, 0) / dryQ.reduce((s, v) => s + v * v, 0));
+      const coef = snr(float(dry, hzCents(hz), q), wet), own = snr(dry, dryQ, k), filt = snr(wet, wetQ, k);
+      bad += coef < need || filt < Math.min(54, own - 3);   // 54 dB: under the noise of the BFP8 samples themselves (8-bit mantissas)
+      rows.push(`${hz} Hz Q ${q} ${coef.toFixed(0)}`);
+      noise.push(`${hz} Hz Q ${q} ${filt.toFixed(0)} (voice ${own.toFixed(0)})`);
+    }
+    check(!bad, `${tag} against floating point, signal to difference in dB: ${rows.join(', ')}; a note 30 dB down, signal to noise: ${noise.join(', ')}`);
+  }
+  // 1c. A sweep from 200 Hz to the top and back (64 bits while it moves, 32 bits while it holds): no click as it changes way, the
+  // level as the floating-point filter's.
+  {
+    const mod = { filterFc: hzCents(200), filterQ: 20, envFc: 8000, envAttack: tc(0.3), envDecay: tc(0.6), envSustain: 700, envHold: tc(0.3) };
+    const a = play(sineBank(rate, mod), 72, 1.6), ref = plain[2];
+    let jump = 0;
+    for (let i = 2; i < a.length; ++i) jump = Math.max(jump, Math.abs(a[i] - 2 * a[i - 1] + a[i - 2]));
+    const smooth = (2 * Math.PI * f0 * 2 / rate) ** 2 * Math.max(...a.map(Math.abs));   // a sine's own second difference at its peak
+    const env = t => t < 0.3 ? t / 0.3 : t < 0.6 ? 1 : Math.max(0.3, 1 - (t - 0.6) / 0.6);
+    let worst = 0;
+    for (const t of [0.15, 0.45, 1.3]) worst = Math.max(worst, Math.abs(db(rms(a, t, 640), ref) - responseDb(hzCents(200) + 8000 * env(t + 0.01), 20, f0 * 2, rate)));
+    check(jump < 1.2 * smooth && worst < 0.6, `${tag} a sweep to the top and back: no click (second difference ${(jump / smooth).toFixed(2)} of a sine's), level within ${worst.toFixed(2)} dB`);
   }
   // 2. A low cutoff (100 Hz, the poles close to 1): the right level, and silence after the release (no limit cycles).
   {

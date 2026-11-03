@@ -150,7 +150,7 @@ What has no effect has its default: an LFO without depth its delay and rate, the
 (-12000) and sustain (0), a zone without a filter cutoff 13500 and resonance 0. The filter runs when the cutoff can come under 13500:
 from the start, with the envelope going down, or with the LFO. It is RBJ's two-pole low-pass at the cutoff (at most 0.45 of the rate)
 with Q = 10^((resonance / 10 - 3.01) / 20) and the gain 1 / sqrt(Q), FluidSynth's filter; its coefficients follow the cutoff once a
-block. The player moves the LFOs and the modulation envelope on once per envelope step and adds their pitch to the bend and the wheel's
+block. (The player runs a still cutoff between 1/50 and 1/4 of the rate in 32 bits, its coefficients within 0.2 dB of these.) The player moves the LFOs and the modulation envelope on once per envelope step and adds their pitch to the bend and the wheel's
 vibrato.
 
 ## Lookup in C

@@ -336,6 +336,31 @@ second pass to mix. `make_sine_bank.js` program 4 is a 1 kHz filter the envelope
 -22 to -14 dB in 0.45 s and down to -26 dB, its pitch still. `test_emu/measure_load.ps1` serves one setup (script, bank, firmware) for
 such a measurement. Images: 32 voices 431 516 bytes, 24 voices 431 292.
 
+**The filter in 32 bits (2026-11-03, branch `sf2-filter`).** Two simplifications were tried, to be kept only if they cannot be heard.
+First where the cost is: with the filter's arithmetic replaced by a copy the load is 54.8 % against 76.9 % (`load32_lfo`), so the
+arithmetic is almost all of it; with the same three products in 32 bits (sound not kept), 59.3 %. The emulator counts the 64-bit
+multiplies dear; whether the FM-1 does is not known. So, kept: a cutoff that holds still between 1/50 and 1/4 of the rate (640 Hz to
+8 kHz at 32 kHz) runs in 32 bits: coefficients in Q13 (b0 with up to 16 bits more), the signal shifted so that the voice's loudest
+possible frame (from its level) has 13 bits, as many for a soft note as for a loud one, 12 dB of room for the resonance, and the
+output's rounding carried to the next frame. Under 1/50 the poles are too near 1 for Q13, over 1/4 the carried rounding (moved up in
+frequency) meets the resonance near the top and ticked; there, and while the cutoff moves, it runs in 64 bits as before. The block
+that glides to a still cutoff glides to the 32-bit coefficients themselves, so the change of way has no step. The 64-bit way now also
+carries its rounding: it used to round down, which at 100 Hz added a DC of about 1 % of the signal. Tried and dropped: leaving out an
+open filter (at the top, resonance at most 3 dB) for its gain alone: it saved nothing measurable (62.3 % against 61.3 %, `load32_filter`)
+and closing it again ticked. `test_filter.js`, 26 checks: the responses within 0.2 dB of floating point (0.01 dB in 64 bits); sample by
+sample against floating point 43-66 dB at 44.1 kHz and 52-65 dB at 32 kHz (the Q13 coefficients: under 1 %, about 0.1 dB), 80 dB in 64
+bits; the noise of a note 30 dB down, scaled up, 55-67 dB at 44.1 kHz and 56-72 dB at 32 kHz under the signal (the unfiltered voice's
+own: 94 dB; BFP8's 8-bit mantissas are some 45-50 dB), a sweep from 200 Hz to the top and back with no tick. **Cost**, fm1-emu, one
+session, the mean from 6 s:
+
+| | filters off | 64 bits (before) | 32 bits where it can (now) |
+| --- | --- | --- | --- |
+| `load32_filter` | 48.6 % (peak 63) | 73.8 % (84) | 62.6 % (76) |
+| `load32_lfo` | about 50 % | 80.1 % (89) | 64.1 % (77) |
+
+So 32 filtered voices cost some 14 % more than none, against 25-30 % before: about 0.45 % a filtered voice. Images: 32 voices 432 252
+bytes, 24 voices 431 804.
+
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
 (`test_emu/load8.script`): load 53 %; the same with the wheel at 127, the bend full up and the pedal down (`load8_bend.script`): 55-59 %.
