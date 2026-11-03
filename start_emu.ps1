@@ -41,7 +41,9 @@ $page = Join-Path $emu 'index_tap.html'
 $catalog = Join-Path $emu 'firmwares.json'
 $json = Get-Content $catalog -Raw
 if ($json -notmatch '"id":\s*"sf2"') { throw "firmwares.json has no sf2 entry: add one with id sf2 and package http://127.0.0.1:$Port/sf2player.fwsc" }
-$json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc', "http://127.0.0.1:$Port/sf2player.fwsc"
+# ?v= the package's time: each build gets its own address, so no browser can play a copy it kept of an older one
+$version = (Get-Item $package).LastWriteTimeUtc.Ticks
+$json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc(\?v=\d+)?', "http://127.0.0.1:$Port/sf2player.fwsc?v=$version"
 Set-Content $catalog $json -NoNewline
 
 # 4. the server (127.0.0.1 only), unless one already answers on the port
