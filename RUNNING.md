@@ -88,7 +88,7 @@ node make_wasm_js.js
 The simulator plays on one sampler track through the panel slot only. **MIDI channels and program change are firmware only**
 (`transfer.c`), so multitimbral cannot be heard in the simulator.
 
-### 3b. The install page: firmware and bank in one go (2026-11-03, not yet run on a device)
+### 3b. The install page: firmware and bank in one go (2026-11-03, the bank step run on the FM-1)
 
 ```powershell
 cd D:\git\fm1-sf2
@@ -104,7 +104,8 @@ checked). Either step can be left out. It only updates over the SF2 player's own
 another firmware is told to use the workbench the first time. `make_install.js` must run after the build it packs: the build id it
 writes is `build/dx7/build-identity.json`'s, and the device's must match it after the update. Checked in the browser pane against a fake
 FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank arrives (1 040 frames, CRC right), bank only, the stock
-V15 refused, no FM-1 found. The firmware write itself is the SDK's code and has not been run from this page.
+V15 refused, no FM-1 found. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
+not been run from this page yet.
 
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
