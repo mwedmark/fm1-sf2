@@ -32,13 +32,29 @@ struct voice {
     uint8_t side;
     uint16_t side_gain;
     /* The zone's LFOs (FORMAT.md, "Modulation"): triangles from 0, phase 2^32 a cycle, moved on per envelope step after a delay
-     * of so many steps. lfos: bit 0 they move the pitch, bit 1 the volume, 0: the zone has none. */
+     * of so many steps. lfos: bit 0 they (or the modulation envelope) move the pitch, bit 1 the volume, bit 2 the modulation
+     * envelope runs, bit 3 the LFOs run; 0: the zone has none. */
     uint32_t mod_phase, mod_inc, vib_phase, vib_inc;
     uint16_t mod_wait, vib_wait;
     int16_t mod_pitch, vib_pitch, mod_volume;  /* cents, cents, cB at full excursion */
-    int16_t lfo_cents;                         /* the LFOs' pitch now, in cents */
+    int32_t lfo_cents;                         /* the LFOs' and the modulation envelope's pitch now, in cents */
+    int32_t lfo_m;                             /* the mod LFO now, -32768..32768: for the filter */
     uint32_t tremolo;                          /* the mod LFO's volume now, Q16 */
     uint8_t lfos;
+    /* The modulation envelope (SF2 generators 25-30): 0..2^24, linear, a phase of its own (MENV_*), stepped with the volume
+     * envelope. menv_left counts the delay and hold steps. */
+    uint8_t menv_phase;
+    uint32_t menv, menv_left, menv_attack, menv_hold, menv_decay, menv_sustain, menv_release;
+    int16_t menv_pitch;                        /* cents at its top */
+    /* The low-pass filter (FORMAT.md, "Modulation"): a two-pole resonant filter as FluidSynth's, run on the voice's output once a
+     * block. filtered: 0 none, 1 running, 2 not started (its coefficients start at their first values). fc in absolute cents,
+     * fc_env and fc_lfo the cents the modulation envelope and the mod LFO add at their top; inv2q 1 / (2 Q) and fgain the
+     * resonance's 1 / sqrt(Q), Q16. b0 (= b2, b1 = 2 b0), a1, a2 Q30; x1, x2, y1, y2 the filter's history. */
+    uint8_t filtered;
+    int16_t fc, fc_env, fc_lfo;
+    int32_t fc_now;                            /* the cutoff the coefficients are for, cents */
+    uint32_t inv2q, fgain;
+    int32_t b0, a1, a2, x1, x2, y1, y2;
     /* SEA zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
@@ -50,7 +66,8 @@ static struct {
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
     uint32_t extras;  /* the zone levels, exclusive classes, scale tunings and sends, 0: none (a bank made before them) */
     uint32_t extra_size;  /* their bytes a zone: 8, or 4 in a 52-byte header (no sends) */
-    uint32_t mods, mod_count;  /* the modulation records (LFOs, key scaling), 0: none (a header under 64 bytes) */
+    uint32_t mods, mod_count;  /* the modulation records (LFOs, key scaling, filter), 0: none (a header under 64 bytes) */
+    uint32_t mod_size;         /* their bytes: 40, or 20 in a 64-byte header (no filter) */
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
@@ -65,7 +82,12 @@ static unsigned voice_limit = FM1B_VOICES, voices_cut;
 enum { CUT_RELEASE = 13500 };
 enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA, FORMAT_BFP8 };
 enum { BFP_GROUP = 32, BFP_GROUP_BYTES = 33 };   /* BFP8: a shift byte, then 32 signed 8-bit mantissas */
-enum { MOD_RECORD = 20 };                         /* a modulation record: nine i16 in SF2 units and two bytes of 0 */
+enum { MOD_RECORD_LFO = 20, MOD_RECORD_FILTER = 40 };   /* a modulation record: up to its LFOs, up to its filter (i16 in SF2 units) */
+enum { MENV_DELAY, MENV_ATTACK, MENV_HOLD, MENV_DECAY, MENV_SUSTAIN, MENV_RELEASE, MENV_ONE = 1 << 24 };
+/* A cutoff of 0 cents (8.176 Hz) as a fraction of the rate, Q32. */
+static const uint32_t FILTER_BASE = (uint32_t)((8176ULL * 4294967296ULL + 500ULL * FM1B_RATE) / (1000ULL * FM1B_RATE));
+/* The filter's top, 0.45 of the rate (as FluidSynth), Q30; a filtered voice is rendered this many frames at a time. */
+enum { FILTER_TOP = 483183821, FILTER_CHUNK = 128 };
 /* An LFO at 0 timecents (8.176 Hz, the SF2 default) moves its phase this much per envelope step. */
 static const uint32_t LFO_BASE = (uint32_t)((8176ULL * 4294967296ULL * (unsigned)ENV_STEP + 500ULL * FM1B_RATE) / (1000ULL * FM1B_RATE));
 
@@ -169,8 +191,10 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.extra_size = bank.pitch >= 56U ? rd32(image + 52) : 4U;   /* a 56-byte header has their size */
     bank.mods = bank.pitch >= 64U ? rd32(image + 56) : 0U;   /* a 64-byte header has the modulation records */
     bank.mod_count = bank.mods ? rd32(image + 60) : 0U;
+    bank.mod_size = bank.pitch >= 68U ? rd32(image + 64) : MOD_RECORD_LFO;   /* a 68-byte header has their size */
     bank.env_count = 0;
-    if ((bank.mods && (bank.mods % 4U || bank.mod_count > 65535U || !region_ok(bank.mods, (uint64_t)MOD_RECORD * bank.mod_count))) || bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
+    if ((bank.mods && (bank.mods % 4U || bank.mod_count > 65535U || bank.mod_size < MOD_RECORD_LFO || bank.mod_size > 256U ||
+                       bank.mod_size % 4U || !region_ok(bank.mods, (uint64_t)bank.mod_size * bank.mod_count))) || bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
         !region_ok(bank.presets, 24ULL * bank.preset_count) || !region_ok(bank.keymaps, 128ULL * bank.preset_count) ||
         !region_ok(bank.zones, 24ULL * bank.zone_count) || (bank.extras && (bank.extras % 4U || bank.extra_size < 4U || bank.extra_size > 64U || bank.extra_size % 4U ||
                                                     !region_ok(bank.extras, (uint64_t)bank.extra_size * bank.zone_count))))
@@ -352,11 +376,114 @@ static FM1_DSP_CODE void lfo_step(struct voice *v)
     if (v->mod_wait) --v->mod_wait; else v->mod_phase += v->mod_inc;
     if (v->vib_wait) --v->vib_wait; else v->vib_phase += v->vib_inc;
     int32_t m = triangle(v->mod_phase), b = triangle(v->vib_phase);
-    v->lfo_cents = (int16_t)((m * v->mod_pitch + b * v->vib_pitch) >> 15);
+    v->lfo_m = m;
+    v->lfo_cents = ((m * v->mod_pitch + b * v->vib_pitch) >> 15) + (int32_t)(((int64_t)v->menv * v->menv_pitch) >> 24);
     if (v->lfos & 2U) {
         int32_t cents = ((m * v->mod_volume) >> 15) * 1993 / 100;
         v->tremolo = cents_factor(cents > 2400 ? 2400 : cents);
     }
+}
+/* The modulation envelope one step on. Its release starts with the volume envelope's. */
+static FM1_DSP_CODE void menv_step(struct voice *v)
+{
+    if (v->phase == RELEASE && v->menv_phase != MENV_RELEASE)
+        v->menv_phase = MENV_RELEASE;
+    switch (v->menv_phase) {
+    case MENV_DELAY:
+        if (v->menv_left) --v->menv_left;
+        if (!v->menv_left) v->menv_phase = MENV_ATTACK;
+        break;
+    case MENV_ATTACK:
+        v->menv += v->menv_attack;
+        if (v->menv >= MENV_ONE) { v->menv = MENV_ONE; v->menv_left = v->menv_hold; v->menv_phase = v->menv_left ? MENV_HOLD : MENV_DECAY; }
+        break;
+    case MENV_HOLD:
+        if (v->menv_left) --v->menv_left;
+        if (!v->menv_left) v->menv_phase = MENV_DECAY;
+        break;
+    case MENV_DECAY:
+        if (v->menv > v->menv_sustain + v->menv_decay) v->menv -= v->menv_decay;
+        else { v->menv = v->menv_sustain; v->menv_phase = MENV_SUSTAIN; }
+        break;
+    case MENV_RELEASE:
+        v->menv = v->menv > v->menv_release ? v->menv - v->menv_release : 0U;
+        break;
+    default:
+        break;
+    }
+}
+/* sin(x) in Q30 for x in 0..pi/2 (Q30 radians): the Taylor series to x^9, within 4e-8. */
+static FM1_DSP_CODE int32_t sin_q30(int32_t x)
+{
+    /* 1/72, 1/42, 1/20, 1/6 in Q32: products, as a 64-bit division is a library call on the device */
+    int64_t x2 = ((int64_t)x * x) >> 30, t = (1LL << 30) - ((x2 * 59652324LL) >> 32);
+    t = (1LL << 30) - (((x2 * t) >> 30) * 102261126LL >> 32);
+    t = (1LL << 30) - (((x2 * t) >> 30) * 214748365LL >> 32);
+    t = (1LL << 30) - (((x2 * t) >> 30) * 715827883LL >> 32);
+    return (int32_t)(((int64_t)x * t) >> 30);
+}
+/* The filter's coefficients for its cutoff now: the zone's, plus the modulation envelope's and the mod LFO's, 1500..13500 cents
+ * (20 Hz..20 kHz) and at most 0.45 of the rate. RBJ's low-pass with FluidSynth's gain: b0 = (1 - cos w) / 2 / a0 * gain,
+ * a1 = -2 cos w / a0, a2 = (1 - alpha) / a0, a0 = 1 + alpha, alpha = sin w / (2 Q). 1 - cos w is 2 sin^2(w / 2), exact at
+ * low cutoffs. */
+static inline __attribute__((always_inline)) int32_t filter_cents(const struct voice *v)
+{
+    int32_t fc = v->fc + (int32_t)(((int64_t)v->menv * v->fc_env) >> 24) + ((v->lfo_m * v->fc_lfo) >> 15);
+    return fc < 1500 ? 1500 : fc > 13500 ? 13500 : fc;
+}
+static FM1_DSP_CODE void filter_coefs(const struct voice *v, int32_t fc, int32_t *b0, int32_t *a1, int32_t *a2)
+{
+    const int32_t half_pi = 1686629713;                       /* pi / 2 in Q30 */
+    uint32_t turn = scale_tc(FILTER_BASE, fc) >> 2;           /* the cutoff over the rate, Q30 */
+    turn = turn > (uint32_t)FILTER_TOP ? (uint32_t)FILTER_TOP : turn;
+    int64_t w = (int64_t)(((uint64_t)turn * (uint32_t)half_pi) >> 28);   /* 2 pi times it, Q30 radians: up to 0.9 pi */
+    int32_t s = sin_q30((int32_t)(w > half_pi ? 2LL * half_pi - w : w)), h = sin_q30((int32_t)(w >> 1));
+    int64_t omc = ((int64_t)h * h) >> 29;                     /* 1 - cos w */
+    int64_t alpha = ((int64_t)s * v->inv2q) >> 16;
+    /* 1 / a0 in Q30, a0 = 1..1.8: a 32-bit division to 16 bits, then one Newton step (x (2 - a0 x)) to 30 */
+    int64_t a0 = (1LL << 30) + alpha, inv = (int64_t)((0x80000000U / (uint32_t)(a0 >> 14)) << 15);
+    inv = (inv * ((2LL << 30) - ((a0 * inv) >> 30))) >> 30;
+    *a1 = (int32_t)(-((((1LL << 30) - omc) * inv) >> 29));
+    *a2 = (int32_t)((((1LL << 30) - alpha) * inv) >> 30);
+    *b0 = (int32_t)((((omc * inv) >> 31) * v->fgain) >> 16);
+}
+/* The voice's block x through its filter, added to out; with keep also written back to x (for the buses). While the cutoff moves
+ * the coefficients go from where they were to their value now across the block (glide); otherwise they stay in registers. */
+static inline __attribute__((always_inline)) void filter_loop(struct voice *v, int32_t *x, int32_t *out, unsigned n, int32_t c0, int32_t c1,
+                                                             int32_t c2, int32_t d0, int32_t d1, int32_t d2, const int glide, const int keep)
+{
+    int32_t x1 = v->x1, x2 = v->x2, y1 = v->y1, y2 = v->y2;
+    for (unsigned i = 0; i < n; ++i) {
+        int32_t in = x[i];
+        int64_t acc = (int64_t)c0 * (in + 2 * x1 + x2) - (int64_t)c1 * y1 - (int64_t)c2 * y2;
+        int32_t y = (int32_t)(acc >> 30);
+        y = y > (1 << 28) ? (1 << 28) : y < -(1 << 28) ? -(1 << 28) : y;
+        x2 = x1; x1 = in; y2 = y1; y1 = y;
+        out[i] += y;
+        if (keep) x[i] = y;
+        if (glide) { c0 += d0; c1 += d1; c2 += d2; }
+    }
+    v->x1 = x1; v->x2 = x2; v->y1 = y1; v->y2 = y2;
+}
+static FM1_DSP_CODE __attribute__((noinline)) void filter_run(struct voice *v, int32_t *x, int32_t *out, unsigned n, int keep)
+{
+    int32_t fc = filter_cents(v);
+    if (v->filtered == 1 && fc == v->fc_now) {
+        if (keep) filter_loop(v, x, out, n, v->b0, v->a1, v->a2, 0, 0, 0, 0, 1);
+        else filter_loop(v, x, out, n, v->b0, v->a1, v->a2, 0, 0, 0, 0, 0);
+        return;
+    }
+    int32_t b0, a1, a2;
+    filter_coefs(v, fc, &b0, &a1, &a2);
+    v->fc_now = fc;
+    if (v->filtered == 2) { v->b0 = b0; v->a1 = a1; v->a2 = a2; v->filtered = 1; }
+    /* a1 goes from about -2 to 2 (Q30): its change needs 33 bits. A step is the change times 1 / n (Q16). */
+    int64_t r = (int64_t)(65536U / n);
+    int32_t c0 = v->b0, c1 = v->a1, c2 = v->a2;
+    int32_t d0 = (int32_t)((((int64_t)b0 - c0) * r) >> 16), d1 = (int32_t)((((int64_t)a1 - c1) * r) >> 16), d2 = (int32_t)((((int64_t)a2 - c2) * r) >> 16);
+    if (keep) filter_loop(v, x, out, n, c0, c1, c2, d0, d1, d2, 1, 1);
+    else filter_loop(v, x, out, n, c0, c1, c2, d0, d1, d2, 1, 0);
+    v->b0 = b0; v->a1 = a1; v->a2 = a2;
 }
 static FM1_DSP_CODE void channel_retune(unsigned channel)
 {
@@ -535,14 +662,49 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     if (extra && bank.extra_size >= 8U && bank.mods) {
         uint32_t number = rd16(extra + 6);                    /* the record's index plus 1, 0: none */
         if (number && number <= bank.mod_count)
-            mod = bank.image + bank.mods + (number - 1U) * MOD_RECORD;
+            mod = bank.image + bank.mods + (number - 1U) * bank.mod_size;
     }
     if (mod) {
         int32_t volume = (int16_t)rd16(mod), pitch = (int16_t)rd16(mod + 2), vib = (int16_t)rd16(mod + 4);
         v->mod_volume = (int16_t)(volume < -960 ? -960 : volume > 960 ? 960 : volume);
         v->mod_pitch = (int16_t)(pitch < -12000 ? -12000 : pitch > 12000 ? 12000 : pitch);
         v->vib_pitch = (int16_t)(vib < -12000 ? -12000 : vib > 12000 ? 12000 : vib);
-        if (v->mod_volume || v->mod_pitch) {                  /* delay in steps (at most 47 s), rate as a phase step */
+        int32_t fc = 13500, q = 0, fc_env = 0, fc_lfo = 0, menv_pitch = 0;
+        if (bank.mod_size >= MOD_RECORD_FILTER) {
+            fc = (int16_t)rd16(mod + 18); q = (int16_t)rd16(mod + 20); fc_env = (int16_t)rd16(mod + 22); fc_lfo = (int16_t)rd16(mod + 24);
+            menv_pitch = (int16_t)rd16(mod + 38);
+            fc = fc < 1500 ? 1500 : fc > 13500 ? 13500 : fc;
+            q = q < 0 ? 0 : q > 960 ? 960 : q;
+            fc_env = fc_env < -12000 ? -12000 : fc_env > 12000 ? 12000 : fc_env;
+            fc_lfo = fc_lfo < -12000 ? -12000 : fc_lfo > 12000 ? 12000 : fc_lfo;
+            menv_pitch = menv_pitch < -12000 ? -12000 : menv_pitch > 12000 ? 12000 : menv_pitch;
+        }
+        if (fc < 13500 || fc_env < 0 || fc_lfo) {             /* a cutoff that can come down: the filter runs */
+            v->filtered = 2;
+            v->fc = (int16_t)fc; v->fc_env = (int16_t)fc_env; v->fc_lfo = (int16_t)fc_lfo;
+            /* Q in cB is the resonance's height (dB times 10); minus 3.01 dB, so that 0 is flat (Q = 0.707) */
+            int32_t q_cents = (q * 1993 + 50) / 100 - 600;     /* Q as cents of amplitude: 19.93 a cB */
+            uint32_t q_lin = cents_factor(q_cents);           /* Q16 */
+            v->inv2q = (uint32_t)((1ULL << 31) / q_lin);      /* 1 / (2 Q), Q16 */
+            v->fgain = cents_factor(-q_cents / 2);            /* 1 / sqrt(Q) */
+        }
+        if (fc_env || menv_pitch) {                           /* the modulation envelope: delay, attack, hold, decay, sustain, release */
+            uint32_t steps;
+            v->menv_pitch = (int16_t)menv_pitch;
+            v->menv_left = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 26));
+            v->menv_phase = v->menv_left ? MENV_DELAY : MENV_ATTACK;
+            steps = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 28));
+            v->menv_attack = MENV_ONE / (steps ? steps : 1U);
+            v->menv_hold = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 30));
+            steps = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 32));
+            v->menv_decay = MENV_ONE / (steps ? steps : 1U);
+            int32_t sustain = (int16_t)rd16(mod + 34);        /* 0.1 % below the top */
+            sustain = sustain < 0 ? 0 : sustain > 1000 ? 1000 : sustain;
+            v->menv_sustain = (uint32_t)(((uint64_t)MENV_ONE * (uint32_t)(1000 - sustain)) / 1000U);
+            steps = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 36));
+            v->menv_release = MENV_ONE / (steps ? steps : 1U);
+        }
+        if (v->mod_volume || v->mod_pitch || fc_lfo) {        /* delay in steps (at most 47 s), rate as a phase step */
             uint32_t wait = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 6));
             v->mod_wait = (uint16_t)(wait > 65535U ? 65535U : wait);
             v->mod_inc = scale_tc(LFO_BASE, (int16_t)rd16(mod + 8));
@@ -552,7 +714,8 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
             v->vib_wait = (uint16_t)(wait > 65535U ? 65535U : wait);
             v->vib_inc = scale_tc(LFO_BASE, (int16_t)rd16(mod + 12));
         }
-        v->lfos = (uint8_t)((v->mod_pitch || v->vib_pitch ? 1U : 0U) | (v->mod_volume ? 2U : 0U));
+        v->lfos = (uint8_t)((v->mod_pitch || v->vib_pitch || menv_pitch ? 1U : 0U) | (v->mod_volume ? 2U : 0U) |
+                            (fc_env || menv_pitch ? 4U : 0U) | (v->mod_pitch || v->vib_pitch || v->mod_volume || fc_lfo ? 8U : 0U));
         v->tremolo = 65536U;
         key_hold = (int16_t)rd16(mod + 14);
         key_decay = (int16_t)rd16(mod + 16);
@@ -865,7 +1028,9 @@ static FM1_DSP_CODE void env_step(struct voice *v)
         v->active = 0;
         return;
     }
-    if (v->lfos)
+    if (v->lfos & 4U)
+        menv_step(v);
+    if (v->lfos & 12U)
         lfo_step(v);
     if (channel_mod[v->channel] || (v->lfos & 1U)) {          /* vibrato: the step follows the LFOs, once per envelope step */
         if (channel_mod[v->channel])
@@ -975,14 +1140,34 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice
     default: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM8); break;
     }
 }
+/* A filtered voice: played into a block of its own, through its filter, then added to the mix and, times rg, cg and sg as
+ * voice_run does, to the buses it has. */
+static int32_t filter_block[FILTER_CHUNK];
+static FM1_DSP_CODE __attribute__((noinline)) void voice_filtered(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
+                                                                 unsigned frames, int32_t rg, int32_t cg, int32_t sg)
+{
+    for (unsigned at = 0; at < frames && v->active; at += FILTER_CHUNK) {
+        unsigned n = frames - at < FILTER_CHUNK ? frames - at : FILTER_CHUNK;
+        memset(filter_block, 0, n * sizeof *filter_block);
+        voice_play(v, filter_block, n);
+        filter_run(v, filter_block, out + at, n, rg || cg || sg);
+        if (rg) for (unsigned i = 0; i < n; ++i) rev[at + i] += (filter_block[i] * rg) >> 7;
+        if (cg) for (unsigned i = 0; i < n; ++i) cho[at + i] += (filter_block[i] * cg) >> 7;
+        if (sg) for (unsigned i = 0; i < n; ++i) side[at + i] += (filter_block[i] * sg) >> 8;
+    }
+}
 FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
 {
     queue_drain();
     if (!bank.image)
         return;
     for (unsigned n = 0; n < FM1B_VOICES; ++n)
-        if (voices[n].active && voices[n].owner == owner)
-            voice_play(&voices[n], out, frames);
+        if (voices[n].active && voices[n].owner == owner) {
+            if (voices[n].filtered)
+                voice_filtered(&voices[n], out, NULL, NULL, NULL, frames, 0, 0, 0);
+            else
+                voice_play(&voices[n], out, frames);
+        }
 }
 /* A voice's sends: its channel's (CC 91, CC 93) plus its zone's own, at most 127. */
 static inline __attribute__((always_inline)) int voice_reverb(const struct voice *v)
@@ -1029,12 +1214,19 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
         struct voice *v = &voices[n];
         if (!v->active || v->owner != owner)
             continue;
-        if (!buses)
-            voice_play(v, out, frames);
-        else {
+        if (!buses) {
+            if (v->filtered)
+                voice_filtered(v, out, NULL, NULL, NULL, frames, 0, 0, 0);
+            else
+                voice_play(v, out, frames);
+        } else {
             int32_t r = voice_reverb(v), c = voice_chorus(v);
-            voice_play_buses(v, out, rev, cho, v->side ? sides[v->side - 1U] : NULL, frames, buses & 1U ? r + (r >> 6) : 0,
-                             buses & 2U ? c + (c >> 6) : 0, v->side ? v->side_gain : 0);
+            int32_t rg = buses & 1U ? r + (r >> 6) : 0, cg = buses & 2U ? c + (c >> 6) : 0, sg = v->side ? v->side_gain : 0;
+            int32_t *side = v->side ? sides[v->side - 1U] : NULL;
+            if (v->filtered)
+                voice_filtered(v, out, rev, cho, side, frames, rg, cg, sg);
+            else
+                voice_play_buses(v, out, rev, cho, side, frames, rg, cg, sg);
         }
     }
     return buses;

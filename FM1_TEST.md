@@ -1,9 +1,9 @@
 # Checklista: SF2-spelaren på en riktig FM-1
 
-Gäller firmwaren på `sf2-lfo` från 2026-11-03: 32 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
+Gäller firmwaren på `sf2-filter` från 2026-11-03: 32 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
 pan per kanal och SF2-filens egen pan, nivå per zon, hihat-choke, skalstämning, velocitykurva enligt SF2, limiter på utgången,
-reverb/chorus per zon, zonernas LFO (vibrato och tremolo) och tangentstyrd decay. **Banken är BFP8**, det enda formatet vi testar framöver (SEA6 spelar fortfarande men testas inte). Bygg om banken
-med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus och LFO (en äldre bank spelar fortfarande, men utan dem). Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
+reverb/chorus per zon, zonernas LFO (vibrato och tremolo), tangentstyrd decay och lågpassfilter med modulationsenvelope. **Banken är BFP8**, det enda formatet vi testar framöver (SEA6 spelar fortfarande men testas inte). Bygg om banken
+med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus, LFO och filter (en äldre bank spelar fortfarande, men utan dem). Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
 
 ## Det här behövs
 
@@ -40,7 +40,7 @@ USB-uppdateringsläge). Notera exakt vad som visades.
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
-| B1 | Öppna konverteraren, släpp `1mgm.sf2`, välj **Kodning: BFP8** (förvald), **32 000 Hz**, alla presets, **Konvertera**. | Cirka 460 KB (98,5 %), "ryms i enhetens samplebank". | |
+| B1 | Öppna konverteraren, släpp `1mgm.sf2`, välj **Kodning: BFP8** (förvald), **32 000 Hz**, alla presets, **Konvertera**. | Cirka 463 KB (99,2 %), "ryms i enhetens samplebank". | |
 | B2 | Klicka **Skicka till FM-1** (godkänn MIDI/SysEx i webbläsaren). | Sidan visar procent; FM-1 visar `UPLOAD n Rx`. Hela banken tar en stund. | Tid: |
 | B3 | När den är klar. | Sidan säger att banken är kontrollerad; FM-1 visar ett programnamn. | |
 | B4 | Stäng av och slå på FM-1. | Banken finns kvar (programnamnet visas igen). | |
@@ -79,6 +79,7 @@ Spela `test_emu\midi\mt.mid` och `drums.mid` från Windows till FM-1, en gång p
 | D11 | Panelen: program 5 (E Piano 1) och 90 (Warm Pad), jämför med 1 (piano). | E-pianot och padden har tydligt mer chorus (svävning, bredd) än pianot; allt har lite mer reverb än förut. Kolumnen CHO på kanalsidan visar bara kanalens värde, inte zonens tillägg. | | | |
 | D12 | Panelen: program 41 (Violin), håll en ton i ett par sekunder utan modulationshjulet. Sedan program 22 (Accordion), en ton under C4. | Violinen börjar rakt och får ett lätt vibrato efter ungefär en kvarts sekund. Dragspelet pulserar svagt i volym (tremolo). | | | |
 | D13 | Program 1 (piano): spela samma anslag längst ned och längst upp. | De höga tonerna klingar ut tydligt fortare än de låga. | | | |
+| D14 | Program 39 (Synth Bass 1), 82 (Saw Wave) och 90 (Warm Pad): håll en ton. | Mörkare och rundare än förut; Saw Wave börjar ljust och mörknar under första halvsekunden (filtret stänger). Inget pip, inget knaster. | | | |
 
 ## E. Last och CPU-spärr
 
@@ -93,7 +94,8 @@ sänkt gränsen.
 | E4 | `steal40.mid` (40 toner, 32 röster) | de äldsta tonerna stjäls | | |
 | E5 | `release.mid` | Allt tystnar efter note off | | |
 | E6 | `load24_pan.mid` (alla röster panorerade) | Som E1, högst ett par procent mer | | |
-| E7 | `load32_lfo.mid` (32 toner på violin och Organ 3, alla röster med LFO) | 42-45 %, topp 57 % | | |
+| E7 | `load32_lfo.mid` (32 toner på violin och Organ 3, alla med LFO och filter) | 75-80 %, topp 87 %: `CPU` kan visas | | |
+| E8 | `load32_filter.mid` (32 toner på Saw Wave, Warm Pad, Organ 2, Synth Bass 1, alla med filter) | 73-78 %, topp 86 %: `CPU` kan visas | | |
 
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 Om det knastrar eller `CPU` visas ofta: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).

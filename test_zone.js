@@ -26,8 +26,8 @@ function check(ok, what) { ++checks; if (!ok) { ++failed; console.log('FAIL', wh
 const bank = A.buildBank(sf, -2, { rate: 32000, bits: 16 });
 const bin = A.writeFm1(bank), dv = new DataView(bin.buffer);
 const nz = bank.zones.length, offZone = dv.getUint32(32, true), offExtra = dv.getUint32(48, true), S = dv.getUint32(52, true);
-check(dv.getUint32(16, true) === 64 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
-  'the header is 64 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
+check(dv.getUint32(16, true) === 68 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
+  'the header is 68 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
 // The bank's zones in the order buildBank adds them: every preset's zones from presetZones, as the SoundFont has them.
 const source = sf.presets.flatMap((p, i) => A.presetZones(sf, i));
 check(source.length === nz, `one bank zone per SoundFont zone (${nz})`);
@@ -70,7 +70,7 @@ const again = A.writeFm1(A.buildBank(back, -2, { rate: 32000, bits: 16 }));
 const zonesOf = x => { const d = new DataView(x.buffer, x.byteOffset); const o = d.getUint32(32, true), e = d.getUint32(48, true), n = d.getUint16(14, true);
   return Array.from({ length: n }, (_, i) => [x[o + i * 24 + 16], d.getInt16(o + i * 24 + 20, true), ...x.slice(e + i * S, e + i * S + S)].join()); };
 const z1 = zonesOf(bin), z2 = zonesOf(again);
-const modsOf = x => { const d = new DataView(x.buffer, x.byteOffset); return Array.from(x.slice(d.getUint32(56, true), d.getUint32(56, true) + 20 * d.getUint32(60, true))).join(); };
+const modsOf = x => { const d = new DataView(x.buffer, x.byteOffset); return Array.from(x.slice(d.getUint32(56, true), d.getUint32(56, true) + d.getUint32(64, true) * d.getUint32(60, true))).join(); };
 check(z1.length === z2.length && z1.every((v, i) => v === z2[i]) && modsOf(bin) === modsOf(again),
   'the SF2 the converter writes keeps root, fine tune, level, class, scale tuning, sends, LFOs and key scaling');
 

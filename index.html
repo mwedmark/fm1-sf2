@@ -231,11 +231,15 @@ function presetZones(sf, p) {
         // reverb and chorus send in 0.1 % (generators 16 and 15, instrument plus preset)
         reverb: Math.max(0, Math.min(1000, n(16) + np(16))),
         chorus: Math.max(0, Math.min(1000, n(15) + np(15))),
-        // the LFOs (SF2 units: cB, cents, timecents; instrument plus preset) and the key number's hold and decay scaling
+        // the LFOs (SF2 units: cB, cents, timecents; instrument plus preset), the key number's hold and decay scaling, the low-pass
+        // filter (cutoff in absolute cents, resonance in cB) and the modulation envelope that moves its cutoff and the pitch
         mod: modRecord({
           lfoVolume: n(13) + np(13), lfoPitch: n(5) + np(5), vibPitch: n(6) + np(6),
           lfoDelay: tc(21, -12000), lfoFreq: tc(22, 0), vibDelay: tc(23, -12000), vibFreq: tc(24, 0),
           keyHold: n(39) + np(39), keyDecay: n(40) + np(40),
+          filterFc: tc(8, 13500), filterQ: n(9) + np(9), envFc: n(11) + np(11), lfoFc: n(10) + np(10),
+          envDelay: tc(25, -12000), envAttack: tc(26, -12000), envHold: tc(27, -12000), envDecay: tc(28, -12000),
+          envSustain: n(29) + np(29), envRelease: tc(30, -12000), envPitch: n(7) + np(7),
         }),
       });
     }
@@ -554,28 +558,39 @@ function envRecord(e, drum) {
   };
 }
 
-// A zone's LFOs and key scaling in SF2 units, within the SF2 ranges, or null when it has none of them (FORMAT.md, "Modulation").
-// An LFO with no depth gets the default delay and rate, so that records differing only there are shared.
+// A zone's LFOs, key scaling, filter and modulation envelope in SF2 units, within the SF2 ranges, or null when it has none of them
+// (FORMAT.md, "Modulation"). What has no effect gets its default (an LFO or the envelope with no depth, the resonance of a filter
+// that is off), so that records differing only there are shared.
 function modRecord(m) {
-  const c = (x, lo, hi) => Math.max(lo, Math.min(hi, Math.round(x || 0)));
+  const c = (x, lo, hi, d = 0) => Math.max(lo, Math.min(hi, Math.round(x === undefined ? d : x)));
   const r = {
     lfoVolume: c(m.lfoVolume, -960, 960), lfoPitch: c(m.lfoPitch, -12000, 12000), vibPitch: c(m.vibPitch, -12000, 12000),
-    lfoDelay: c(m.lfoDelay, -12000, 5000), lfoFreq: c(m.lfoFreq, -16000, 4500), vibDelay: c(m.vibDelay, -12000, 5000), vibFreq: c(m.vibFreq, -16000, 4500),
-    keyHold: c(m.keyHold, -1200, 1200), keyDecay: c(m.keyDecay, -1200, 1200),
+    lfoDelay: c(m.lfoDelay, -12000, 5000, -12000), lfoFreq: c(m.lfoFreq, -16000, 4500), vibDelay: c(m.vibDelay, -12000, 5000, -12000),
+    vibFreq: c(m.vibFreq, -16000, 4500), keyHold: c(m.keyHold, -1200, 1200), keyDecay: c(m.keyDecay, -1200, 1200),
+    filterFc: c(m.filterFc, 1500, 13500, 13500), filterQ: c(m.filterQ, 0, 960), envFc: c(m.envFc, -12000, 12000), lfoFc: c(m.lfoFc, -12000, 12000),
+    envDelay: c(m.envDelay, -12000, 5000, -12000), envAttack: c(m.envAttack, -12000, 8000, -12000), envHold: c(m.envHold, -12000, 5000, -12000),
+    envDecay: c(m.envDecay, -12000, 8000, -12000), envSustain: c(m.envSustain, 0, 1000), envRelease: c(m.envRelease, -12000, 8000, -12000),
+    envPitch: c(m.envPitch, -12000, 12000),
   };
-  if (!r.lfoVolume && !r.lfoPitch) { r.lfoDelay = -12000; r.lfoFreq = 0; }
+  // the filter is off (13500 cents, 20 kHz) unless its cutoff can come down: from the start, the envelope going down or the LFO
+  const filter = r.filterFc < 13500 || r.envFc < 0 || r.lfoFc !== 0;
+  if (!filter) Object.assign(r, { filterQ: 0, envFc: 0, lfoFc: 0 });
+  if (!r.lfoVolume && !r.lfoPitch && !r.lfoFc) { r.lfoDelay = -12000; r.lfoFreq = 0; }
   if (!r.vibPitch) { r.vibDelay = -12000; r.vibFreq = 0; }
-  return r.lfoVolume || r.lfoPitch || r.vibPitch || r.keyHold || r.keyDecay ? r : null;
+  if (!r.envFc && !r.envPitch) Object.assign(r, { envDelay: -12000, envAttack: -12000, envHold: -12000, envDecay: -12000, envSustain: 0, envRelease: -12000 });
+  return r.lfoVolume || r.lfoPitch || r.vibPitch || r.keyHold || r.keyDecay || filter || r.envPitch ? r : null;
 }
-const MOD_FIELDS = ['lfoVolume', 'lfoPitch', 'vibPitch', 'lfoDelay', 'lfoFreq', 'vibDelay', 'vibFreq', 'keyHold', 'keyDecay'];
-const MOD_GENS = [13, 5, 6, 21, 22, 23, 24, 39, 40];       // the SF2 generator of each field
+const MOD_FIELDS = ['lfoVolume', 'lfoPitch', 'vibPitch', 'lfoDelay', 'lfoFreq', 'vibDelay', 'vibFreq', 'keyHold', 'keyDecay',
+  'filterFc', 'filterQ', 'envFc', 'lfoFc', 'envDelay', 'envAttack', 'envHold', 'envDecay', 'envSustain', 'envRelease', 'envPitch'];
+const MOD_GENS = [13, 5, 6, 21, 22, 23, 24, 39, 40, 8, 9, 11, 10, 25, 26, 27, 28, 29, 30, 7];   // the SF2 generator of each field
+const MOD_DEFAULTS = [0, 0, 0, -12000, 0, -12000, 0, 0, 0, 13500, 0, 0, 0, -12000, -12000, -12000, -12000, 0, -12000, 0];   // and its SF2 default
 
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
-//   header (64) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
-//   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (20 each) | sample data (each sample padded to 4 bytes)
+//   header (68) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
+//   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (40 each) | sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 64, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 20;
+const FM1B_HEADER = 68, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 40;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -618,6 +633,7 @@ function writeFm1(bank) {
   dv.setUint32(52, FM1B_ZONE_EXTRA, true);                 // their size per zone
   dv.setUint32(56, mods.length ? offMod : 0, true);         // modulation records: LFOs and key scaling
   dv.setUint32(60, mods.length, true);
+  dv.setUint32(64, FM1B_MOD, true);                        // their size
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -789,7 +805,7 @@ function writeSf2(bank, name) {
     if (z.excl) gens.push({ op: 57, u: z.excl });
     if (z.reverb) gens.push({ op: 16, u: Math.round(z.reverb * 1000 / 127) });   // back to 0.1 %
     if (z.chorus) gens.push({ op: 15, u: Math.round(z.chorus * 1000 / 127) });
-    if (z.mod) MOD_FIELDS.forEach((f, j) => { if (z.mod[f]) gens.push({ op: MOD_GENS[j], u: z.mod[f] & 0xffff }); });
+    if (z.mod) MOD_FIELDS.forEach((f, j) => { if (z.mod[f] !== MOD_DEFAULTS[j]) gens.push({ op: MOD_GENS[j], u: z.mod[f] & 0xffff }); });
     gens.push({ op: 58, u: z.root });
     gens.push({ op: 53, u: z.sample.index });
   }

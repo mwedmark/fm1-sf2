@@ -57,6 +57,7 @@ node test_rate.js             # the output stage at 32 kHz + resampler against 4
                               # the velocity curve and the output limiter
 node test_zone.js             # zone level, exclusive class (hi-hat choke), scale tuning: converter against 1mgm.sf2, then fm1b.c
 node test_lfo.js              # the zone's LFOs (vibrato, tremolo, delay) and key to hold/decay, at 44.1 and 32 kHz, on a sine bank
+node test_filter.js           # the low-pass filter and the modulation envelope against the same filter in floating point; 1mgm.sf2
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
@@ -311,6 +312,29 @@ with an LFO) 42-45 % held, 57 % as the notes start, against 39-42 % and 55 % wit
 40-44 % against 42-46 % (no measurable difference; this run is a few % under the last section's). `make_sine_bank.js` writes
 `dist/sine_lfo.fm1b` and `test_emu/sine.script` plays it: the tap's new `hz` field shows the firmware's vibrato (472-522 Hz around 500),
 the tremolo (about +-5 dB at 1 Hz) and the delay. Images: 32 voices 427 004 bytes, 24 voices 427 100.
+
+**Low-pass filter, modulation envelope (2026-11-03, branch `sf2-filter`).** The converter keeps each zone's filter cutoff and resonance
+(SF2 generators 8, 9), the modulation envelope (25-30) and what it moves (cutoff 11, pitch 7), and the mod LFO on the cutoff (10); the
+modulation records grow to 40 bytes (header 68 bytes, offset 64 their size; FORMAT.md). A filter whose cutoff can never come under
+13500 cents (pianos 2 and 3: 14400 with an envelope that only opens it) is left out. 1mgm.sf2: 185 zones of 52 programs are filtered,
+piano 1, violin, the basses, brass, organs 2 and 3, the synths and pads among them; 101 records, 463 268 bytes (99.2 % of the sample
+flash, 3.6 KB left). The player runs RBJ's two-pole low-pass as FluidSynth does (Q from the resonance less 3.01 dB, gain 1 / sqrt(Q)) on
+each filtered voice's block before it is mixed; the coefficients are computed again only when the cutoff moves, once a block, and glide
+across it. Integer only: sin to x^9, 1 / a0 by a 32-bit division and a Newton step (a 64-bit division is a library call on the device).
+`test_filter.js`, 22 checks at 44.1 and 32 kHz: the response at five octaves for 1, 8 and 20 kHz and resonance 0 to 19 dB within 0.01
+dB of the same filter in floating point, a 100 Hz cutoff with no limit cycles after the release, the envelope on the cutoff and on the
+pitch, the LFO on the cutoff, a bank with the 64-byte header (LFOs, no filter); on 1mgm.sf2 the filter darkens Synth Bass 1 and Warm
+Pad and no filtered program's peak rises over 2 dB. Two overflows found and fixed on the way: the cutoff's angle past pi / 2, and a
+coefficient's change from near 2 to near -2 in one block.
+**Cost** (fm1-emu, 240 MHz, silent, 32-voice build, BFP8, the mean of the held notes from 6 s on, one session; the emulator differs by
+up to 5 % between sessions): `load32_lfo` (violin and Organ 3, all filtered) 76.6 %, peak 87 %, against 50.4 % with the filters off in
+the same firmware (`dist/gm_32k_nofilter.fm1b`) and 47.6 % with the `sf2-lfo` firmware; `load32_filter` (Saw Wave, Warm Pad, Organ 2,
+Synth Bass 1) 73-78 %, peak 86 %, against 45-49 % without; `load32_all` (flute, not filtered) 51.2 % against 49.1 % on `sf2-lfo`. So a
+filtered voice costs about 0.8 % of the CPU more, some 50 % over the voice itself; 32 filtered voices come near the CPU guard (80 %),
+which then lowers the voice limit. A first version cost twice that (96-110 %): coefficients every block with 64-bit divisions, and a
+second pass to mix. `make_sine_bank.js` program 4 is a 1 kHz filter the envelope opens and closes: in fm1-emu a 2 kHz tone goes from
+-22 to -14 dB in 0.45 s and down to -26 dB, its pitch still. `test_emu/measure_load.ps1` serves one setup (script, bank, firmware) for
+such a measurement. Images: 32 voices 431 516 bytes, 24 voices 431 292.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute

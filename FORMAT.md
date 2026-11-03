@@ -5,10 +5,10 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (64) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | sample data
+header (68) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | sample data
 ```
 
-## Header (64 bytes)
+## Header (68 bytes)
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -30,6 +30,7 @@ header (64) | pitch table | bank map | presets | key maps | zones | zone levels 
 | 52 | u32 | bytes per zone in the zone levels, 8 (a multiple of 4, at most 64). Only there when the pitch table starts at 56 or later: a 52-byte header (banks of 2026-11-03 before the sends) has 4 bytes a zone |
 | 56 | u32 | offset of the modulation records, 0 = none. Only there when the pitch table starts at 64 or later: a 56-byte header (banks of 2026-11-03 before the LFOs) has none |
 | 60 | u32 | number of modulation records |
+| 64 | u32 | bytes per modulation record, 40 (a multiple of 4, at least 20). Only there when the pitch table starts at 68 or later: a 64-byte header (banks of the `sf2-lfo` branch) has records of 20 bytes, without the filter |
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
@@ -116,9 +117,10 @@ With a scale tuning other than 100 a note plays `(note - root) * scale + fine` c
 pitch table, the rest (0..99 cents) as the fine tune is. The converter then moves the root by whole multiples of the scale and keeps the
 rest of the zone's tuning in `fine`, so `fine` may be outside -50..50 for those zones (all of the tuning at scale 0).
 
-## Modulation: 20 bytes each
+## Modulation: 40 bytes each
 
-A zone's LFOs and how the key number scales its volume envelope, in SF2 units, instrument plus preset. Zones share them: the converter
+A zone's LFOs, how the key number scales its volume envelope, its low-pass filter and the modulation envelope, in SF2 units,
+instrument plus preset. A player reads only as much of a record as the header's size gives (20 bytes: up to offset 18). Zones share them: the converter
 writes each different record once. An LFO is a triangle that starts at 0 and rises; its value is -1..1 times the depth.
 
 | Offset | Type | Field |
@@ -132,10 +134,24 @@ writes each different record once. An LFO is a triangle that starts at 0 and ris
 | 12 | i16 | vibrato LFO rate, timecents above 8.176 Hz (generator 24) |
 | 14 | i16 | key number to hold, timecents a key (generator 39): the hold time times 2^((60 - key) * value / 1200) |
 | 16 | i16 | key number to decay, timecents a key (generator 40): the decay time the same way |
-| 18 | u16 | 0 |
+| 18 | i16 | filter cutoff, absolute cents (generator 8, 1500..13500 = 20 Hz..20 kHz; 13500 = no filter) |
+| 20 | i16 | filter resonance, cB (generator 9, 0..960): the peak's height above the pass band, as FluidSynth plays it |
+| 22 | i16 | modulation envelope to cutoff, cents at its top (generator 11) |
+| 24 | i16 | mod LFO to cutoff, cents at full excursion (generator 10) |
+| 26 | i16 | modulation envelope delay, timecents (generator 25) |
+| 28 | i16 | its attack, timecents (generator 26): linear from 0 to 1 |
+| 30 | i16 | its hold, timecents (generator 27) |
+| 32 | i16 | its decay, timecents (generator 28): linear, this long for all of 1 to 0, until the sustain level |
+| 34 | i16 | its sustain, 0.1 % below the top (generator 29) |
+| 36 | i16 | its release, timecents (generator 30): linear, this long for all of 1 to 0; it starts with the volume envelope's |
+| 38 | i16 | modulation envelope to pitch, cents at its top (generator 7) |
 
-An LFO without depth has the default delay and rate. The player moves the LFOs on once per envelope step and adds their pitch to the
-bend and the wheel's vibrato.
+What has no effect has its default: an LFO without depth its delay and rate, the modulation envelope without depth its times
+(-12000) and sustain (0), a zone without a filter cutoff 13500 and resonance 0. The filter runs when the cutoff can come under 13500:
+from the start, with the envelope going down, or with the LFO. It is RBJ's two-pole low-pass at the cutoff (at most 0.45 of the rate)
+with Q = 10^((resonance / 10 - 3.01) / 20) and the gain 1 / sqrt(Q), FluidSynth's filter; its coefficients follow the cutoff once a
+block. The player moves the LFOs and the modulation envelope on once per envelope step and adds their pitch to the bend and the wheel's
+vibrato.
 
 ## Lookup in C
 
@@ -160,7 +176,7 @@ const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, u
 
 ## What is left out
 
-Filters, the modulation envelope, the key number's scaling of the modulation envelope, velocity layers (the layer that answers to
+The key number's scaling of the modulation envelope, velocity layers (the layer that answers to
 velocity 100 is used), stacked layers (the lowest-numbered zone of a key plays), stereo (the left channel is used), modulators (the
 wheel's vibrato is the player's own), and sample start offsets.
 

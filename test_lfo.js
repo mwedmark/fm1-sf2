@@ -30,18 +30,18 @@ const b = fs.readFileSync(process.argv[2] || path.join(root, '1mgm.sf2'));
 const sf = A.parseSf2(b.buffer.slice(b.byteOffset, b.byteOffset + b.length));
 const bank = A.buildBank(sf, -2, { rate: 32000, bfp: true, bits: 16 });
 const bin = A.writeFm1(bank), dv = new DataView(bin.buffer);
-const offExtra = dv.getUint32(48, true), S = dv.getUint32(52, true), offMod = dv.getUint32(56, true), nMod = dv.getUint32(60, true);
+const offExtra = dv.getUint32(48, true), S = dv.getUint32(52, true), offMod = dv.getUint32(56, true), nMod = dv.getUint32(60, true), M = dv.getUint32(64, true);
 const source = sf.presets.flatMap((p, i) => A.presetZones(sf, i));
 const recordOf = i => { const n = dv.getUint16(offExtra + i * S + 6, true); if (!n) return null;
-  return Object.fromEntries(A.MOD_FIELDS.map((f, j) => [f, dv.getInt16(offMod + (n - 1) * 20 + j * 2, true)])); };
+  return Object.fromEntries(A.MOD_FIELDS.map((f, j) => [f, dv.getInt16(offMod + (n - 1) * M + j * 2, true)])); };
 let modOk = 0, withMod = 0, vib = 0, trem = 0, keyed = 0;
 source.forEach((s, i) => {
   const r = recordOf(i);
   modOk += JSON.stringify(r) === JSON.stringify(s.mod);
   if (r) { ++withMod; vib += !!(r.lfoPitch || r.vibPitch); trem += !!r.lfoVolume; keyed += !!(r.keyHold || r.keyDecay); }
 });
-check(offMod && offMod % 4 === 0 && dv.getUint32(16, true) === 64 && dv.getUint32(36, true) === offMod + 20 * nMod,
-  `header offset 56 points at ${nMod} modulation records of 20 bytes, right before the sample data`);
+check(offMod && offMod % 4 === 0 && dv.getUint32(16, true) === 68 && M === 40 && dv.getUint32(36, true) === offMod + M * nMod,
+  `header offset 56 points at ${nMod} modulation records of ${M} bytes (offset 64), right before the sample data`);
 check(modOk === source.length && vib > 0 && trem > 0 && keyed > 0,
   `every zone points at its own LFOs and key scaling (${withMod} zones: ${vib} with vibrato, ${trem} with tremolo, ${keyed} with key scaling)`);
 const program = (p, n) => { const pr = bank.presets.find(x => x.bank === 0 && x.preset === p);
