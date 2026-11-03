@@ -1,7 +1,7 @@
 # Checklista: SF2-spelaren på en riktig FM-1
 
-Gäller firmwaren på `sf2-zone-params` från 2026-11-03: 24 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
-SEA6 och BFP8, pan per kanal och SF2-filens egen pan, nivå per zon, hihat-choke och skalstämning. Bygg om banken med dagens konverterare,
+Gäller firmwaren på `sf2-velocity-limiter` från 2026-11-03: 24 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
+SEA6 och BFP8, pan per kanal och SF2-filens egen pan, nivå per zon, hihat-choke, skalstämning, velocitykurva enligt SF2 och limiter på utgången. Bygg om banken med dagens konverterare,
 annars saknar den pan och zonnivåer (en gammal bank spelar fortfarande, men allt på full nivå och utan choke). Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
 
 ## Det här behövs
@@ -72,7 +72,9 @@ Spela `test_emu\midi\mt.mid` och `drums.mid` från Windows till FM-1, en gång p
 | D5 | `pan.mid` (hörlurar): stråkar på kanal 1, CC10 sveper vänster, höger, mitten. | Ljudet glider jämnt utan knaster; PAN-kolumnen följer. | | | |
 | D6 | `drums.mid` igen, med hörlurar. | Trummorna sprids i stereo som i SoundFonten (t.ex. hihat och tom-trummor åt olika håll). | | | |
 | D7 | `hats.mid`: öppen hihat, stängd 0,5 s senare (två gånger), sist en öppen ensam. | Den stängda tystar den öppna direkt; den ensamma klingar ut. | | | |
-| D8 | Spela några program du känner (piano, stråkar, trummor). | Instrumenten är jämnare sinsemellan än förut men totalt svagare: vrid upp MASTER. Inget knaster. | | | |
+| D8 | Spela några program du känner (piano, stråkar, trummor). | Instrumenten är jämnare sinsemellan än förut, och totalt ungefär lika starka som före zonnivåerna. Inget knaster. | | | |
+| D9 | Ett keyboard med anslagskänslighet: spela svagt och hårt på piano. | Tydligare skillnad än förut: svaga toner är mycket svagare (velocity 64 är 12 dB under fullt anslag). | | | |
+| D10 | Ett tätt, hårt ackord med många tangenter (eller `load24_all.mid`). | Högt men inte sprucket; nivån andas lite efter ackordet (limitern), inget hårt klipp. | | | |
 
 ## E. Last och CPU-spärr (SEA6)
 
@@ -88,7 +90,7 @@ sänkt gränsen.
 | E5 | `release.mid` | Allt tystnar efter note off | | |
 | E6 | `load24_pan.mid` (alla röster panorerade) | Som E3, högst ett par procent mer | | |
 
-Täta ackord med 24 röster låg förut på full nivå. Med zonnivåerna är mixen ungefär 6 dB svagare (RMS 0,24 mot 0,51 i emulatorn); lyssna ändå efter distorsion i E3 och E4, det är nivån och inte CPU:n.
+Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 
 ## F. Samma sak med BFP8
 

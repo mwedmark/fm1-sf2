@@ -441,7 +441,9 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     voice_pan(v);
     if (channel_cents[channel] || channel_mod[channel])
         retune(v);
-    v->gain = (int32_t)((int64_t)velocity * level * 1073741824LL / (127 * 127 * 4));
+    /* velocity squared: the SoundFont default (velocity to attenuation, concave, 960 cB at 0.4) is 40 log10(127 / velocity) dB,
+     * so 64 is 12 dB under 127 and 32 is 24 dB under */
+    v->gain = (int32_t)((int64_t)velocity * velocity * level * 1073741824LL / (127 * 127 * 127 * 4));
     if (atten)                                                /* 0.5 dB a step: 2^(-atten * 99.66 / 1200) */
         v->gain = (int32_t)(((int64_t)v->gain * cents_factor(-(int32_t)((atten * 99658U + 500U) / 1000U))) >> 16);
     v->exclusive = (uint8_t)exclusive;

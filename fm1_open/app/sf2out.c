@@ -5,6 +5,34 @@
 #include "engine.h"
 #include <stddef.h>
 
+/* The limiter: the dry mix gets LIMIT_MAKEUP (the zone levels left the mix about 6 dB under where it was) and its peaks are held
+ * at LIMIT_CEILING, under full scale so the effects and the pan have room. The gain drops at once on a peak and comes back
+ * with a time constant of 2^LIMIT_RELEASE frames (128 ms at 32 kHz). It is one gain for the whole mix, so it scales the
+ * buses and the pan's sides alike: the voices keep their balance. */
+enum { LIMIT_MAKEUP = 2, LIMIT_CEILING = 5938679 /* -3 dB of Q23 */, LIMIT_RELEASE = 12 };
+#define LIMIT_UNITY ((int32_t)LIMIT_MAKEUP << 16)
+static int32_t limit_gain = LIMIT_UNITY;              /* Q16 */
+static unsigned limit_frames;                         /* frames held under the makeup gain, since start (for the tests) */
+static inline __attribute__((always_inline)) int32_t scale(int32_t x, int32_t g) { return (int32_t)(((int64_t)x * g) >> 16); }
+static FM1_DSP_CODE void limit(int32_t *dry, int32_t *rev, int32_t *cho, int32_t *left, int32_t *right, unsigned buses, unsigned n)
+{
+    int32_t g = limit_gain;
+    for (unsigned i = 0; i < n; ++i) {
+        g += ((LIMIT_UNITY - g) >> LIMIT_RELEASE) + (g < LIMIT_UNITY);   /* + 1: the last 2^RELEASE steps too */
+        int32_t x = dry[i], a = x < 0 ? -x : x;
+        if ((int64_t)a * g > (int64_t)LIMIT_CEILING << 16)   /* ceiling / a, in Q16 within 32 bits: a is over 2^21 here */
+            g = (int32_t)(((uint32_t)LIMIT_CEILING << 8) / ((uint32_t)a >> 8));
+        if (g < LIMIT_UNITY - 64) ++limit_frames;
+        dry[i] = scale(x, g);
+        if (buses & 1U) rev[i] = scale(rev[i], g);
+        if (buses & 2U) cho[i] = scale(cho[i], g);
+        if (buses & 4U) left[i] = scale(left[i], g);
+        if (buses & 8U) right[i] = scale(right[i], g);
+    }
+    limit_gain = g;
+}
+unsigned sf2out_limited(void) { return limit_frames; }
+
 #if FM1B_RATE == 44100U
 static int32_t melodic[FM1_BLOCK_FRAMES], reverb_bus[FM1_BLOCK_FRAMES], chorus_bus[FM1_BLOCK_FRAMES];
 static int32_t cut_left[FM1_BLOCK_FRAMES], cut_right[FM1_BLOCK_FRAMES];
@@ -14,6 +42,7 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
     int32_t *sides[2] = {cut_left, cut_right};
     for (unsigned i = 0; i < FM1_BLOCK_FRAMES; ++i) melodic[i] = 0;
     unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, sides, FM1_BLOCK_FRAMES, sends);
+    limit(melodic, reverb_bus, chorus_bus, cut_left, cut_right, buses, FM1_BLOCK_FRAMES);
     /* dry on both channels less what the panned voices take from each, plus reverb and chorus: from the dry mix while all
      * channels send alike, else from the buses */
     sf2fx_mix_sends(melodic, buses & 4U ? cut_left : NULL, buses & 8U ? cut_right : NULL,
@@ -44,6 +73,7 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
     int32_t *sides[2] = {cut_left, cut_right};
     for (unsigned i = 0; i < n; ++i) { melodic[i] = 0; stereo[2 * i] = stereo[2 * i + 1] = 0; }
     unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, sides, n, sends);
+    limit(melodic, reverb_bus, chorus_bus, cut_left, cut_right, buses, n);
     sf2fx_mix_sends(melodic, buses & 4U ? cut_left : NULL, buses & 8U ? cut_right : NULL,
                     buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
                     buses & 2U ? chorus_bus : melodic, buses & 2U ? 127U : sends[1], stereo, n);

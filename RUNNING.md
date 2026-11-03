@@ -53,7 +53,8 @@ node test_multitimbral.js     # 63 checks: channels, program change, volume, CC1
 node test_fx.js               # reverb and chorus (sf2fx.c), master levels times sends
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 node test_formats.js          # SEA5, SEA6, BFP8, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
-node test_rate.js             # the output stage at 32 kHz + resampler against 44.1 kHz: pitch, level, brightness, release, vibrato, reverb
+node test_rate.js             # the output stage at 32 kHz + resampler against 44.1 kHz: pitch, level, brightness, release, vibrato, reverb;
+                              # the velocity curve and the output limiter
 node test_zone.js             # zone level, exclusive class (hi-hat choke), scale tuning: converter against 1mgm.sf2, then fm1b.c
 ```
 
@@ -271,6 +272,15 @@ bank (`gm_32k_nopan`) the open hat rings 0.7 s past the closed one, with the new
 66-70 % new against 68-73 % old, so the cost is not measurable; RMS 0.24 against 0.51, as that program's zones are about 6 dB down in
 the SoundFont: the mix is quieter and dense chords saturate less, turn MASTER up to match. Images: 32 voices 423 740 bytes, 24 voices
 423 612.
+
+**Velocity curve, output limiter (2026-11-03, branch `sf2-velocity-limiter`).** A voice's gain is velocity squared (fm1b.c), the
+SoundFont default curve (velocity to attenuation, concave, 960 cB at 0.4): velocity 64 is 12 dB under 127, 32 is 24 dB under (it was 6
+and 12, so soft playing was too loud). The output stage (sf2out.c, before the effects) gives the voices' mix 6 dB of makeup gain, taking
+back what the zone levels took, and holds its peaks at -3 dB of full scale: the gain drops at once on a peak and comes back with a time
+constant of 128 ms, one gain for the dry mix, the effect buses and the pan's sides alike. `test_rate.js`, 6 more checks (37): the
+velocity steps, one note never reaches the limiter, 16 loud notes do and nothing clips (peak -2.9 dB), the gain comes all the way back.
+fm1-emu, 240 MHz, silent, 32-voice build, SEA6, `load24_all` (velocity 100): load 63-69 % (66-70 % without the limiter), RMS up to
+0.39 (0.24 without, 0.51 before the zone levels), peak 0.88: nothing clips. Images: 32 voices 423 900 bytes, 24 voices 423 804.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute

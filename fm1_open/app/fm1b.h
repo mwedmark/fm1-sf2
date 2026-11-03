@@ -32,7 +32,7 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt);
 int fm1b_program(unsigned bank, unsigned program);
 unsigned fm1b_ready(void);
 /* Note on (velocity 1..127) or off (velocity 0) for `owner`, any pointer the caller keeps rendering with.
- * level 0..127 scales the whole player. */
+ * level 0..127 scales the whole player. The gain follows velocity squared (the SoundFont default curve). */
 void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level);
 /* The same for the percussion kit (bank 128), which sounds beside the selected program. -1 if the bank has none. */
 void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level);

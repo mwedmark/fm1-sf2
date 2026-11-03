@@ -26,17 +26,17 @@ const engines = [44100, 32000].map(rate => {
   return w;
 });
 // Play: program, notes on channel 1, controllers first, held for `on` seconds then released, `total` seconds in all. Mono (left).
-function play(w, { program = 73, notes = [69], on = 1.5, total = 3, fx = [0, 0], controls = [] }) {
+function play(w, { program = 73, notes = [69], on = 1.5, total = 3, fx = [0, 0], controls = [], velocity = 100 }) {
   if (w.rt_bind(bank.length) !== 0 || w.rt_program(program) !== 0) throw new Error('bank');
   w.rt_fx(fx[0], fx[1]);
   for (const [c, v] of controls) w.rt_control(0, c, v);
-  for (const n of notes) w.rt_note(0, n, 100);
+  for (const n of notes) w.rt_note(0, n, velocity);
   const blocks = Math.round(total * 44100 / 128), off = Math.round(on * 44100 / 128), out = new Float64Array(blocks * 128);
   for (let b = 0; b < blocks; ++b) {
     if (b === off) for (const n of notes) w.rt_note(0, n, 0);
     w.rt_block();
     const o = new Int32Array(w.memory.buffer, w.rt_out(), 256);
-    for (let i = 0; i < 128; ++i) out[b * 128 + i] = o[2 * i] / 8388608;
+    for (let i = 0; i < 128; ++i) { out[b * 128 + i] = o[2 * i] / 8388608; if (Math.abs(o[2 * i]) >= 8388607) ++clipped; }
   }
   return out;
 }
@@ -49,6 +49,7 @@ function period(a, from, n = 4096) {
   const y0 = r[lag - 1], y1 = r[lag], y2 = r[lag + 1];
   return lag + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2);
 }
+let clipped = 0;                                          // samples at full scale, since start
 const rms = (a, from, to) => { let s = 0; for (let i = from; i < to; ++i) s += a[i] * a[i]; return Math.sqrt(s / (to - from)); };
 const db = x => 20 * Math.log10(x);
 function centroid(a, from, n = 2048) {                   // spectral centroid in Hz: Hann window, DFT bins of 43 Hz up to 22 kHz
@@ -95,6 +96,23 @@ for (const [program, note] of [[73, 69], [0, 60], [0, 84], [40, 55]]) {
   check(Math.abs(db(rb / ra)) < 1.5, `reverb tail 0.2-1 s after the note within 1.5 dB (${db(ra).toFixed(1)} / ${db(rb).toFixed(1)} dB under the note)`);
   const la = rms(a, 22050, off), lb = rms(b, 22050, off);
   check(Math.abs(db(lb / la)) < 0.5, `level with reverb and chorus within 0.5 dB (${db(lb / la).toFixed(2)} dB)`);
+}
+// The velocity curve (fm1b.c: velocity squared, 40 log10(127 / v) dB) and the output limiter (sf2out.c: 6 dB makeup, peaks held at
+// -3 dB), on the 32 kHz build as the device runs it.
+{
+  const w = engines[1], soft = { program: 0, notes: [60], on: 1, total: 1.5 };
+  const level = v => { const a = play(w, { ...soft, velocity: v }); return rms(a, 4410, 22050); };
+  const start = w.rt_limited(), l127 = level(127), l64 = level(64), l32 = level(32);
+  check(Math.abs(db(l64 / l127) + 11.95) < 0.3, `velocity 64 is 12 dB under 127 (${db(l64 / l127).toFixed(2)} dB)`);
+  check(Math.abs(db(l32 / l127) + 23.9) < 0.3, `velocity 32 is 24 dB under 127 (${db(l32 / l127).toFixed(2)} dB)`);
+  check(w.rt_limited() === start, `one note does not reach the limiter (${w.rt_limited() - start} frames held)`);
+  const chord = [36, 40, 43, 48, 52, 55, 60, 64, 67, 72, 76, 79, 84, 88, 91, 96];
+  const before = clipped, a = play(w, { program: 0, notes: chord, velocity: 127, on: 1, total: 3 });
+  let peak = 0; for (let i = 0; i < a.length; ++i) peak = Math.max(peak, Math.abs(a[i]));
+  check(w.rt_limited() > start, `16 loud notes reach it (${w.rt_limited() - start} frames held)`);
+  check(clipped === before && db(peak) < -2.5, `and stay under full scale: peak ${db(peak).toFixed(2)} dB, ${clipped - before} samples clipped`);
+  const after = level(64);
+  check(Math.abs(db(after / l64)) < 0.1, `the gain comes back after the chord (${db(after / l64).toFixed(3)} dB)`);
 }
 // The voice limit and the CPU guard (sf2out_load), on the 32 kHz build as the device runs it.
 {

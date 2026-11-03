@@ -21,6 +21,7 @@ EXPORT unsigned rt_rate(void) { return FM1B_RATE; }
 EXPORT void rt_limit(unsigned limit) { fm1b_voice_limit(limit); }
 EXPORT unsigned rt_voice_max(void) { return FM1B_VOICES; }
 EXPORT unsigned rt_sounding(void) { return fm1b_voices_sounding(); }
+EXPORT unsigned rt_limited(void) { return sf2out_limited(); }
 EXPORT void rt_load(unsigned used, unsigned block) { sf2out_load(used, block); }
 EXPORT unsigned rt_status(unsigned field)                /* 0 voices (with the fading ones), 1 the limit, 2 voices cut */
 {
