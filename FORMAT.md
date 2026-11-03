@@ -5,10 +5,10 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (68) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | sample data
+header (76) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | layers | sample data
 ```
 
-## Header (68 bytes)
+## Header (76 bytes)
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -31,6 +31,8 @@ header (68) | pitch table | bank map | presets | key maps | zones | zone levels 
 | 56 | u32 | offset of the modulation records, 0 = none. Only there when the pitch table starts at 64 or later: a 56-byte header (banks of 2026-11-03 before the LFOs) has none |
 | 60 | u32 | number of modulation records |
 | 64 | u32 | bytes per modulation record, 40 (a multiple of 4, at least 20). Only there when the pitch table starts at 68 or later: a 64-byte header (banks of the `sf2-lfo` branch) has records of 20 bytes, without the filter |
+| 68 | u32 | offset of the layers, 0 = none (every key plays only its key map's zone). Only there when the pitch table starts at 76 or later: a 68-byte header (banks before the layers) has none |
+| 72 | u32 | number of layer entries |
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
@@ -117,6 +119,29 @@ With a scale tuning other than 100 a note plays `(note - root) * scale + fine` c
 pitch table, the rest (0..99 cents) as the fine tune is. The converter then moves the root by whole multiples of the scale and keeps the
 rest of the zone's tuning in `fine`, so `fine` may be outside -50..50 for those zones (all of the tuning at scale 0).
 
+## Layers
+
+In a SoundFont every zone that covers a key sounds. The key map gives the lowest of them; the layers name the others. First one
+record of 4 bytes a preset, in preset order:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | u16 | the preset's first layer entry |
+| 2 | u16 | its number of entries, 0 = one zone a key |
+
+then the entries, 4 bytes each:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | u8 | lowest key |
+| 1 | u8 | highest key |
+| 2 | u8 | zone within the preset |
+| 3 | u8 | 0 |
+
+A zone has an entry when some lower zone of its preset covers a key it covers too; its range is its whole key range. A note
+starts the key map's zone and every entry of the preset whose range holds the note and whose zone is not the key map's, each on a
+voice of its own, at most four zones a note. 1mgm.sf2 has 197 entries in 62 presets, at most two zones a key: 1.3 KB.
+
 ## Modulation: 40 bytes each
 
 A zone's LFOs, how the key number scales its volume envelope, its low-pass filter and the modulation envelope, in SF2 units,
@@ -177,8 +202,8 @@ const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, u
 ## What is left out
 
 The key number's scaling of the modulation envelope, velocity layers (the layer that answers to
-velocity 100 is used), stacked layers (the lowest-numbered zone of a key plays), stereo (the left channel is used), modulators (the
-wheel's vibrato is the player's own), and sample start offsets.
+velocity 100 is used), stereo (the left channel is used), modulators (the wheel's vibrato is the player's own), and sample start
+offsets.
 
 ## Envelopes: 12 bytes each
 

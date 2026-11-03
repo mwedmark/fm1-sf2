@@ -45,11 +45,12 @@ function sineBank(rate, mod, env) {
   return A.writeFm1({ zones: [zone], samples: [sample], presets: [{ name: 'sine', bank: 0, preset: 0, first: 0, count: 1 }], rate, bits: 16 });
 }
 // A bank of the sf2-lfo branch: the 64-byte header, records of 20 bytes (their LFOs and key scaling only).
-function to64(bin) {
+function to64(bin) {   // a bank of one zone a preset: no layer table to move
   const d = new DataView(bin.buffer, bin.byteOffset), mods = d.getUint32(56, true), n = d.getUint32(60, true), size = d.getUint32(64, true);
-  const smp = d.getUint32(36, true), cut = (size - 20) * n, at = x => x < mods ? x - 4 : x >= smp ? x - 4 - cut : x - 4;
-  const o = new Uint8Array(bin.length - 4 - cut), od = new DataView(o.buffer);
-  o.set(bin.subarray(0, 64)); o.set(bin.subarray(68, mods), 64);
+  const H = d.getUint32(16, true), h = H - 64;
+  const smp = d.getUint32(36, true), cut = (size - 20) * n, at = x => x < mods ? x - h : x >= smp ? x - h - cut : x - h;
+  const o = new Uint8Array(bin.length - h - cut), od = new DataView(o.buffer);
+  o.set(bin.subarray(0, 64)); o.set(bin.subarray(H, mods), 64);
   for (let i = 0; i < n; ++i) o.set(bin.subarray(mods + i * size, mods + i * size + 20), at(mods) + i * 20);
   o.set(bin.subarray(smp), at(smp));
   [16, 20, 24, 28, 32, 36, 40, 44, 48, 56].forEach(f => { const v = d.getUint32(f, true); od.setUint32(f, v ? at(v) : 0, true); });

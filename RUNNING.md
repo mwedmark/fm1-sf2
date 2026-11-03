@@ -58,6 +58,7 @@ node test_rate.js             # the output stage at 32 kHz + resampler against 4
 node test_zone.js             # zone level, exclusive class (hi-hat choke), scale tuning: converter against 1mgm.sf2, then fm1b.c
 node test_lfo.js              # the zone's LFOs (vibrato, tremolo, delay) and key to hold/decay, at 44.1 and 32 kHz, on a sine bank
 node test_filter.js           # the low-pass filter and the modulation envelope against the same filter in floating point; 1mgm.sf2
+node test_layers.js           # stacked layers: every zone that covers a key sounds; 1mgm.sf2 at 32 kHz, BFP8
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
@@ -378,6 +379,24 @@ reads brighter with its filter in fm1-emu and in WebAssembly alike: its cutoff e
 harmonics there, as in FluidSynth. Cost, one session (slower than the one above): `load32_filter` 69.8 % (peak 83) against 83.0 % (96)
 with the 64-bit filter only and 53.2 % (70) with the filters off; `load32_lfo` 64.5 % (81). Images: 32 voices 432 252 bytes, 24 voices
 431 836.
+
+**Stacked layers (2026-11-03, branch `sf2-layers`).** In 62 of 1mgm.sf2's 129 presets two zones cover the same keys (Honky-Tonk's two
+detuned pianos, 5th Saw Wave, Bass & Lead, the choirs, organs, most pads and synths); the player used to play only the lowest. All
+the zones were already in the bank, so the samples cost nothing: a layer table (FORMAT.md, "Layers"; header 76 bytes) names, per
+preset, the zones stacked on the key map's, 197 entries, 1 312 bytes. The bank is now 464 580 bytes, 99.5 % of the sample flash
+(2.4 KB left). A note starts every zone that covers its key, one voice each: exclusive classes are applied for all of them before
+any starts (so one layer never cuts the other), and the voice limit makes room for all of them at once. `test_layers.js`, 9 checks:
+every key of every preset starts exactly the zones that cover it (16 512 keys, 7 297 stacked); 174 notes of the layered GM programs
+start one voice per zone and are, sample for sample, the sum of each zone played alone; note off ends both; the limit; two layers in
+one class sound together; a 68-byte header plays one zone as before. The tests that measure one zone at a time (`test_zone.js`) run
+with the layers off (offset 68 = 0); `test_rate.js`'s voice-limit checks use the recorder (74, one zone a key) instead of the flute,
+which now has two. In fm1-emu (`test_emu/layers.script`: Honky-Tonk, 5th Saw Wave, Bass & Lead, Choir Aahs, Piano 1 at C4, RMS
+and centroid against `dist/gm_32k_nolayers.fm1b`): Honky-Tonk 0.030 against 0.0125 (+7.7 dB, the second piano), 5th Saw Wave 0.196
+against 0.152 (+2.2 dB, centroid 367 against 318 Hz), Choir 0.223 against 0.143 (+3.9 dB, 550 against 372 Hz), Bass & Lead about the
+same, the piano unchanged. A layered program is louder because its layers add up, as in FluidSynth. Cost, one session: `load32_all`
+(flute, now two voices a note, so 32 notes are capped at 32 voices) 50.8 % (peak 72) against 47.6 % (58); `load32_filter` 67.7 % (92)
+against 65.5 % (86). Twice the voices a note means half the notes in those programs, and more voices fading at once as notes start,
+so the peaks rise; the CPU guard takes over over 80 %. Image: 32 voices 432 700 bytes.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute

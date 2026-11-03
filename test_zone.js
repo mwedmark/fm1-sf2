@@ -26,8 +26,8 @@ function check(ok, what) { ++checks; if (!ok) { ++failed; console.log('FAIL', wh
 const bank = A.buildBank(sf, -2, { rate: 32000, bits: 16 });
 const bin = A.writeFm1(bank), dv = new DataView(bin.buffer);
 const nz = bank.zones.length, offZone = dv.getUint32(32, true), offExtra = dv.getUint32(48, true), S = dv.getUint32(52, true);
-check(dv.getUint32(16, true) === 68 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
-  'the header is 68 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
+check(dv.getUint32(16, true) === 76 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
+  'the header is 76 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
 // The bank's zones in the order buildBank adds them: every preset's zones from presetZones, as the SoundFont has them.
 const source = sf.presets.flatMap((p, i) => A.presetZones(sf, i));
 check(source.length === nz, `one bank zone per SoundFont zone (${nz})`);
@@ -75,6 +75,8 @@ check(z1.length === z2.length && z1.every((v, i) => v === z2[i]) && modsOf(bin) 
   'the SF2 the converter writes keeps root, fine tune, level, class, scale tuning, sends, LFOs and key scaling');
 
 // ---- 2. The player ----
+// The player's checks of one zone at a time: the bank with its stacked layers off (offset 68 = 0; test_layers.js has them).
+const one = bin.slice(); new DataView(one.buffer).setUint32(68, 0, true);
 const BLOCK = 128;
 function load(image) {
   new Uint8Array(w.memory.buffer, w.mt_bank(), image.length).set(image);
@@ -105,8 +107,8 @@ function patched(image, changes) {
   return c;
 }
 const allZones = (v) => Array.from({ length: nz }, (_, i) => [i, v]);
-const neutral = patched(bin, allZones({ atten: 0, excl: 0, scale: 100, reverb: 0, chorus: 0, mod: 0 }));
-const old = bin.slice(); new DataView(old.buffer).setUint32(48, 0, true);    // the offset 0: a bank without the table
+const neutral = patched(one, allZones({ atten: 0, excl: 0, scale: 100, reverb: 0, chorus: 0, mod: 0 }));
+const old = one.slice(); new DataView(old.buffer).setUint32(48, 0, true);    // the offset 0: a bank without the table
 function play(image, program, notes, blocks = 300) {
   load(image);
   if (w.mt_program(0, program) !== 0) throw new Error('no program ' + program);
@@ -135,11 +137,11 @@ function downgrade(src, hdr, xs) {
   return o;
 }
 {
-  const n52 = downgrade(bin, 52, 4), n56 = downgrade(bin, 56, 8);
-  check(same(play(n52, 0, [48, 60, 67]), play(patched(bin, allZones({ reverb: 0, chorus: 0, mod: 0 })), 0, [48, 60, 67])),
+  const n52 = downgrade(one, 52, 4), n56 = downgrade(one, 56, 8);
+  check(same(play(n52, 0, [48, 60, 67]), play(patched(one, allZones({ reverb: 0, chorus: 0, mod: 0 })), 0, [48, 60, 67])),
     'a bank with the 52-byte header (4 bytes a zone, no sends) still binds and plays, without zone sends');
-  check(same(play(n56, 40, [55, 67], 500), play(patched(bin, allZones({ mod: 0 })), 40, [55, 67], 500)) &&
-        !same(play(bin, 40, [55, 67], 500), play(patched(bin, allZones({ mod: 0 })), 40, [55, 67], 500)),
+  check(same(play(n56, 40, [55, 67], 500), play(patched(one, allZones({ mod: 0 })), 40, [55, 67], 500)) &&
+        !same(play(one, 40, [55, 67], 500), play(patched(one, allZones({ mod: 0 })), 40, [55, 67], 500)),
     'a bank with the 56-byte header (no modulation records) plays without LFOs, though this violin has them');
 }
 const older = path.join(root, 'dist/gm_32k_nopan.fm1b');
@@ -166,7 +168,7 @@ for (const p of [0, 24, 40, 56, 73, 80].map(melodic)) {
   for (const n of [48, 60, 72]) {
     const i = zoneOf(p, n), a = extra(i).atten;
     if (!a) continue;
-    const r = sumAbs(play(bin, p.preset, [n], 150)) / sumAbs(play(patched(bin, [[i, { atten: 0 }]]), p.preset, [n], 150));
+    const r = sumAbs(play(one, p.preset, [n], 150)) / sumAbs(play(patched(one, [[i, { atten: 0 }]]), p.preset, [n], 150));
     ++realChecked;
     if (Math.abs(r / Math.pow(10, -a / 40) - 1) > 0.01) realBad++, console.log('   program', p.preset, 'note', n, 'level', a, 'ratio', r);
   }
@@ -184,24 +186,24 @@ function hats(image, closedChannel = DRUMS, gap = 20) {
   render(4);                                         // 512 frames, 12 ms: the cut takes about 5 ms
   return [before, w.mt_voices()];
 }
-const [openAlone, withClass] = hats(bin);
+const [openAlone, withClass] = hats(one);
 check(openAlone === 1 && withClass === 1, `the closed hi-hat cuts the open one (voices ${openAlone} then ${withClass})`);
-const noClass = patched(bin, [[kitZone(OPEN), { excl: 0 }], [kitZone(CLOSED), { excl: 0 }]]);
+const noClass = patched(one, [[kitZone(OPEN), { excl: 0 }], [kitZone(CLOSED), { excl: 0 }]]);
 check(hats(noClass)[1] === 2, 'without the class both hi-hats sound');
-check(hats(bin, 3)[1] === 2, 'a hi-hat on another channel does not cut it');
-const otherClass = patched(bin, [[kitZone(OPEN), { excl: 9 }]]);
+check(hats(one, 3)[1] === 2, 'a hi-hat on another channel does not cut it');
+const otherClass = patched(one, [[kitZone(OPEN), { excl: 9 }]]);
 check(hats(otherClass)[1] === 2, 'a note of another class does not cut it');
-load(bin);
+load(one);
 w.mt_drum(DRUMS, OPEN, 100); render(20); w.mt_drum(DRUMS, OPEN, 100); render(4);
 check(w.mt_voices() === 1, 'a second open hi-hat cuts the first');
 // The cut is a fast fade, not a click: the open hat (the mix minus the closed hat alone) starts where it was and is gone in 3 blocks.
-load(bin);
+load(one);
 w.mt_drum(DRUMS, OPEN, 100); render(20);
 const openOnly = render(8);
-load(bin);
+load(one);
 render(20); w.mt_drum(DRUMS, CLOSED, 100);
 const closedOnly = render(8);
-load(bin);
+load(one);
 w.mt_drum(DRUMS, OPEN, 100); render(20); w.mt_drum(DRUMS, CLOSED, 100);
 const faded = render(8).map((v, i) => v - closedOnly[i]);
 const blockAbs = (a, k) => sumAbs(a.slice(k * BLOCK, (k + 1) * BLOCK));
