@@ -361,6 +361,24 @@ session, the mean from 6 s:
 So 32 filtered voices cost some 14 % more than none, against 25-30 % before: about 0.45 % a filtered voice. Images: 32 voices 432 252
 bytes, 24 voices 431 804.
 
+**The 32-bit filter buzzed in the device build (2026-11-03, found in fm1-emu).** Warm Pad (a still 1.1 kHz cutoff, so in 32 bits)
+came out brighter with its filter than without (the tap's centroid 622 Hz against 432), while the same firmware with the 32-bit way
+turned off made it darker (385). With `make_sine_bank.js` programs 5 and 6 (a still 2 kHz low-pass, with and without resonance) and
+`test_emu/sine_filter.script` a 500 Hz sine came out with its zero crossings at 690-940 a second, at full and at soft velocity; in
+WebAssembly it is clean. The cause, in the disassembly (`llvm-objdump -D` of `build/dx7/sdk.elf` from `filter_run`): the compiler
+paired a shift by a register with a load or store that uses the shift's result register (`r7 = r1 >>> r0 # r2 = [r7+40]`,
+`r1 = r14 << r0 # [r2+56] = r1`). The pair means "both read the old registers" (the SDK's hand-written `dx7_seed_q4_block_64_asm`
+relies on that), but fm1-emu runs this one as if the shift came first, so the filter's history was read from and saved to the wrong
+place at every block. Whether the FM-1 itself does the same is not known. An empty `asm volatile` between the loads and the shifts
+(and the shifts and the stores) in `filter_loop32` keeps them apart; no shift by a register is paired that way anywhere in the
+firmware now (checked over the whole disassembly). After it: the sine 500 Hz in all five windows, peaks as with the 64-bit filter
+(0.371 against 0.373); Warm Pad 377 Hz (64 bits 385, unfiltered 432), Synth Bass 1 69 (unfiltered 107). `test_emu/filter_listen.script`
+plays Synth Bass 1, Saw Wave, Warm Pad, Violin and Piano 2.5 s each; `pad_long.script` Warm Pad 10 s and Synth Bass 1 8 s. Saw Wave
+reads brighter with its filter in fm1-emu and in WebAssembly alike: its cutoff ends at 4.4 kHz with 8 dB of resonance, which lifts the
+harmonics there, as in FluidSynth. Cost, one session (slower than the one above): `load32_filter` 69.8 % (peak 83) against 83.0 % (96)
+with the 64-bit filter only and 53.2 % (70) with the filters off; `load32_lfo` 64.5 % (81). Images: 32 voices 432 252 bytes, 24 voices
+431 836.
+
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
 (`test_emu/load8.script`): load 53 %; the same with the wheel at 127, the bend full up and the pedal down (`load8_bend.script`): 55-59 %.

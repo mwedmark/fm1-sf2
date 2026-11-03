@@ -79,7 +79,7 @@ Spela `test_emu\midi\mt.mid` och `drums.mid` från Windows till FM-1, en gång p
 | D11 | Panelen: program 5 (E Piano 1) och 90 (Warm Pad), jämför med 1 (piano). | E-pianot och padden har tydligt mer chorus (svävning, bredd) än pianot; allt har lite mer reverb än förut. Kolumnen CHO på kanalsidan visar bara kanalens värde, inte zonens tillägg. | | | |
 | D12 | Panelen: program 41 (Violin), håll en ton i ett par sekunder utan modulationshjulet. Sedan program 22 (Accordion), en ton under C4. | Violinen börjar rakt och får ett lätt vibrato efter ungefär en kvarts sekund. Dragspelet pulserar svagt i volym (tremolo). | | | |
 | D13 | Program 1 (piano): spela samma anslag längst ned och längst upp. | De höga tonerna klingar ut tydligt fortare än de låga. | | | |
-| D14 | Program 39 (Synth Bass 1), 82 (Saw Wave) och 90 (Warm Pad): håll en ton. | Mörkare och rundare än förut; Saw Wave börjar ljust och mörknar under första halvsekunden (filtret stänger). Inget pip, inget knaster. | | | |
+| D14 | Program 39 (Synth Bass 1), 82 (Saw Wave) och 90 (Warm Pad): håll en ton. | Synth Bass 1 och Warm Pad mörkare och rundare än förut. Saw Wave blir efter en halv sekund något nasal (resonans kring 4 kHz). Inget surr, pip eller knaster. | | | |
 
 ## E. Last och CPU-spärr
 
@@ -95,7 +95,7 @@ sänkt gränsen.
 | E5 | `release.mid` | Allt tystnar efter note off | | |
 | E6 | `load24_pan.mid` (alla röster panorerade) | Som E1, högst ett par procent mer | | |
 | E7 | `load32_lfo.mid` (32 toner på violin och Organ 3, alla med LFO och filter) | 61-64 %, topp 77 % | | |
-| E8 | `load32_filter.mid` (32 toner på Saw Wave, Warm Pad, Organ 2, Synth Bass 1, alla med filter) | 60-63 %, topp 76 % | | |
+| E8 | `load32_filter.mid` (32 toner på Saw Wave, Warm Pad, Organ 2, Synth Bass 1, alla med filter) | 60-70 %, topp 76-83 % | | |
 
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 Om det knastrar eller `CPU` visas ofta: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).

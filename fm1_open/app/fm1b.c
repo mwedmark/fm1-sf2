@@ -492,7 +492,12 @@ static inline __attribute__((always_inline)) void filter_loop32(struct voice *v,
     while ((peak >> sh) >= (1 << 13)) ++sh;
     if (sh != v->qs) { v->qerr = 0; v->qs = (uint8_t)sh; }
     const int32_t q0 = v->q0, q1 = v->q1, q2 = v->q2, k = v->qk;
-    int32_t x1 = v->x1 >> sh, x2 = v->x2 >> sh, y1 = v->y1 >> sh, y2 = v->y2 >> sh, e = v->qerr;
+    /* The empty asm keeps the loads apart from the shifts (and below the shifts apart from the stores). Without it the compiler
+     * paired a shift by a register with a load or store that uses the shift's result register in one bundle; fm1-emu runs such a
+     * pair as if the shift came first, and the history it read and saved was wrong at every block: a buzz of a few hundred Hz. */
+    int32_t x1 = v->x1, x2 = v->x2, y1 = v->y1, y2 = v->y2, e = v->qerr;
+    __asm__ volatile("" : "+r"(x1), "+r"(x2), "+r"(y1), "+r"(y2));
+    x1 >>= sh; x2 >>= sh; y1 >>= sh; y2 >>= sh;
     for (unsigned i = 0; i < n; ++i) {
         int32_t in = x[i] >> sh;
         int32_t acc = ((q0 * (in + 2 * x1 + x2)) >> k) - q1 * y1 - q2 * y2 + e;
@@ -503,7 +508,9 @@ static inline __attribute__((always_inline)) void filter_loop32(struct voice *v,
         out[i] += y << sh;
         if (keep) x[i] = y << sh;
     }
-    v->x1 = x1 << sh; v->x2 = x2 << sh; v->y1 = y1 << sh; v->y2 = y2 << sh; v->qerr = e;
+    x1 <<= sh; x2 <<= sh; y1 <<= sh; y2 <<= sh;
+    __asm__ volatile("" : "+r"(x1), "+r"(x2), "+r"(y1), "+r"(y2));
+    v->x1 = x1; v->x2 = x2; v->y1 = y1; v->y2 = y2; v->qerr = e;
 }
 /* The 32-bit coefficients from the 64-bit ones: a1, a2 in Q13, b0 with as many more bits as keep it under 2^13. The 64-bit ones
  * become exactly what the 32-bit ones are, so that the block that glides to them in 64 bits ends where the 32-bit blocks start. */
