@@ -56,6 +56,7 @@ node test_formats.js          # SEA5, SEA6, BFP8, 8-, 12- and 16-bit banks play 
 node test_rate.js             # the output stage at 32 kHz + resampler against 44.1 kHz: pitch, level, brightness, release, vibrato, reverb;
                               # the velocity curve and the output limiter
 node test_zone.js             # zone level, exclusive class (hi-hat choke), scale tuning: converter against 1mgm.sf2, then fm1b.c
+node test_lfo.js              # the zone's LFOs (vibrato, tremolo, delay) and key to hold/decay, at 44.1 and 32 kHz, on a sine bank
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
@@ -294,6 +295,22 @@ sets the zone sends to 0, as it tests the channels'. **BFP8 is the standard from
 built (`node make_bank.js sea6`) and plays. fm1-emu, 240 MHz, silent, 32-voice build, BFP8: `load32_all` load 49 % held, 63 % as the
 notes start, against 47-48 % and 64 % with the zone sends set to 0 (`dist/gm_32k_nosend.fm1b`); `load32_plain` 43-44 % either way.
 Images: 32 voices 424 092 bytes, 24 voices 424 028.
+
+**LFOs and key scaling (2026-11-03, branch `sf2-lfo`).** The converter keeps each zone's vibrato LFO (to pitch), mod LFO (to pitch and
+to volume) with their delays and rates, and how the key number scales the volume envelope's hold and decay (SF2 generators 5, 6, 13,
+21-24, 39, 40), in modulation records the zones share (20 bytes each, header 64 bytes, FORMAT.md "Modulation"): 33 records for 206 zones
+of 1mgm.sf2, 668 bytes more (459 884, 98.5 %). The player runs both LFOs as triangles once per envelope step (0.72 ms): their pitch adds
+to the bend and the wheel's vibrato, the mod LFO's volume multiplies the level. Hold and decay scale per note when it starts (integer
+log2 and 2^-x, so the decay keeps its exact shape). In 1mgm.sf2: strings and brass get 9-19 cents of vibrato after 0.26 s, the
+accordion, harmonica and vibraphone a tremolo, pianos 1-4 a decay 33 timecents shorter per key (an octave up decays 0.8 times as long).
+Not done: the mod envelope and the filter, and stacked layers (Organ 3 and the accordion have a vibrato layer over a tremolo layer: only
+the first plays, as before). `test_lfo.js`, 15 checks at 44.1 and 32 kHz on a looped sine: vibrato 100 cents at 2 Hz, the mod LFO after a
+0.5 s delay, a 6 dB tremolo, key to decay and hold; `test_zone.js` 33: a bank with the 56-byte header plays without them, the SF2 the
+converter writes keeps them. fm1-emu, 240 MHz, silent, 32-voice build, BFP8: `load32_lfo` (32 notes on violin and Organ 3, every voice
+with an LFO) 42-45 % held, 57 % as the notes start, against 39-42 % and 55 % with the old bank (`dist/gm_32k_nolfo.fm1b`); `load32_all`
+40-44 % against 42-46 % (no measurable difference; this run is a few % under the last section's). `make_sine_bank.js` writes
+`dist/sine_lfo.fm1b` and `test_emu/sine.script` plays it: the tap's new `hz` field shows the firmware's vibrato (472-522 Hz around 500),
+the tremolo (about +-5 dB at 1 Hz) and the delay. Images: 32 voices 427 004 bytes, 24 voices 427 100.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute

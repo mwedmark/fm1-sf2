@@ -231,6 +231,12 @@ function presetZones(sf, p) {
         // reverb and chorus send in 0.1 % (generators 16 and 15, instrument plus preset)
         reverb: Math.max(0, Math.min(1000, n(16) + np(16))),
         chorus: Math.max(0, Math.min(1000, n(15) + np(15))),
+        // the LFOs (SF2 units: cB, cents, timecents; instrument plus preset) and the key number's hold and decay scaling
+        mod: modRecord({
+          lfoVolume: n(13) + np(13), lfoPitch: n(5) + np(5), vibPitch: n(6) + np(6),
+          lfoDelay: tc(21, -12000), lfoFreq: tc(22, 0), vibDelay: tc(23, -12000), vibFreq: tc(24, 0),
+          keyHold: n(39) + np(39), keyDecay: n(40) + np(40),
+        }),
       });
     }
   }
@@ -526,7 +532,7 @@ function buildBank(sf, presetIdx, opt) {
     const atten = Math.max(0, Math.min(255, Math.round((z.atten || 0) * 0.4 / 5)));
     // the sends in the units of a MIDI channel's (0..127 = 0..100 %): the player adds them to the channel's CC 91 and CC 93
     const reverb = Math.round((z.reverb || 0) * 127 / 1000), chorus = Math.round((z.chorus || 0) * 127 / 1000);
-    out.push({ lo: z.lo, hi: z.hi, root, fine, pan: z.pan || 0, atten, excl: z.excl || 0, scale, reverb, chorus, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
+    out.push({ lo: z.lo, hi: z.hi, root, fine, pan: z.pan || 0, atten, excl: z.excl || 0, scale, reverb, chorus, mod: z.mod || null, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
                env: envRecord(z.env, z.drum) });
   }
 }
@@ -548,12 +554,28 @@ function envRecord(e, drum) {
   };
 }
 
+// A zone's LFOs and key scaling in SF2 units, within the SF2 ranges, or null when it has none of them (FORMAT.md, "Modulation").
+// An LFO with no depth gets the default delay and rate, so that records differing only there are shared.
+function modRecord(m) {
+  const c = (x, lo, hi) => Math.max(lo, Math.min(hi, Math.round(x || 0)));
+  const r = {
+    lfoVolume: c(m.lfoVolume, -960, 960), lfoPitch: c(m.lfoPitch, -12000, 12000), vibPitch: c(m.vibPitch, -12000, 12000),
+    lfoDelay: c(m.lfoDelay, -12000, 5000), lfoFreq: c(m.lfoFreq, -16000, 4500), vibDelay: c(m.vibDelay, -12000, 5000), vibFreq: c(m.vibFreq, -16000, 4500),
+    keyHold: c(m.keyHold, -1200, 1200), keyDecay: c(m.keyDecay, -1200, 1200),
+  };
+  if (!r.lfoVolume && !r.lfoPitch) { r.lfoDelay = -12000; r.lfoFreq = 0; }
+  if (!r.vibPitch) { r.vibDelay = -12000; r.vibFreq = 0; }
+  return r.lfoVolume || r.lfoPitch || r.vibPitch || r.keyHold || r.keyDecay ? r : null;
+}
+const MOD_FIELDS = ['lfoVolume', 'lfoPitch', 'vibPitch', 'lfoDelay', 'lfoFreq', 'vibDelay', 'vibFreq', 'keyHold', 'keyDecay'];
+const MOD_GENS = [13, 5, 6, 21, 22, 23, 24, 39, 40];       // the SF2 generator of each field
+
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
-//   header (56) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
-//   key maps (128 bytes per preset) | zones (24 each) | zone levels (4 each) | envelopes (12 each) | sample data (each sample padded to 4 bytes)
+//   header (64) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
+//   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (20 each) | sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 56, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12;
+const FM1B_HEADER = 64, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 20;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -570,7 +592,15 @@ function writeFm1(bank) {
     if (!envIndex.has(k)) { envIndex.set(k, envs.length); envs.push(e); }
     z.envIndex = envIndex.get(k);
   }
-  const offSmp = offEnv + FM1B_ENV * envs.length;
+  const mods = [], modIndex = new Map();                    // so are the modulation records; a zone without one has 0
+  for (const z of bank.zones) {
+    z.modNumber = 0;
+    if (!z.mod) continue;
+    const k = MOD_FIELDS.map(f => z.mod[f]).join();
+    if (!modIndex.has(k)) { mods.push(z.mod); modIndex.set(k, mods.length); }
+    z.modNumber = modIndex.get(k);                           // the record's index plus 1
+  }
+  const offMod = offEnv + FM1B_ENV * envs.length, offSmp = offMod + FM1B_MOD * mods.length;
   let end = offSmp;
   for (const s of bank.samples) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
 
@@ -586,6 +616,8 @@ function writeFm1(bank) {
   dv.setUint32(44, offEnv, true);                          // envelope table
   dv.setUint32(48, offExtra, true);                        // zone levels, exclusive classes, scale tunings and sends
   dv.setUint32(52, FM1B_ZONE_EXTRA, true);                 // their size per zone
+  dv.setUint32(56, mods.length ? offMod : 0, true);         // modulation records: LFOs and key scaling
+  dv.setUint32(60, mods.length, true);
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -618,7 +650,9 @@ function writeFm1(bank) {
     out[x] = z.atten || 0; out[x + 1] = z.excl || 0;
     dv.setUint16(x + 2, z.scale === undefined ? 100 : z.scale, true);
     out[x + 4] = z.reverb || 0; out[x + 5] = z.chorus || 0;
+    dv.setUint16(x + 6, z.modNumber, true);
   });
+  mods.forEach((m, i) => MOD_FIELDS.forEach((f, j) => dv.setInt16(offMod + i * FM1B_MOD + j * 2, m[f], true)));
   envs.forEach((e, i) => {
     const o = offEnv + i * FM1B_ENV;
     dv.setUint16(o, e.attack, true); dv.setUint16(o + 2, e.hold, true); dv.setUint16(o + 4, e.decay, true);
@@ -755,6 +789,7 @@ function writeSf2(bank, name) {
     if (z.excl) gens.push({ op: 57, u: z.excl });
     if (z.reverb) gens.push({ op: 16, u: Math.round(z.reverb * 1000 / 127) });   // back to 0.1 %
     if (z.chorus) gens.push({ op: 15, u: Math.round(z.chorus * 1000 / 127) });
+    if (z.mod) MOD_FIELDS.forEach((f, j) => { if (z.mod[f]) gens.push({ op: MOD_GENS[j], u: z.mod[f] & 0xffff }); });
     gens.push({ op: 58, u: z.root });
     gens.push({ op: 53, u: z.sample.index });
   }

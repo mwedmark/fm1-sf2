@@ -26,8 +26,8 @@ function check(ok, what) { ++checks; if (!ok) { ++failed; console.log('FAIL', wh
 const bank = A.buildBank(sf, -2, { rate: 32000, bits: 16 });
 const bin = A.writeFm1(bank), dv = new DataView(bin.buffer);
 const nz = bank.zones.length, offZone = dv.getUint32(32, true), offExtra = dv.getUint32(48, true), S = dv.getUint32(52, true);
-check(dv.getUint32(16, true) === 56 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
-  'the header is 56 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
+check(dv.getUint32(16, true) === 64 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
+  'the header is 64 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
 // The bank's zones in the order buildBank adds them: every preset's zones from presetZones, as the SoundFont has them.
 const source = sf.presets.flatMap((p, i) => A.presetZones(sf, i));
 check(source.length === nz, `one bank zone per SoundFont zone (${nz})`);
@@ -70,7 +70,9 @@ const again = A.writeFm1(A.buildBank(back, -2, { rate: 32000, bits: 16 }));
 const zonesOf = x => { const d = new DataView(x.buffer, x.byteOffset); const o = d.getUint32(32, true), e = d.getUint32(48, true), n = d.getUint16(14, true);
   return Array.from({ length: n }, (_, i) => [x[o + i * 24 + 16], d.getInt16(o + i * 24 + 20, true), ...x.slice(e + i * S, e + i * S + S)].join()); };
 const z1 = zonesOf(bin), z2 = zonesOf(again);
-check(z1.length === z2.length && z1.every((v, i) => v === z2[i]), 'the SF2 the converter writes keeps root, fine tune, level, class, scale tuning and sends');
+const modsOf = x => { const d = new DataView(x.buffer, x.byteOffset); return Array.from(x.slice(d.getUint32(56, true), d.getUint32(56, true) + 20 * d.getUint32(60, true))).join(); };
+check(z1.length === z2.length && z1.every((v, i) => v === z2[i]) && modsOf(bin) === modsOf(again),
+  'the SF2 the converter writes keeps root, fine tune, level, class, scale tuning, sends, LFOs and key scaling');
 
 // ---- 2. The player ----
 const BLOCK = 128;
@@ -98,11 +100,12 @@ function patched(image, changes) {
     if (v.scale !== undefined) d.setUint16(e + i * S + 2, v.scale, true);
     if (v.reverb !== undefined) c[e + i * S + 4] = v.reverb;
     if (v.chorus !== undefined) c[e + i * S + 5] = v.chorus;
+    if (v.mod !== undefined) d.setUint16(e + i * S + 6, v.mod, true);
   }
   return c;
 }
 const allZones = (v) => Array.from({ length: nz }, (_, i) => [i, v]);
-const neutral = patched(bin, allZones({ atten: 0, excl: 0, scale: 100, reverb: 0, chorus: 0 }));
+const neutral = patched(bin, allZones({ atten: 0, excl: 0, scale: 100, reverb: 0, chorus: 0, mod: 0 }));
 const old = bin.slice(); new DataView(old.buffer).setUint32(48, 0, true);    // the offset 0: a bank without the table
 function play(image, program, notes, blocks = 300) {
   load(image);
@@ -115,22 +118,29 @@ const zoneOf = (p, n) => bank.zones.slice(p.first, p.first + p.count).findIndex(
 
 // A bank without the table (offset 0, or a 48-byte header from before it) plays as one whose zones are all at the defaults.
 check(same(play(old, 0, [48, 60, 67]), play(neutral, 0, [48, 60, 67])), 'a bank without zone levels plays as one at full level, no class, 100 cents a key');
-// A bank from 2026-11-03 with the 52-byte header and 4 bytes a zone (no sends): rebuilt here from this one.
+// Banks of 2026-11-03 before the LFOs: rebuilt here from this one with a shorter header, fewer zone bytes and no modulation records.
+function downgrade(src, hdr, xs) {
+  const d = new DataView(src.buffer, src.byteOffset), H = d.getUint32(16, true), env = d.getUint32(44, true), mods = d.getUint32(56, true);
+  const smp = d.getUint32(36, true), envEnd = mods || smp, cutX = (S - xs) * nz, cutM = mods ? smp - mods : 0;
+  const at = x => x < offExtra ? x - (H - hdr) : x < envEnd ? x - (H - hdr) - cutX : x - (H - hdr) - cutX - cutM;
+  const o = new Uint8Array(src.length - (H - hdr) - cutX - cutM), od = new DataView(o.buffer);
+  o.set(src.subarray(0, hdr));
+  o.set(src.subarray(H, offExtra), hdr);
+  for (let i = 0; i < nz; ++i) o.set(src.subarray(offExtra + i * S, offExtra + i * S + xs), at(offExtra) + i * xs);
+  o.set(src.subarray(env, envEnd), at(env));
+  o.set(src.subarray(smp), at(smp));
+  [16, 20, 24, 28, 32, 36, 40, 44, 48].forEach(f => { const v = d.getUint32(f, true); od.setUint32(f, v ? at(v) : 0, true); });
+  if (hdr >= 56) od.setUint32(52, xs, true);
+  for (let i = 0; i < nz; ++i) od.setUint32(at(offZone) + i * 24, at(d.getUint32(offZone + i * 24, true)), true);   // the samples moved too
+  return o;
+}
 {
-  const o = old.slice(), od = new DataView(o.buffer), n52 = new Uint8Array(o.length - 4 - 4 * nz);
-  const offs = [16, 20, 24, 28, 32, 36, 40, 44].map(f => od.getUint32(f, true));
-  // everything after the header moves 4 bytes down, and everything after the zone levels 4 * nz more
-  const at = x => x >= offExtra + S * nz ? x - 4 - 4 * nz : x - 4;
-  n52.set(o.subarray(0, 52));
-  const nd = new DataView(n52.buffer);
-  [16, 20, 24, 28, 32, 36, 40, 44].forEach((f, k) => nd.setUint32(f, offs[k] ? at(offs[k]) : 0, true));
-  nd.setUint32(48, offExtra - 4, true);
-  n52.set(o.subarray(56, offExtra), 52);
-  for (let i = 0; i < nz; ++i) n52.set(bin.subarray(offExtra + i * S, offExtra + i * S + 4), offExtra - 4 + i * 4);
-  n52.set(o.subarray(offExtra + S * nz), offExtra - 4 + 4 * nz);
-  for (let i = 0; i < nz; ++i) nd.setUint32(offZone - 4 + i * 24, at(od.getUint32(offZone + i * 24, true)), true);   // the samples moved too
-  const sendless = patched(bin, allZones({ reverb: 0, chorus: 0 }));
-  check(same(play(n52, 0, [48, 60, 67]), play(sendless, 0, [48, 60, 67])), 'a bank with the 52-byte header (4 bytes a zone, no sends) still binds and plays, without zone sends');
+  const n52 = downgrade(bin, 52, 4), n56 = downgrade(bin, 56, 8);
+  check(same(play(n52, 0, [48, 60, 67]), play(patched(bin, allZones({ reverb: 0, chorus: 0, mod: 0 })), 0, [48, 60, 67])),
+    'a bank with the 52-byte header (4 bytes a zone, no sends) still binds and plays, without zone sends');
+  check(same(play(n56, 40, [55, 67], 500), play(patched(bin, allZones({ mod: 0 })), 40, [55, 67], 500)) &&
+        !same(play(bin, 40, [55, 67], 500), play(patched(bin, allZones({ mod: 0 })), 40, [55, 67], 500)),
+    'a bank with the 56-byte header (no modulation records) plays without LFOs, though this violin has them');
 }
 const older = path.join(root, 'dist/gm_32k_nopan.fm1b');
 if (fs.existsSync(older)) {

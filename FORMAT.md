@@ -5,10 +5,10 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (56) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | sample data
+header (64) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | sample data
 ```
 
-## Header (56 bytes)
+## Header (64 bytes)
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -28,6 +28,8 @@ header (56) | pitch table | bank map | presets | key maps | zones | zone levels 
 | 44 | u32 | offset of the envelope table, 0 = none (every zone then plays with the default envelope) |
 | 48 | u32 | offset of the zone levels, 0 = none. Only there when the pitch table starts at 52 or later: banks made before 2026-11-03 have a 48-byte header, and the player reads the field only when offset 16 says the header is that long |
 | 52 | u32 | bytes per zone in the zone levels, 8 (a multiple of 4, at most 64). Only there when the pitch table starts at 56 or later: a 52-byte header (banks of 2026-11-03 before the sends) has 4 bytes a zone |
+| 56 | u32 | offset of the modulation records, 0 = none. Only there when the pitch table starts at 64 or later: a 56-byte header (banks of 2026-11-03 before the LFOs) has none |
+| 60 | u32 | number of modulation records |
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
@@ -108,11 +110,32 @@ level, with no exclusive class and 100 cents a key.
 | 2 | u16 | scale tuning in cents a key (generator 56, 0..1200), 100 the normal keyboard |
 | 4 | u8 | reverb send (generator 16, instrument plus preset) in the units of MIDI CC 91, 0..127 = 0..100 %. The player adds it to the channel's CC 91, at most 127 |
 | 5 | u8 | chorus send (generator 15), the same with CC 93 |
-| 6 | u8[2] | 0 |
+| 6 | u16 | modulation record number plus 1, 0 = none (no LFOs, no key scaling). 0 in banks made before them |
 
 With a scale tuning other than 100 a note plays `(note - root) * scale + fine` cents from the sample's pitch: whole semitones from the
 pitch table, the rest (0..99 cents) as the fine tune is. The converter then moves the root by whole multiples of the scale and keeps the
 rest of the zone's tuning in `fine`, so `fine` may be outside -50..50 for those zones (all of the tuning at scale 0).
+
+## Modulation: 20 bytes each
+
+A zone's LFOs and how the key number scales its volume envelope, in SF2 units, instrument plus preset. Zones share them: the converter
+writes each different record once. An LFO is a triangle that starts at 0 and rises; its value is -1..1 times the depth.
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | i16 | mod LFO to volume, cB at full excursion (generator 13, -960..960): a positive value is louder at the LFO's top. The player raises at most 12 dB |
+| 2 | i16 | mod LFO to pitch, cents (generator 5) |
+| 4 | i16 | vibrato LFO to pitch, cents (generator 6) |
+| 6 | i16 | mod LFO delay, timecents (generator 21, default -12000 = 1 ms) |
+| 8 | i16 | mod LFO rate, timecents above 8.176 Hz (generator 22, default 0) |
+| 10 | i16 | vibrato LFO delay, timecents (generator 23) |
+| 12 | i16 | vibrato LFO rate, timecents above 8.176 Hz (generator 24) |
+| 14 | i16 | key number to hold, timecents a key (generator 39): the hold time times 2^((60 - key) * value / 1200) |
+| 16 | i16 | key number to decay, timecents a key (generator 40): the decay time the same way |
+| 18 | u16 | 0 |
+
+An LFO without depth has the default delay and rate. The player moves the LFOs on once per envelope step and adds their pitch to the
+bend and the wheel's vibrato.
 
 ## Lookup in C
 
@@ -137,8 +160,9 @@ const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, u
 
 ## What is left out
 
-Filters, the modulation envelope and LFOs, velocity layers (the layer that answers to velocity 100 is used), stereo (the left channel
-is used), per-zone reverb and chorus sends, and sample start offsets.
+Filters, the modulation envelope, the key number's scaling of the modulation envelope, velocity layers (the layer that answers to
+velocity 100 is used), stacked layers (the lowest-numbered zone of a key plays), stereo (the left channel is used), modulators (the
+wheel's vibrato is the player's own), and sample start offsets.
 
 ## Envelopes: 12 bytes each
 

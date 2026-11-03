@@ -31,6 +31,14 @@ struct voice {
     int8_t zone_pan;
     uint8_t side;
     uint16_t side_gain;
+    /* The zone's LFOs (FORMAT.md, "Modulation"): triangles from 0, phase 2^32 a cycle, moved on per envelope step after a delay
+     * of so many steps. lfos: bit 0 they move the pitch, bit 1 the volume, 0: the zone has none. */
+    uint32_t mod_phase, mod_inc, vib_phase, vib_inc;
+    uint16_t mod_wait, vib_wait;
+    int16_t mod_pitch, vib_pitch, mod_volume;  /* cents, cents, cB at full excursion */
+    int16_t lfo_cents;                         /* the LFOs' pitch now, in cents */
+    uint32_t tremolo;                          /* the mod LFO's volume now, Q16 */
+    uint8_t lfos;
     /* SEA zones: the LMS state after group state_group (-1: none), and the two most recent groups by parity. */
     int32_t state_group, id[2], state[8];
     int16_t pcm[2][FM1_SEA_GROUP];
@@ -42,6 +50,7 @@ static struct {
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
     uint32_t extras;  /* the zone levels, exclusive classes, scale tunings and sends, 0: none (a bank made before them) */
     uint32_t extra_size;  /* their bytes a zone: 8, or 4 in a 52-byte header (no sends) */
+    uint32_t mods, mod_count;  /* the modulation records (LFOs, key scaling), 0: none (a header under 64 bytes) */
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
@@ -56,6 +65,9 @@ static unsigned voice_limit = FM1B_VOICES, voices_cut;
 enum { CUT_RELEASE = 13500 };
 enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA, FORMAT_BFP8 };
 enum { BFP_GROUP = 32, BFP_GROUP_BYTES = 33 };   /* BFP8: a shift byte, then 32 signed 8-bit mantissas */
+enum { MOD_RECORD = 20 };                         /* a modulation record: nine i16 in SF2 units and two bytes of 0 */
+/* An LFO at 0 timecents (8.176 Hz, the SF2 default) moves its phase this much per envelope step. */
+static const uint32_t LFO_BASE = (uint32_t)((8176ULL * 4294967296ULL * (unsigned)ENV_STEP + 500ULL * FM1B_RATE) / (1000ULL * FM1B_RATE));
 
 /* One state per MIDI channel plus the panel's: the preset a note plays (-1: bank.preset), and the channel's volume and
  * expression with their product, a Q14 gain on the General MIDI curve, which the voices apply as the envelope ramps. */
@@ -155,8 +167,10 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.envs = rd32(image + 44);
     bank.extras = bank.pitch >= 52U ? rd32(image + 48) : 0U;  /* a 52-byte header has the offset; banks before it end at 48 */
     bank.extra_size = bank.pitch >= 56U ? rd32(image + 52) : 4U;   /* a 56-byte header has their size */
+    bank.mods = bank.pitch >= 64U ? rd32(image + 56) : 0U;   /* a 64-byte header has the modulation records */
+    bank.mod_count = bank.mods ? rd32(image + 60) : 0U;
     bank.env_count = 0;
-    if (bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
+    if ((bank.mods && (bank.mods % 4U || bank.mod_count > 65535U || !region_ok(bank.mods, (uint64_t)MOD_RECORD * bank.mod_count))) || bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
         !region_ok(bank.presets, 24ULL * bank.preset_count) || !region_ok(bank.keymaps, 128ULL * bank.preset_count) ||
         !region_ok(bank.zones, 24ULL * bank.zone_count) || (bank.extras && (bank.extras % 4U || bank.extra_size < 4U || bank.extra_size > 64U || bank.extra_size % 4U ||
                                                     !region_ok(bank.extras, (uint64_t)bank.extra_size * bank.zone_count))))
@@ -274,17 +288,75 @@ static FM1_DSP_CODE uint32_t cents_factor(int32_t cents)
     uint32_t f = (uint32_t)(((uint64_t)semitone_q16[rest / 100] * (uint32_t)(65536 + t + ((t * t) >> 17))) >> 16);
     return octave >= 0 ? f << octave : f >> -octave;
 }
-/* The voice's step with its channel's bend and, while the modulation wheel is up, the vibrato: a triangle of +-50 cents
- * at full depth. A channel without either plays base_step untouched. */
+/* base * 2^(tc / 1200) for timecents of any size, at most 2^32 - 1: for LFO rates and delays and the key scaling. */
+static FM1_DSP_CODE uint32_t scale_tc(uint32_t base, int32_t tc)
+{
+    int32_t octave = tc >= 0 ? tc / 1200 : -((1199 - tc) / 1200);
+    uint64_t x = ((uint64_t)base * cents_factor(tc - octave * 1200)) >> 16;
+    if (octave < 0)
+        return octave < -40 ? 0U : (uint32_t)(x >> -octave);
+    return octave > 31 || x > (0xffffffffULL >> octave) ? 0xffffffffU : (uint32_t)(x << octave);
+}
+/* -log2(f / 65536) in Q24 for a factor f of 1..65535 (Q16), a bit at a time: square, and halve past 2. */
+static FM1_DSP_CODE uint32_t neglog2_q24(uint32_t f)
+{
+    uint32_t n = 0;
+    if (!f)
+        return 17U << 24;                                     /* below 2^-16: as good as nothing */
+    while (f < 32768U) { f <<= 1; ++n; }                      /* f / 65536 in 0.5..1: its log2 is log2(f / 32768) - 1 */
+    uint64_t q = (uint64_t)f << 15;                           /* f / 32768 in Q30, 1..2 */
+    uint32_t frac = 0;
+    for (int bit = 23; bit >= 0; --bit) {
+        q = (q * q) >> 30;
+        if (q >= 2ULL << 30) { q >>= 1; frac |= 1U << bit; }
+    }
+    return ((n + 1U) << 24) - frac;
+}
+/* 2^(-l) in Q16 for l in Q24: the whole part a shift, the fraction a product of 2^(-2^-i), i = 1..24. */
+static const uint32_t exp2_neg_bit[24] = {759250125, 902905651, 984625594, 1028218693, 1050733751, 1062175491, 1067942999, 1070838486,
+    1072289173, 1073015252, 1073378477, 1073560135, 1073650976, 1073696399, 1073719111, 1073730468, 1073736146, 1073738985,
+    1073740404, 1073741114, 1073741469, 1073741647, 1073741735, 1073741780};   /* Q30 */
+static FM1_DSP_CODE uint32_t exp2neg_q16(uint32_t l)
+{
+    if (l >> 24 >= 17U)
+        return 0;
+    uint64_t r = 1ULL << 30;
+    for (unsigned i = 0; i < 24; ++i)
+        if (l & (1U << (23 - i)))
+            r = (r * exp2_neg_bit[i]) >> 30;
+    return (uint32_t)((r + (1ULL << (13 + (l >> 24)))) >> (14 + (l >> 24)));
+}
+/* A triangle from 0 for phase 0: up to 32768 at a quarter cycle, down to -32768 at three quarters. */
+static inline __attribute__((always_inline)) int32_t triangle(uint32_t phase)
+{
+    int32_t q = (int32_t)(phase >> 16);
+    return q < 16384 ? 2 * q : q < 49152 ? 65536 - 2 * q : 2 * q - 131072;
+}
+/* The voice's step with its channel's bend, while the modulation wheel is up the vibrato (a triangle of +-50 cents at full
+ * depth), and its zone's LFOs. A voice without any of them plays base_step untouched. */
 static FM1_DSP_CODE void retune(struct voice *v)
 {
-    int32_t cents = channel_cents[v->channel];
+    int32_t cents = channel_cents[v->channel] + v->lfo_cents;
     unsigned mod = channel_mod[v->channel];
     if (mod) {
         int32_t tri = v->lfo < 32768U ? (int32_t)v->lfo : 65535 - (int32_t)v->lfo;   /* 0..32767 */
         cents += (tri - 16384) * (int32_t)mod * VIBRATO_CENTS / (16384 * 127);
     }
+    cents = cents < -4800 ? -4800 : cents > 4800 ? 4800 : cents;
     v->step = cents ? (uint32_t)(((uint64_t)v->base_step * cents_factor(cents)) >> 16) : v->base_step;
+}
+/* The zone's LFOs one envelope step on: the pitch they give and, for the mod LFO, the volume (cB, as 19.93 cents of amplitude
+ * each; at most +12 dB). */
+static FM1_DSP_CODE void lfo_step(struct voice *v)
+{
+    if (v->mod_wait) --v->mod_wait; else v->mod_phase += v->mod_inc;
+    if (v->vib_wait) --v->vib_wait; else v->vib_phase += v->vib_inc;
+    int32_t m = triangle(v->mod_phase), b = triangle(v->vib_phase);
+    v->lfo_cents = (int16_t)((m * v->mod_pitch + b * v->vib_pitch) >> 15);
+    if (v->lfos & 2U) {
+        int32_t cents = ((m * v->mod_volume) >> 15) * 1993 / 100;
+        v->tremolo = cents_factor(cents > 2400 ? 2400 : cents);
+    }
 }
 static FM1_DSP_CODE void channel_retune(unsigned channel)
 {
@@ -457,12 +529,46 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         v->zone_reverb = sends[0] > 127U ? 127U : sends[0];
         v->zone_chorus = sends[1] > 127U ? 127U : sends[1];
     }
+    /* The zone's modulation record (FORMAT.md, "Modulation"): its LFOs, and how the key number scales hold and decay. */
+    const uint8_t *mod = NULL;
+    int32_t key_hold = 0, key_decay = 0;
+    if (extra && bank.extra_size >= 8U && bank.mods) {
+        uint32_t number = rd16(extra + 6);                    /* the record's index plus 1, 0: none */
+        if (number && number <= bank.mod_count)
+            mod = bank.image + bank.mods + (number - 1U) * MOD_RECORD;
+    }
+    if (mod) {
+        int32_t volume = (int16_t)rd16(mod), pitch = (int16_t)rd16(mod + 2), vib = (int16_t)rd16(mod + 4);
+        v->mod_volume = (int16_t)(volume < -960 ? -960 : volume > 960 ? 960 : volume);
+        v->mod_pitch = (int16_t)(pitch < -12000 ? -12000 : pitch > 12000 ? 12000 : pitch);
+        v->vib_pitch = (int16_t)(vib < -12000 ? -12000 : vib > 12000 ? 12000 : vib);
+        if (v->mod_volume || v->mod_pitch) {                  /* delay in steps (at most 47 s), rate as a phase step */
+            uint32_t wait = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 6));
+            v->mod_wait = (uint16_t)(wait > 65535U ? 65535U : wait);
+            v->mod_inc = scale_tc(LFO_BASE, (int16_t)rd16(mod + 8));
+        }
+        if (v->vib_pitch) {
+            uint32_t wait = scale_tc(ENV_STEPS_PER_S1000, (int16_t)rd16(mod + 10));
+            v->vib_wait = (uint16_t)(wait > 65535U ? 65535U : wait);
+            v->vib_inc = scale_tc(LFO_BASE, (int16_t)rd16(mod + 12));
+        }
+        v->lfos = (uint8_t)((v->mod_pitch || v->vib_pitch ? 1U : 0U) | (v->mod_volume ? 2U : 0U));
+        v->tremolo = 65536U;
+        key_hold = (int16_t)rd16(mod + 14);
+        key_decay = (int16_t)rd16(mod + 16);
+    }
     /* envelope: the attack starts from silence; a step is ENV_STEP frames */
     uint32_t attack_steps = (rd16(env) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U, hold_steps = (rd16(env + 2) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U;
     attack_steps = attack_steps ? attack_steps : 1U;
     v->attack_inc = ENV_ONE / attack_steps;
+    if (key_hold)                                             /* SF2: the time times 2^((60 - key) * k / 1200) */
+        hold_steps = scale_tc(hold_steps, (60 - (int32_t)note) * key_hold);
     v->left = hold_steps;
     v->decay = (uint16_t)rd16(env + 4);
+    if (key_decay && v->decay) {                              /* a decay s times as long: the factor to the power 1 / s */
+        uint32_t f = exp2neg_q16(scale_tc(neglog2_q24(v->decay), ((int32_t)note - 60) * key_decay));
+        v->decay = (uint16_t)(f > 65535U ? 65535U : f ? f : 1U);
+    }
     v->sustain = rd16(env + 6) << 8;
     v->release = (uint16_t)rd16(env + 8);
     v->fixed = (uint8_t)(rd16(env + 10) & 1U);
@@ -759,11 +865,16 @@ static FM1_DSP_CODE void env_step(struct voice *v)
         v->active = 0;
         return;
     }
-    if (channel_mod[v->channel]) {                            /* vibrato: the step follows the LFO, once per envelope step */
-        v->lfo = (uint16_t)(v->lfo + LFO_STEP);
+    if (v->lfos)
+        lfo_step(v);
+    if (channel_mod[v->channel] || (v->lfos & 1U)) {          /* vibrato: the step follows the LFOs, once per envelope step */
+        if (channel_mod[v->channel])
+            v->lfo = (uint16_t)(v->lfo + LFO_STEP);
         retune(v);
     }
     int32_t next = (int32_t)((((int64_t)v->gain * target >> 24) * channel_scale[v->channel]) >> 14);   /* the channel's volume applies live */
+    if (v->lfos & 2U)                                         /* tremolo */
+        next = (int32_t)(((int64_t)next * v->tremolo) >> 16);
     v->level_step = (next - v->level) / ENV_STEP;
     v->frames = ENV_STEP;
 }
