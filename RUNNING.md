@@ -88,6 +88,24 @@ node make_wasm_js.js
 The simulator plays on one sampler track through the panel slot only. **MIDI channels and program change are firmware only**
 (`transfer.c`), so multitimbral cannot be heard in the simulator.
 
+### 3b. The install page: firmware and bank in one go (2026-11-03, not yet run on a device)
+
+```powershell
+cd D:\gitm1-sf2
+.m1_open\sdk\Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'   # from fm1_open, as in section 1
+node make_install.js [bank.fm1b]     # dist/install/: the last build's package, the bank (default dist/gm_32k.fm1b), manifest.json
+```
+
+Open <http://localhost:8765/install.html> (the same server as section 3) in Chrome or Edge and click **Installera**. It finds the FM-1
+with the SDK's own browser updater (`fm1_open/sdk/WebUpdate.js`, the protocol M-VAVE's workbench uses: identity query, capability with the
+build id), installs the firmware through the vendor loader unless the FM-1 already reports this build, waits for it to come back and checks
+the build id it reports, then sends the bank with the player's SysEx upload (as `index.html` does, on the port the updater found and
+checked). Either step can be left out. It only updates over the SF2 player's own firmware (`FM-1_8000014`): an FM-1 on the stock V15 or
+another firmware is told to use the workbench the first time. `make_install.js` must run after the build it packs: the build id it
+writes is `build/dx7/build-identity.json`'s, and the device's must match it after the update. Checked in the browser pane against a fake
+FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank arrives (1 040 frames, CRC right), bank only, the stock
+V15 refused, no FM-1 found. The firmware write itself is the SDK's code and has not been run from this page.
+
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
 **Quick start** (verified): build the firmware (section 1), then

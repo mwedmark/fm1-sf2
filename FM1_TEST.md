@@ -14,6 +14,7 @@ med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus, L
 | Originalfirmwaren (V15) | `fm1_open\sdk\firmware\FM-1_015.fwsc` |
 | Workbench för att flasha | <https://open.m-vave.com/fm1-workbench> (Chrome eller Edge, USB-kabel) |
 | Konverteraren som skickar banken | `index.html` via `python -m http.server 8765`, sedan <http://localhost:8765/index.html> (RUNNING.md avsnitt 3) |
+| Installationssidan (firmware och bank i ett steg) | <http://localhost:8765/install.html>, efter `node make_install.js` (RUNNING.md avsnitt 3b). Fungerar när FM-1 redan kör SF2-firmwaren. |
 | SoundFont | `1mgm.sf2` |
 | Test-MIDI-filer | `test_emu\midi\*.mid` (byggs med `node make_midi.js`), spelas från Windows (RUNNING.md avsnitt 6) |
 
@@ -37,6 +38,9 @@ Om A4 eller A5 misslyckas: sluta testa och använd M-VAVE:s återställning (wor
 USB-uppdateringsläge). Notera exakt vad som visades.
 
 ## B. Ladda in en bank (BFP8)
+
+Kör FM-1 redan SF2-firmwaren kan B1-B3 ersättas av installationssidan: **Installera** skriver firmwaren (om den är en annan version) och
+banken i ett svep. Notera i så fall tid och vad sidan visade för varje steg.
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
