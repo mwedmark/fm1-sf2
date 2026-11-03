@@ -5,10 +5,10 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (52) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | sample data
+header (56) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | sample data
 ```
 
-## Header (52 bytes)
+## Header (56 bytes)
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -27,6 +27,7 @@ header (52) | pitch table | bank map | presets | key maps | zones | zone levels 
 | 40 | u32 | file size |
 | 44 | u32 | offset of the envelope table, 0 = none (every zone then plays with the default envelope) |
 | 48 | u32 | offset of the zone levels, 0 = none. Only there when the pitch table starts at 52 or later: banks made before 2026-11-03 have a 48-byte header, and the player reads the field only when offset 16 says the header is that long |
+| 52 | u32 | bytes per zone in the zone levels, 8 (a multiple of 4, at most 64). Only there when the pitch table starts at 56 or later: a 52-byte header (banks of 2026-11-03 before the sends) has 4 bytes a zone |
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
@@ -95,7 +96,7 @@ lowest-numbered zone wins, so the CPU never has to choose.
 
 Zones that use the same sample point at the same data.
 
-## Zone levels: 4 bytes each
+## Zone levels: 8 bytes each
 
 One per zone, in the zone table's order. A bank without them (header offset 48 is 0, or a 48-byte header) plays every zone at full
 level, with no exclusive class and 100 cents a key.
@@ -105,6 +106,9 @@ level, with no exclusive class and 100 cents a key.
 | 0 | u8 | level in 0.5 dB steps below full (0..255). The converter writes SF2 initial attenuation (generator 48, instrument plus preset) times 0.4, as the EMU hardware and FluidSynth play it |
 | 1 | u8 | exclusive class (generator 57), 0 = none. A note of a class fades out the voices of the same class, preset and channel in about 5 ms (a closed hi-hat cuts the open one) |
 | 2 | u16 | scale tuning in cents a key (generator 56, 0..1200), 100 the normal keyboard |
+| 4 | u8 | reverb send (generator 16, instrument plus preset) in the units of MIDI CC 91, 0..127 = 0..100 %. The player adds it to the channel's CC 91, at most 127 |
+| 5 | u8 | chorus send (generator 15), the same with CC 93 |
+| 6 | u8[2] | 0 |
 
 With a scale tuning other than 100 a note plays `(note - root) * scale + fine` cents from the sample's pitch: whole semitones from the
 pitch table, the rest (0..99 cents) as the fine tune is. The converter then moves the root by whole multiples of the scale and keeps the

@@ -25,24 +25,28 @@ function check(ok, what) { ++checks; if (!ok) { ++failed; console.log('FAIL', wh
 // ---- 1. The converter ----
 const bank = A.buildBank(sf, -2, { rate: 32000, bits: 16 });
 const bin = A.writeFm1(bank), dv = new DataView(bin.buffer);
-const nz = bank.zones.length, offZone = dv.getUint32(32, true), offExtra = dv.getUint32(48, true);
-check(dv.getUint32(16, true) === 52 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + 4 * nz,
-  'the header is 52 bytes; the zone levels follow the zones, 4 bytes each, and the envelopes follow them');
+const nz = bank.zones.length, offZone = dv.getUint32(32, true), offExtra = dv.getUint32(48, true), S = dv.getUint32(52, true);
+check(dv.getUint32(16, true) === 56 && S === 8 && offExtra === offZone + 24 * nz && dv.getUint32(44, true) === offExtra + S * nz,
+  'the header is 56 bytes; the zone levels follow the zones, 8 bytes each (header offset 52), and the envelopes follow them');
 // The bank's zones in the order buildBank adds them: every preset's zones from presetZones, as the SoundFont has them.
 const source = sf.presets.flatMap((p, i) => A.presetZones(sf, i));
 check(source.length === nz, `one bank zone per SoundFont zone (${nz})`);
-const extra = i => ({ atten: bin[offExtra + i * 4], excl: bin[offExtra + i * 4 + 1], scale: dv.getUint16(offExtra + i * 4 + 2, true) });
-let levelOk = 0, exclOk = 0, scaleOk = 0, attenuated = 0, classes = 0, scaled = 0;
+const extra = i => ({ atten: bin[offExtra + i * S], excl: bin[offExtra + i * S + 1], scale: dv.getUint16(offExtra + i * S + 2, true),
+  reverb: bin[offExtra + i * S + 4], chorus: bin[offExtra + i * S + 5] });
+let levelOk = 0, exclOk = 0, scaleOk = 0, attenuated = 0, classes = 0, scaled = 0, sendOk = 0, reverbs = 0, choruses = 0;
 source.forEach((s, i) => {
   const x = extra(i);
   levelOk += x.atten === Math.min(255, Math.round(s.atten * 0.4 / 5));
   exclOk += x.excl === s.excl;
   scaleOk += x.scale === s.scale;
   attenuated += x.atten > 0; classes += x.excl > 0; scaled += x.scale !== 100;
+  sendOk += x.reverb === Math.round(s.reverb * 127 / 1000) && x.chorus === Math.round(s.chorus * 127 / 1000);
+  reverbs += x.reverb > 0; choruses += x.chorus > 0;
 });
 check(levelOk === nz && attenuated > 200, `every zone's level is the SoundFont's attenuation x 0.4 in 0.5 dB steps (${attenuated} zones below full level)`);
 check(exclOk === nz && classes > 0, `every zone keeps its exclusive class (${classes} zones in a class)`);
 check(scaleOk === nz && scaled > 0, `every zone keeps its scale tuning (${scaled} zones not at 100 cents a key)`);
+check(sendOk === nz && reverbs > 100 && choruses > 0, `every zone keeps its reverb and chorus send, in 0..127 (${reverbs} zones with reverb, ${choruses} with chorus)`);
 // The pitch the player computes, (note - root) * scale + fine, against the SoundFont's (note - root key) * scale + tuning.
 let pitchBad = 0, pitchChecked = 0, worst = 0;
 source.forEach((s, i) => {
@@ -64,9 +68,9 @@ check(hatClasses[0] > 0 && hatClasses.every(c => c === hatClasses[0]), `the kit'
 const sf2 = A.writeSf2(bank, 'zone test'), back = A.parseSf2(sf2.buffer.slice(sf2.byteOffset, sf2.byteOffset + sf2.byteLength));
 const again = A.writeFm1(A.buildBank(back, -2, { rate: 32000, bits: 16 }));
 const zonesOf = x => { const d = new DataView(x.buffer, x.byteOffset); const o = d.getUint32(32, true), e = d.getUint32(48, true), n = d.getUint16(14, true);
-  return Array.from({ length: n }, (_, i) => [x[o + i * 24 + 16], d.getInt16(o + i * 24 + 20, true), x[e + i * 4], x[e + i * 4 + 1], d.getUint16(e + i * 4 + 2, true)].join()); };
+  return Array.from({ length: n }, (_, i) => [x[o + i * 24 + 16], d.getInt16(o + i * 24 + 20, true), ...x.slice(e + i * S, e + i * S + S)].join()); };
 const z1 = zonesOf(bin), z2 = zonesOf(again);
-check(z1.length === z2.length && z1.every((v, i) => v === z2[i]), 'the SF2 the converter writes keeps root, fine tune, level, class and scale tuning');
+check(z1.length === z2.length && z1.every((v, i) => v === z2[i]), 'the SF2 the converter writes keeps root, fine tune, level, class, scale tuning and sends');
 
 // ---- 2. The player ----
 const BLOCK = 128;
@@ -89,14 +93,16 @@ const same = (a, x) => a.length === x.length && a.every((v, i) => v === x[i]);
 function patched(image, changes) {
   const c = image.slice(), d = new DataView(c.buffer), e = d.getUint32(48, true);
   for (const [i, v] of changes) {
-    if (v.atten !== undefined) c[e + i * 4] = v.atten;
-    if (v.excl !== undefined) c[e + i * 4 + 1] = v.excl;
-    if (v.scale !== undefined) d.setUint16(e + i * 4 + 2, v.scale, true);
+    if (v.atten !== undefined) c[e + i * S] = v.atten;
+    if (v.excl !== undefined) c[e + i * S + 1] = v.excl;
+    if (v.scale !== undefined) d.setUint16(e + i * S + 2, v.scale, true);
+    if (v.reverb !== undefined) c[e + i * S + 4] = v.reverb;
+    if (v.chorus !== undefined) c[e + i * S + 5] = v.chorus;
   }
   return c;
 }
 const allZones = (v) => Array.from({ length: nz }, (_, i) => [i, v]);
-const neutral = patched(bin, allZones({ atten: 0, excl: 0, scale: 100 }));
+const neutral = patched(bin, allZones({ atten: 0, excl: 0, scale: 100, reverb: 0, chorus: 0 }));
 const old = bin.slice(); new DataView(old.buffer).setUint32(48, 0, true);    // the offset 0: a bank without the table
 function play(image, program, notes, blocks = 300) {
   load(image);
@@ -109,6 +115,23 @@ const zoneOf = (p, n) => bank.zones.slice(p.first, p.first + p.count).findIndex(
 
 // A bank without the table (offset 0, or a 48-byte header from before it) plays as one whose zones are all at the defaults.
 check(same(play(old, 0, [48, 60, 67]), play(neutral, 0, [48, 60, 67])), 'a bank without zone levels plays as one at full level, no class, 100 cents a key');
+// A bank from 2026-11-03 with the 52-byte header and 4 bytes a zone (no sends): rebuilt here from this one.
+{
+  const o = old.slice(), od = new DataView(o.buffer), n52 = new Uint8Array(o.length - 4 - 4 * nz);
+  const offs = [16, 20, 24, 28, 32, 36, 40, 44].map(f => od.getUint32(f, true));
+  // everything after the header moves 4 bytes down, and everything after the zone levels 4 * nz more
+  const at = x => x >= offExtra + S * nz ? x - 4 - 4 * nz : x - 4;
+  n52.set(o.subarray(0, 52));
+  const nd = new DataView(n52.buffer);
+  [16, 20, 24, 28, 32, 36, 40, 44].forEach((f, k) => nd.setUint32(f, offs[k] ? at(offs[k]) : 0, true));
+  nd.setUint32(48, offExtra - 4, true);
+  n52.set(o.subarray(56, offExtra), 52);
+  for (let i = 0; i < nz; ++i) n52.set(bin.subarray(offExtra + i * S, offExtra + i * S + 4), offExtra - 4 + i * 4);
+  n52.set(o.subarray(offExtra + S * nz), offExtra - 4 + 4 * nz);
+  for (let i = 0; i < nz; ++i) nd.setUint32(offZone - 4 + i * 24, at(od.getUint32(offZone + i * 24, true)), true);   // the samples moved too
+  const sendless = patched(bin, allZones({ reverb: 0, chorus: 0 }));
+  check(same(play(n52, 0, [48, 60, 67]), play(sendless, 0, [48, 60, 67])), 'a bank with the 52-byte header (4 bytes a zone, no sends) still binds and plays, without zone sends');
+}
 const older = path.join(root, 'dist/gm_32k_nopan.fm1b');
 if (fs.existsSync(older)) {
   const o = fs.readFileSync(older);
@@ -202,5 +225,40 @@ const root60 = bank.zones[z60].root;
 if (keys.includes(root60))
   check(Math.abs(cents(atRoot(root60), period(play(neutral, 73, [root60], 400)))) < 1, 'at the root key the scale tuning changes nothing');
 
+
+// Sends: a voice's reverb and chorus are its channel's (CC 91, CC 93; 30 and 20 until set) plus its zone's, at most 127.
+const sendOf = (image, notes, controls = []) => {
+  load(image); w.mt_program(0, 73);
+  for (const [c, v] of controls) w.mt_control(0, c, v);
+  for (const n of notes) w.mt_note(0, n, 100);
+  const buses = w.mt_block_sends();
+  return [buses, w.mt_send(0), w.mt_send(1)];
+};
+const [b0, r0, c0] = sendOf(neutral, [72]);
+check(b0 === 0 && r0 === 30 && c0 === 20, `without zone sends a voice has its channel's: reverb ${r0}, chorus ${c0}`);
+const wet = patched(neutral, [[fz, { reverb: 40, chorus: 50 }]]);
+const [b1, r1, c1] = sendOf(wet, [72]);
+check(b1 === 0 && r1 === 70 && c1 === 70, `a zone with reverb 40 and chorus 50 adds them: ${r1} and ${c1}, still no bus`);
+const [, r2, c2] = sendOf(wet, [72], [[91, 120], [93, 0]]);
+check(r2 === 127 && c2 === 50, `at most 127: CC 91 120 plus 40 is ${r2}; CC 93 0 leaves the zone's own ${c2}`);
+// Two voices with different sends (the flute with its zone's on channel 1, a piano without on channel 2): the buses, each voice
+// times its own send.
+{
+  const notes = [[0, 73, 72], [1, 0, 60]];
+  const start = only => { load(wet); for (const [ch, p, n] of notes) { w.mt_channel_program(ch, 0, p); if (only === undefined || only === ch) w.mt_note(ch, n, 100); } };
+  const dry = ch => { start(ch); const a = []; for (let k = 0; k < 20; ++k) { w.mt_block_sends(); a.push(...new Int32Array(w.memory.buffer, w.mt_out(), BLOCK)); } return a; };
+  const flute = dry(0), piano = dry(1);
+  start();
+  let buses = 0, err = 0, mag = 0;
+  for (let k = 0; k < 20; ++k) {
+    buses |= w.mt_block_sends();
+    const rev = new Int32Array(w.memory.buffer, w.mt_rev(), BLOCK);
+    for (let i = 0; i < BLOCK; ++i) {
+      const want = (flute[k * BLOCK + i] * 70 + piano[k * BLOCK + i] * 30) / 127;
+      err += Math.abs(rev[i] - want); mag += Math.abs(want);
+    }
+  }
+  check((buses & 3) === 3 && mag > 0 && err / mag < 0.01, `two voices with different sends use the buses, each voice times its own send (error ${(100 * err / mag).toFixed(2)} %)`);
+}
 console.log(failed ? `${failed} of ${checks} checks FAILED` : `${checks}/${checks} checks passed`);
 process.exitCode = failed ? 1 : 0;

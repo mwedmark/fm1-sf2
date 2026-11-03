@@ -25,6 +25,7 @@ struct voice {
     uint16_t lfo;                             /* vibrato phase, moved on only while the channel's modulation wheel is up */
     uint8_t exclusive;                        /* the zone's exclusive class (SF2 generator 57), 0: none */
     int16_t preset;                           /* the preset it plays: an exclusive class holds within one preset */
+    uint8_t zone_reverb, zone_chorus;         /* the zone's own sends (SF2 generators 16, 15), added to its channel's */
     /* Pan: the zone's own (SF2 generator 17, -64..64) plus the channel's CC 10. A panned voice fades its far side by side_gain
      * (Q8): it is added to the side buffer (1: left, 2: right) that the mix takes away from that channel. 0: centred. */
     int8_t zone_pan;
@@ -39,7 +40,8 @@ static struct {
     const int16_t *dqt;
     uint32_t bytes, rate, format, sea_bits, chunk_bytes;   /* format: FORMAT_*; SEA: code bits and 28 + 40 * bits bytes per chunk */
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
-    uint32_t extras;  /* the zone levels, exclusive classes and scale tunings (4 bytes a zone), 0: none (a bank made before them) */
+    uint32_t extras;  /* the zone levels, exclusive classes, scale tunings and sends, 0: none (a bank made before them) */
+    uint32_t extra_size;  /* their bytes a zone: 8, or 4 in a 52-byte header (no sends) */
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
@@ -152,10 +154,12 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.zones = rd32(image + 32);
     bank.envs = rd32(image + 44);
     bank.extras = bank.pitch >= 52U ? rd32(image + 48) : 0U;  /* a 52-byte header has the offset; banks before it end at 48 */
+    bank.extra_size = bank.pitch >= 56U ? rd32(image + 52) : 4U;   /* a 56-byte header has their size */
     bank.env_count = 0;
     if (bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
         !region_ok(bank.presets, 24ULL * bank.preset_count) || !region_ok(bank.keymaps, 128ULL * bank.preset_count) ||
-        !region_ok(bank.zones, 24ULL * bank.zone_count) || (bank.extras && (bank.extras % 4U || !region_ok(bank.extras, 4ULL * bank.zone_count))))
+        !region_ok(bank.zones, 24ULL * bank.zone_count) || (bank.extras && (bank.extras % 4U || bank.extra_size < 4U || bank.extra_size > 64U || bank.extra_size % 4U ||
+                                                    !region_ok(bank.extras, (uint64_t)bank.extra_size * bank.zone_count))))
         return -1;
     if (bank.envs) {
         bank.env_count = (bank.bytes - (bank.envs <= bank.bytes ? bank.envs : bank.bytes)) / 12U;
@@ -384,7 +388,8 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     uint32_t env_number = rd16(zone + 18);
     const uint8_t *env = bank.envs && env_number < bank.env_count ? bank.image + bank.envs + env_number * 12U : default_env;
     /* The zone's level (0.5 dB steps), exclusive class and scale tuning (cents a key): FORMAT.md, "Zone levels". */
-    const uint8_t *extra = bank.extras ? bank.image + bank.extras + (first + key) * 4U : NULL;
+    const uint8_t *extra = bank.extras ? bank.image + bank.extras + (first + key) * bank.extra_size : NULL;
+    const uint8_t *sends = extra && bank.extra_size >= 6U ? extra + 4 : NULL;
     uint32_t atten = extra ? extra[0] : 0U, exclusive = extra ? extra[1] & 127U : 0U, scale = extra ? rd16(extra + 2) : 100U;
     int index = (int)note - (int)zone[16] + 64;
     int32_t fine = (int16_t)rd16(zone + 20);                  /* cents, -50..50 at 100 cents a key: 2^(x/1200) to second order */
@@ -448,6 +453,10 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         v->gain = (int32_t)(((int64_t)v->gain * cents_factor(-(int32_t)((atten * 99658U + 500U) / 1000U))) >> 16);
     v->exclusive = (uint8_t)exclusive;
     v->preset = (int16_t)preset_index;
+    if (sends) {
+        v->zone_reverb = sends[0] > 127U ? 127U : sends[0];
+        v->zone_chorus = sends[1] > 127U ? 127U : sends[1];
+    }
     /* envelope: the attack starts from silence; a step is ENV_STEP frames */
     uint32_t attack_steps = (rd16(env) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U, hold_steps = (rd16(env + 2) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U;
     attack_steps = attack_steps ? attack_steps : 1U;
@@ -864,6 +873,17 @@ FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
         if (voices[n].active && voices[n].owner == owner)
             voice_play(&voices[n], out, frames);
 }
+/* A voice's sends: its channel's (CC 91, CC 93) plus its zone's own, at most 127. */
+static inline __attribute__((always_inline)) int voice_reverb(const struct voice *v)
+{
+    int r = channel_reverb[v->channel] + v->zone_reverb;
+    return r > 127 ? 127 : r;
+}
+static inline __attribute__((always_inline)) int voice_chorus(const struct voice *v)
+{
+    int c = channel_chorus[v->channel] + v->zone_chorus;
+    return c > 127 ? 127 : c;
+}
 static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};                  /* the sends of the latest block that had voices: the tails keep them */
 FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
                                         uint8_t sends[2])
@@ -873,14 +893,14 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
     sends[1] = last_sends[1];
     if (!bank.image)
         return 0;
-    /* While every sounding voice's channel has the same send, the bus is the dry mix times that send: no bus needed. */
+    /* While every sounding voice has the same sends (its channel's plus its zone's), the bus is the dry mix times them: no bus needed. */
     int r0 = -1, c0 = -1;
     unsigned buses = 0;
     for (unsigned n = 0; n < FM1B_VOICES; ++n) {
         const struct voice *v = &voices[n];
         if (!v->active || v->owner != owner)
             continue;
-        int r = channel_reverb[v->channel], c = channel_chorus[v->channel];
+        int r = voice_reverb(v), c = voice_chorus(v);
         if (r0 < 0) { r0 = r; c0 = c; }
         if (r != r0) buses |= 1U;
         if (c != c0) buses |= 2U;
@@ -901,7 +921,7 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
         if (!buses)
             voice_play(v, out, frames);
         else {
-            int32_t r = channel_reverb[v->channel], c = channel_chorus[v->channel];
+            int32_t r = voice_reverb(v), c = voice_chorus(v);
             voice_play_buses(v, out, rev, cho, v->side ? sides[v->side - 1U] : NULL, frames, buses & 1U ? r + (r >> 6) : 0,
                              buses & 2U ? c + (c >> 6) : 0, v->side ? v->side_gain : 0);
         }

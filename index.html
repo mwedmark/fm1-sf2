@@ -71,8 +71,8 @@
       <label class="f"><span>Kodning</span>
         <select id="codec">
           <option value="sea">SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
-          <option value="sea6" selected>SEA6 (6,7 bit/sample, ca 5 dB mindre brus)</option>
-          <option value="bfp8">BFP8 (8 bit med skala per 32 sampel, 8,25 bit/sample, lätt att avkoda)</option>
+          <option value="sea6">SEA6 (6,7 bit/sample, ca 5 dB mindre brus)</option>
+          <option value="bfp8" selected>BFP8 (8 bit med skala per 32 sampel, 8,25 bit/sample, lätt att avkoda)</option>
           <option value="pcm">Rå PCM</option>
         </select></label>
       <label class="f"><span>Samplingsfrekvens</span>
@@ -228,6 +228,9 @@ function presetZones(sf, p) {
         atten: Math.max(0, Math.min(1440, n(48) + np(48))),
         scale: Math.max(0, Math.min(1200, (g(56) ? g(56).s : 100) + np(56))),
         excl: g(57) ? g(57).u & 127 : 0,
+        // reverb and chorus send in 0.1 % (generators 16 and 15, instrument plus preset)
+        reverb: Math.max(0, Math.min(1000, n(16) + np(16))),
+        chorus: Math.max(0, Math.min(1000, n(15) + np(15))),
       });
     }
   }
@@ -521,7 +524,9 @@ function buildBank(sf, presetIdx, opt) {
     const root = Math.max(0, Math.min(127, z.root - semis)), fine = Math.round(cents - (z.root - root) * scale);
     // The level: SF2 initial attenuation times 0.4, as the EMU hardware and FluidSynth play it, in 0.5 dB steps (FORMAT.md)
     const atten = Math.max(0, Math.min(255, Math.round((z.atten || 0) * 0.4 / 5)));
-    out.push({ lo: z.lo, hi: z.hi, root, fine, pan: z.pan || 0, atten, excl: z.excl || 0, scale, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
+    // the sends in the units of a MIDI channel's (0..127 = 0..100 %): the player adds them to the channel's CC 91 and CC 93
+    const reverb = Math.round((z.reverb || 0) * 127 / 1000), chorus = Math.round((z.chorus || 0) * 127 / 1000);
+    out.push({ lo: z.lo, hi: z.hi, root, fine, pan: z.pan || 0, atten, excl: z.excl || 0, scale, reverb, chorus, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
                env: envRecord(z.env, z.drum) });
   }
 }
@@ -545,10 +550,10 @@ function envRecord(e, drum) {
 
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
-//   header (52) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
+//   header (56) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
 //   key maps (128 bytes per preset) | zones (24 each) | zone levels (4 each) | envelopes (12 each) | sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 52, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 4, FM1B_ENV = 12;
+const FM1B_HEADER = 56, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -579,7 +584,8 @@ function writeFm1(bank) {
   dv.setUint32(8, bank.rate, true);
   dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
   dv.setUint32(44, offEnv, true);                          // envelope table
-  dv.setUint32(48, offExtra, true);                        // zone levels, exclusive classes and scale tunings
+  dv.setUint32(48, offExtra, true);                        // zone levels, exclusive classes, scale tunings and sends
+  dv.setUint32(52, FM1B_ZONE_EXTRA, true);                 // their size per zone
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -611,6 +617,7 @@ function writeFm1(bank) {
     const x = offExtra + i * FM1B_ZONE_EXTRA;
     out[x] = z.atten || 0; out[x + 1] = z.excl || 0;
     dv.setUint16(x + 2, z.scale === undefined ? 100 : z.scale, true);
+    out[x + 4] = z.reverb || 0; out[x + 5] = z.chorus || 0;
   });
   envs.forEach((e, i) => {
     const o = offEnv + i * FM1B_ENV;
@@ -746,6 +753,8 @@ function writeSf2(bank, name) {
     if ((z.fine || 0) % 100) gens.push({ op: 52, u: (z.fine % 100) & 0xffff });
     if (z.scale !== undefined && z.scale !== 100) gens.push({ op: 56, u: z.scale });
     if (z.excl) gens.push({ op: 57, u: z.excl });
+    if (z.reverb) gens.push({ op: 16, u: Math.round(z.reverb * 1000 / 127) });   // back to 0.1 %
+    if (z.chorus) gens.push({ op: 15, u: Math.round(z.chorus * 1000 / 127) });
     gens.push({ op: 58, u: z.root });
     gens.push({ op: 53, u: z.sample.index });
   }

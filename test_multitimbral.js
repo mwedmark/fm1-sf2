@@ -15,6 +15,9 @@ const w = new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(wasmPa
 if (w._initialize) w._initialize();
 
 const bank = fs.readFileSync(process.argv[2] || path.join(root, 'dist/gm_32k.fm1b'));
+// The channel sends are tested here, so the zones' own sends (SF2 generators 16 and 15; test_zone.js tests them) are set to 0
+if (bank.readUInt32LE(16) >= 56 && bank.readUInt32LE(48) && bank.readUInt32LE(52) >= 6)
+  for (let i = 0, e = bank.readUInt32LE(48), s = bank.readUInt32LE(52); i < bank.readUInt16LE(14); ++i) bank[e + i * s + 4] = bank[e + i * s + 5] = 0;
 new Uint8Array(w.memory.buffer, w.mt_bank(), bank.length).set(bank);
 const BLOCK = 128;
 let failed = 0, checks = 0;

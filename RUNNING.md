@@ -282,6 +282,19 @@ velocity steps, one note never reaches the limiter, 16 loud notes do and nothing
 fm1-emu, 240 MHz, silent, 32-voice build, SEA6, `load24_all` (velocity 100): load 63-69 % (66-70 % without the limiter), RMS up to
 0.39 (0.24 without, 0.51 before the zone levels), peak 0.88: nothing clips. Images: 32 voices 423 900 bytes, 24 voices 423 804.
 
+**Zone sends; BFP8 the standard (2026-11-03, branch `sf2-zone-sends`).** The converter keeps each zone's reverb and chorus send (SF2
+generators 16 and 15) in the zone levels, which grow to 8 bytes a zone (header 56 bytes, FORMAT.md); the player adds them to the
+channel's CC 91 and CC 93, at most 127. While all sounding voices end up with the same sends nothing changes in the cost; voices that
+differ use the effect buses, as channels with different sends always did. In 1mgm.sf2 every zone has a reverb send of 10.9 % (+14, so
+the default reverb goes from 30 to 44), and 95 zones of 24 programs have a chorus send of 25-50 % (+32 to +63): E Piano 1, Vibraphone,
+Marimba, Organ 3, Clean Gt., the synth leads and pads 82-103. `test_zone.js`, 32 checks: the converter keeps the sends, a bank with the
+52-byte header still plays without them, the sum and its limit, two voices with different sends on the buses. `test_multitimbral.js`
+sets the zone sends to 0, as it tests the channels'. **BFP8 is the standard from now on:** the converter starts on BFP8 and
+`dist/gm_32k.fm1b` is the BFP8 bank (459 216 bytes, 98.3 %), so the tests, `start_emu.ps1` and the FM-1 test use it; SEA6 is still
+built (`node make_bank.js sea6`) and plays. fm1-emu, 240 MHz, silent, 32-voice build, BFP8: `load32_all` load 49 % held, 63 % as the
+notes start, against 47-48 % and 64 % with the zone sends set to 0 (`dist/gm_32k_nosend.fm1b`); `load32_plain` 43-44 % either way.
+Images: 32 voices 424 092 bytes, 24 voices 424 028.
+
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
 (`test_emu/load8.script`): load 53 %; the same with the wheel at 127, the bend full up and the pedal down (`load8_bend.script`): 55-59 %.
