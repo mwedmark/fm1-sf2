@@ -59,6 +59,7 @@ The package carries the firmware image only, so a bank too big for the image liv
 the header) and plays it in place; without one it uses a bank compiled into the image if the build has one (`fm1b_bank_data.inc`), else the panel says NO BANK.
 The flash build has no built-in bank (image 398 140 bytes, 56 KB room to spare). The whole 1mgm.sf2 at 32 kHz SEA5 (335.7 KB) plays from it in fm1-emu:
 `node make_flash_overlay.js bank.fm1b gm.flash` makes the sector file for `&flash=` (the user partition starts at 0x7C000 of the flash image).
+Since 2026-11-02 the standard bank is SEA6 (397 532 bytes) and the player has 16 voices: RUNNING.md, section 7b.
 
 **Upload over MIDI SysEx** (`fm1_open/app/sf2_upload.c`, host side in `index.html`, button "Skicka till FM-1", Web MIDI): `F0 7D 'S' 'F' 02 cmd ... F7`,
 numbers as 5 x 7 bits. `begin` (1, size) stops the bank and erases the flash it needs, `data` (2, offset + up to 448 bytes packed 7 to 8) is written where it says, `end`
@@ -73,8 +74,8 @@ frames after about 20 of them (the same with the flash calls left out), and the 
 
 The library's own reverb and delay are internal to its engine (local symbols, state for its tracks), so the player has its own: a Freeverb-style reverb (four combs,
 two allpasses a side, mono in and stereo out) and a two-tap chorus (16 ms +- 6.8 ms, 0.8 Hz, opposite on the two channels). About 16 KB of SRAM, 16-bit delay lines, run from the
-audio interrupt after the voices (`board/audio.c`); after 3 s of silence they cost nothing. Levels 0..127 (0 = off), default reverb 30 and chorus 20: MIDI CC 91 (reverb) and
-CC 93 (chorus), and on the panel KNOB1 (reverb) and KNOB2 (chorus), 4 steps a click; the panel shows them. **Pan** of the dry sound: KNOB3 (4 steps a click) or MIDI CC 10 on any channel but 10, 0 = left, 64 = centre (the default), 127 = right. It is a balance, not a power pan: the side turned away from is faded out by sqrt(2 (1 - x)) and the other keeps its level, so the centre is bit exact the unpanned sound; reverb and chorus stay stereo. The gains are computed on the control side (integer square root), the audio interrupt only multiplies. It is global, not per program or channel. **Drums**: MIDI channel 10 plays the percussion kit (bank 128, the first kit the bank has) and SCL switches the 27 keys between the selected program and the kit (the panel then says DRUMS and the kit's name); the kit sounds beside the program, as the zones of a kit have the fixed flag and ignore note off. OCT- and OCT+ (buttons 0 and 1) move the keys by octaves, -2..2; a key released stops the note it started. `node test_fx.js` runs it on WebAssembly (off is bit exact dry, the tail
+audio interrupt after the voices (`board/audio.c`); after 3 s of silence they cost nothing. Master levels 0..127 (0 = off, 127 by default) on the panel's KNOB3 (reverb) and
+KNOB4 (chorus), 4 steps a click, times each channel's send (MIDI CC 91 and CC 93, 30 and 20 by default; `sf2fx_mix_sends`, see RUNNING.md section 7). **Pan** of the whole dry mix: KNOB2 on the program page (4 steps a click), 0 = left, 64 = centre (the default), 127 = right. It is a balance, not a power pan: the side turned away from is faded out by sqrt(2 (1 - x)) and the other keeps its level, so the centre is bit exact the unpanned sound; reverb and chorus stay stereo. The gains are computed on the control side (integer square root), the audio interrupt only multiplies. On top of it each voice has its own pan, its zone's from the SoundFont plus its channel's MIDI CC 10 (or KNOB2 on the channel page), with the same balance law (fm1b.c `voice_pan`, RUNNING.md section 7). **Drums**: MIDI channel 10 plays the percussion kit (bank 128, the first kit the bank has) and SCL switches the 27 keys between the selected program and the kit (the panel then says DRUMS and the kit's name); the kit sounds beside the program, as the zones of a kit have the fixed flag and ignore note off. OCT- and OCT+ (buttons 0 and 1) move the keys by octaves, -2..2; a key released stops the note it started. `node test_fx.js` runs it on WebAssembly (off is bit exact dry, the tail
 falls and dies out, no wrap at full level with noise, silence after the idle time, a new note after it). Measured in fm1-emu at 240 MHz with 8 voices held: 56 % with both effects
 off, 62 % with both at 127 (idle 11 %). Not heard on a device.
 
@@ -122,15 +123,14 @@ Use the same note owner for `fm1b_note()` as for `fm1b_render()`.
 
 ## What is still missing
 
-1. **Flashing and a device to test on.** `-FirmwareOnly` stops at `sdk.elf`; the packaged firmware that the web workbench flashes comes from
-   the full `build.bat --package` (needs `FM1_SOURCE_URL`, see `fm1_open/README.md`). Not tried.
-2. **Notes into the player.** The keyboard and MIDI input go into the engine inside the library. `fm1b_note()` must be called with the same
-   notes, from wherever the app sees them (the track/key code in `app/`; `midi_router.c` only handles MIDI *output*). Not investigated yet.
-3. **The bank in flash.** `app/samples.c` and `app/project.c` both treat the sample region as the 8-slot SEA bank
-   (magic `0x53314d46`, 32 000 Hz). An FM1B bank needs its own magic check (`FM1B`) and an upload path (`app/transfer.c`, the workbench).
-4. **The quantizer table.** `fm1b_bind()` takes the 512-entry SEA5 table. The firmware needs its own copy (the same numbers as
-   `fm1_open/web/synth/sample_metadata.inc`, `sdk/Samples.js`).
-5. **CPU budget.** Unknown until measured. The audio interrupt has `statistics.peak_ticks` against `block_ticks` (2.9 ms per block).
-   Each SEA5 voice costs one decoded sample per output sample at the original pitch, more when played higher, plus a jump
-   back to the chunk start on every loop wrap (up to 320 samples). Start with `FM1B_VOICES` at 4 or 8 and raise it while the peak stays low.
-6. **Program selection and the level control** on the panel (`fm1b_program()`, the `level` argument).
+The six items that stood here (flashing, notes into the player, the bank in flash, the quantizer table, the CPU budget, program selection)
+are done; RUNNING.md has how each is built, tested and run. What is left is in RUNNING.md, section 8.
+
+### Pitch bend, modulation wheel, sustain pedal, channel page
+
+Per MIDI channel in `fm1b.c`. A voice keeps the step of its note (`base_step`) and plays `step`, which is `base_step` times 2^(cents/1200)
+(`cents_factor`: an octave shift, a 12-entry semitone table, the rest to second order). The bend (range from RPN 0, 2 semitones by default)
+recomputes the step of the channel's voices when it arrives; the wheel adds a triangle vibrato (5.5 Hz, +-50 cents at 127), moved on in
+`env_step` once per 32 frames, and only while the wheel is up. The sustain pedal marks a released note `held` instead of releasing it, and
+pedal up releases those. `fm1b_channel_info()` gives the panel's channel page (HOME) each channel's program, levels, bend, wheel, pedal,
+voices and a note counter. The sample loop itself is unchanged.

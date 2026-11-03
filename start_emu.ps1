@@ -3,7 +3,8 @@
 #   .\start_emu.ps1                      the multitimbral check (test_emu/mt.script)
 #   .\start_emu.ps1 -Script ''           no script: play it yourself
 #   .\start_emu.ps1 -Tap                 the page that records the emulator's audio into window.__cap (test_emu/tap.js)
-param([int]$Port = 8781, [string]$Script = 'mt.script', [switch]$Tap, [switch]$NoBrowser)
+#   .\start_emu.ps1 -Bank dist\gm_32k_bfp8.fm1b   another bank (make_bank.js builds them): the same firmware plays every format
+param([int]$Port = 8781, [string]$Script = 'mt.script', [switch]$Tap, [switch]$NoBrowser, [string]$Bank = 'dist\gm_32k.fm1b')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $emu = Join-Path $root 'emu'
@@ -23,8 +24,9 @@ $build = Join-Path $root 'fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc'
 $package = Join-Path $emu 'sf2player.fwsc'
 if (Test-Path $build) { Copy-Item $build $package -Force }
 elseif (!(Test-Path $package)) { throw "No firmware: build it first (RUNNING.md section 1)." }
-$bank = Join-Path $root 'dist\gm_32k.fm1b'
-$flash = Join-Path $emu 'gm.flash'
+$bank = if ([IO.Path]::IsPathRooted($Bank)) { $Bank } else { Join-Path $root $Bank }
+$flashName = if ($Bank -eq 'dist\gm_32k.fm1b') { 'gm.flash' } else { [IO.Path]::GetFileNameWithoutExtension($bank) + '.flash' }
+$flash = Join-Path $emu $flashName
 $stale = !(Test-Path $flash)
 if (!$stale -and (Test-Path $bank)) { $stale = (Get-Item $bank).LastWriteTime -gt (Get-Item $flash).LastWriteTime }
 if ($stale) {
@@ -39,7 +41,9 @@ $page = Join-Path $emu 'index_tap.html'
 $catalog = Join-Path $emu 'firmwares.json'
 $json = Get-Content $catalog -Raw
 if ($json -notmatch '"id":\s*"sf2"') { throw "firmwares.json has no sf2 entry: add one with id sf2 and package http://127.0.0.1:$Port/sf2player.fwsc" }
-$json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc', "http://127.0.0.1:$Port/sf2player.fwsc"
+# ?v= the package's time: each build gets its own address, so no browser can play a copy it kept of an older one
+$version = (Get-Item $package).LastWriteTimeUtc.Ticks
+$json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc(\?v=\d+)?', "http://127.0.0.1:$Port/sf2player.fwsc?v=$version"
 Set-Content $catalog $json -NoNewline
 
 # 4. the server (127.0.0.1 only), unless one already answers on the port
@@ -49,6 +53,6 @@ if (!(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyC
 }
 
 # 5. open it (127.0.0.1, not localhost: flash= and script= are fetched from the page's own origin)
-$url = "http://127.0.0.1:$Port/" + $(if ($Tap) { 'index_tap.html' } else { '' }) + '?fw=sf2&flash=gm.flash&mhz=240' + $(if ($Script) { "&script=$Script" } else { '' })
+$url = "http://127.0.0.1:$Port/" + $(if ($Tap) { 'index_tap.html' } else { '' }) + "?fw=sf2&flash=$flashName&mhz=240" + $(if ($Script) { "&script=$Script" } else { '' })
 Write-Host $url
 if (!$NoBrowser) { Start-Process $url }

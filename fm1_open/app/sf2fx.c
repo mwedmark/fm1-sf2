@@ -1,15 +1,20 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "sf2fx.h"
+#include <stddef.h>
 #include "engine.h"
+#include "fm1b.h"                                        /* FM1B_RATE: the effects run at the player's rate */
 
 /* Samples are 16 bit (Q15) in the delay lines: 96 dB is plenty for a reverb tail. Everything lives in internal SRAM
  * (about 16 KB) and runs from the audio interrupt, so no tables in flash and no library calls. */
+/* Lengths at 44.1 kHz, scaled to the player's rate so the times stay. The damping filter's coefficient changes with the rate:
+ * 1 - (1 - 0.2747)^(44100 / 32000) = 0.3577 keeps its cutoff at 32 kHz. */
+#define AT_RATE(n) ((int)(((n) * FM1B_RATE + 22050U) / 44100U))
 enum {
-    COMB0 = 1116, COMB1 = 1188, COMB2 = 1277, COMB3 = 1356,        /* Freeverb's comb lengths at 44.1 kHz */
-    ALLPASS0 = 556, ALLPASS1 = 441, ALLPASS2 = 341, ALLPASS3 = 225, /* left chain 0,1; right chain 2,3 */
-    CHORUS_LENGTH = 2048, CHORUS_BASE = 700, CHORUS_DEPTH = 300,    /* 16 ms +- 6.8 ms */
-    CHORUS_RATE = 77900,                                            /* 0.8 Hz as a 32-bit phase step at 44.1 kHz */
-    REVERB_FEEDBACK = 28800, REVERB_DAMP = 9000,                    /* Q15: 0.88 and 0.27 */
+    COMB0 = AT_RATE(1116U), COMB1 = AT_RATE(1188U), COMB2 = AT_RATE(1277U), COMB3 = AT_RATE(1356U),   /* Freeverb's comb lengths */
+    ALLPASS0 = AT_RATE(556U), ALLPASS1 = AT_RATE(441U), ALLPASS2 = AT_RATE(341U), ALLPASS3 = AT_RATE(225U), /* left 0,1; right 2,3 */
+    CHORUS_LENGTH = 2048, CHORUS_BASE = AT_RATE(700U), CHORUS_DEPTH = AT_RATE(300U),               /* 16 ms +- 6.8 ms */
+    CHORUS_RATE = (int)(77900ULL * 44100U / FM1B_RATE),            /* 0.8 Hz as a 32-bit phase step */
+    REVERB_FEEDBACK = 28800, REVERB_DAMP = FM1B_RATE == 44100U ? 9000 : FM1B_RATE == 32000U ? 11722 : 9000,   /* Q15: 0.88; 0.27 at 44.1 kHz */
     QUIET_LEVEL = 48, QUIET_BLOCKS = 1100                           /* about 3.2 s of silence at 128 frames a block */
 };
 static struct {
@@ -20,9 +25,10 @@ static struct {
     int32_t damp[4];
 } fx;
 static uint32_t chorus_phase, quiet_blocks;
-/* Defaults: a little of both. gain = level * 258 in Q15. */
-static volatile int32_t reverb_gain = 30 * 258, chorus_gain = 20 * 258;
-static volatile unsigned reverb_level = 30, chorus_level = 20;
+/* Master levels, gain = level * 258 in Q15. They default to full: the channels' sends (fm1b, 30 and 20 by default) set how
+ * much there is, so out of the box it sounds as the single global level of 30 and 20 did. */
+static volatile int32_t reverb_gain = 127 * 258, chorus_gain = 127 * 258;
+static volatile unsigned reverb_level = 127, chorus_level = 127;
 static volatile int32_t pan_left = 1024, pan_right = 1024;     /* gains of the dry signal, Q10 */
 static volatile unsigned pan_level = 64;
 
@@ -83,7 +89,13 @@ static FM1_DSP_CODE void clear(void)
 
 FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
 {
-    const int32_t rg = reverb_gain, cg = chorus_gain, pl = pan_left, pr = pan_right;
+    sf2fx_mix_sends(dry, NULL, NULL, dry, 127, dry, 127, out, frames);
+}
+FM1_DSP_CODE void sf2fx_mix_sends(const int32_t *dry, const int32_t *cut_left, const int32_t *cut_right, const int32_t *rev, unsigned rev_send,
+                                  const int32_t *cho, unsigned cho_send, int32_t *out, unsigned frames)
+{
+    const int32_t rg = reverb_gain * (int32_t)rev_send / 127, cg = chorus_gain * (int32_t)cho_send / 127;   /* send 127: the master level exactly */
+    const int32_t pl = pan_left, pr = pan_right;
     int32_t peak = 0;
     for (unsigned i = 0; i < frames; ++i) {
         int32_t a = dry[i] >> 8;
@@ -93,8 +105,9 @@ FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
         if (quiet_blocks >= QUIET_BLOCKS) {                  /* the tails are gone: dry only, no work */
             if (quiet_blocks == QUIET_BLOCKS) { clear(); ++quiet_blocks; }
             for (unsigned i = 0; i < frames; ++i) {
-                out[2 * i] = sat24(out[2 * i] + PAN(dry[i], pl));
-                out[2 * i + 1] = sat24(out[2 * i + 1] + PAN(dry[i], pr));
+                int32_t l = cut_left ? dry[i] - cut_left[i] : dry[i], r = cut_right ? dry[i] - cut_right[i] : dry[i];
+                out[2 * i] = sat24(out[2 * i] + PAN(l, pl));
+                out[2 * i + 1] = sat24(out[2 * i + 1] + PAN(r, pr));
             }
             return;
         }
@@ -102,9 +115,9 @@ FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
     } else
         quiet_blocks = 0;
     for (unsigned i = 0; i < frames; ++i) {
-        int32_t x = dry[i], x16 = x >> 8, left = PAN(x, pl), right = PAN(x, pr);
+        int32_t x = dry[i], left = PAN(cut_left ? x - cut_left[i] : x, pl), right = PAN(cut_right ? x - cut_right[i] : x, pr);
         if (cg) {
-            fx.chorus[fx.chorus_at] = (int16_t)x16;
+            fx.chorus[fx.chorus_at] = (int16_t)(cho[i] >> 8);
             chorus_phase += CHORUS_RATE;
             int32_t tri = (int32_t)((chorus_phase >> 16) < 32768U ? chorus_phase >> 16 : 65535U - (chorus_phase >> 16));  /* 0..32767 */
             int32_t sweep = ((tri - 16384) * (CHORUS_DEPTH * 256)) >> 14;                                        /* Q8 samples */
@@ -121,7 +134,7 @@ FM1_DSP_CODE void sf2fx_mix(const int32_t *dry, int32_t *out, unsigned frames)
             fx.chorus_at = (uint16_t)((fx.chorus_at + 1) & (CHORUS_LENGTH - 1));
         }
         if (rg) {
-            int32_t sum = 0, in = x16 >> 2;
+            int32_t sum = 0, in = (rev[i] >> 8) >> 2;
             COMB(0, in); COMB(1, in); COMB(2, in); COMB(3, in);
             int32_t l = sum >> 2, r = l;
             ALLPASS(1, l); ALLPASS(0, l);

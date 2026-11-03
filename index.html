@@ -70,12 +70,14 @@
     <div class="row">
       <label class="f"><span>Kodning</span>
         <select id="codec">
-          <option value="sea" selected>SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
+          <option value="sea">SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
+          <option value="sea6">SEA6 (6,7 bit/sample, ca 5 dB mindre brus)</option>
+          <option value="bfp8" selected>BFP8 (8 bit med skala per 32 sampel, 8,25 bit/sample, lätt att avkoda)</option>
           <option value="pcm">Rå PCM</option>
         </select></label>
       <label class="f"><span>Samplingsfrekvens</span>
         <select id="rate">
-          <option value="32000" selected>32 000 Hz (SEA5)</option>
+          <option value="32000" selected>32 000 Hz (SEA)</option>
           <option value="11029">11 029 Hz (FM-1 ÷ 4)</option>
           <option value="14706">14 706 Hz (FM-1 ÷ 3)</option>
           <option value="22059">22 059 Hz (FM-1 ÷ 2)</option>
@@ -88,6 +90,7 @@
       <label class="f"><span>Bitdjup</span>
         <select id="bits">
           <option value="8" selected>8 bit</option>
+          <option value="12">12 bit</option>
           <option value="16">16 bit</option>
         </select></label>
     </div>
@@ -218,6 +221,26 @@ function presetZones(sf, p) {
         loop: !!mode && (mode.u & 3) !== 0 && (mode.u & 3) !== 2,
         loopOffStart: n(2) + n(45) * 32768,
         loopOffEnd: n(3) + n(50) * 32768,
+        // pan in 0.1 % (-500 left .. 500 right): instrument plus preset. The left half of a stereo pair plays as mono, centred.
+        pan: sh.type === 4 ? 0 : Math.max(-500, Math.min(500, n(17) + np(17))),
+        // initial attenuation in cB (instrument plus preset), scale tuning in cents per key (100 unless set; the preset's adds),
+        // exclusive class (instrument level only, as the SF2 spec says: a note of the class cuts the others, e.g. hi-hats)
+        atten: Math.max(0, Math.min(1440, n(48) + np(48))),
+        scale: Math.max(0, Math.min(1200, (g(56) ? g(56).s : 100) + np(56))),
+        excl: g(57) ? g(57).u & 127 : 0,
+        // reverb and chorus send in 0.1 % (generators 16 and 15, instrument plus preset)
+        reverb: Math.max(0, Math.min(1000, n(16) + np(16))),
+        chorus: Math.max(0, Math.min(1000, n(15) + np(15))),
+        // the LFOs (SF2 units: cB, cents, timecents; instrument plus preset), the key number's hold and decay scaling, the low-pass
+        // filter (cutoff in absolute cents, resonance in cB) and the modulation envelope that moves its cutoff and the pitch
+        mod: modRecord({
+          lfoVolume: n(13) + np(13), lfoPitch: n(5) + np(5), vibPitch: n(6) + np(6),
+          lfoDelay: tc(21, -12000), lfoFreq: tc(22, 0), vibDelay: tc(23, -12000), vibFreq: tc(24, 0),
+          keyHold: n(39) + np(39), keyDecay: n(40) + np(40),
+          filterFc: tc(8, 13500), filterQ: n(9) + np(9), envFc: n(11) + np(11), lfoFc: n(10) + np(10),
+          envDelay: tc(25, -12000), envAttack: tc(26, -12000), envHold: tc(27, -12000), envDecay: tc(28, -12000),
+          envSustain: n(29) + np(29), envRelease: tc(30, -12000), envPitch: n(7) + np(7),
+        }),
       });
     }
   }
@@ -281,12 +304,30 @@ function resample(src, ratio) {
   return out;
 }
 
-// ---- SEA5 encoder -----------------------------------------------------------
+// ---- SEA encoder -------------------------------------------------------------
 // Port of fm1_open/web/synth/sea_encode.h (MIT, (c) 2025 Dani Biro, modifications (c) 2026 M-VAVE): the FM-1's own
-// sample codec. A chunk is 320 frames in 228 bytes (0.7125 byte per sample) and carries its own LMS seed, so
-// a decoder can start in any chunk. Sums are kept in doubles: they stay below 2^53, so they are exact.
+// sample codec. A chunk is 320 frames in 28 + 40 * bits bytes (SEA5: 228, 0.7125 byte per sample; SEA6: 268) and carries its own
+// LMS seed, so a decoder can start in any chunk. Sums are kept in doubles: they stay below 2^53, so they are exact.
 
 const SEA_FRAMES = 320, SEA_GROUP = 20, SEA_CHUNK = 228;
+const seaChunk = bits => 28 + SEA_FRAMES * bits / 8;
+// The 16 scales of the SEA5 table below (half its step). seaDqt(5) rebuilds that table exactly; seaDqt(6) is the same scales
+// at twice the resolution. make_dqt.js writes the engine's copies (fm1_open/app/fm1b_dqt*.inc) from this function.
+const SEA_SCALES = [1, 5, 14, 28, 48, 75, 108, 150, 199, 257, 323, 398, 483, 578, 682, 797];
+const seaDqtCache = {};
+function seaDqt(bits) {
+  if (seaDqtCache[bits]) return seaDqtCache[bits];
+  const n = 1 << (bits - 1), out = new Int16Array(32 << bits >> 1);
+  for (let s = 0; s < 16; s++) {
+    const unit = SEA_SCALES[s] * 2 / (1 << (bits - 5));
+    for (let k = 0, prev = 0; k < n; k++) {
+      const ideal = k === 0 ? 0.375 : k === n - 1 ? n - 0.5 : k + 0.25;
+      const m = Math.max(Math.round(ideal * unit), prev + 1);
+      prev = m; out[(s * n + k) * 2] = m; out[(s * n + k) * 2 + 1] = -m;
+    }
+  }
+  return (seaDqtCache[bits] = out);
+}
 const SEA_DQT = Int16Array.from([1,-1,3,-3,5,-5,7,-7,9,-9,11,-11,13,-13,15,-15,17,-17,19,-19,21,-21,23,-23,25,-25,27,-27,29,-29,31,-31,4,-4,13,-13,23,-23,33,-33,43,-43,53,-53,63,-63,73,-73,83,-83,93,-93,103,-103,113,-113,123,-123,133,-133,143,-143,155,-155,11,-11,35,-35,63,-63,91,-91,119,-119,147,-147,175,-175,203,-203,231,-231,259,-259,287,-287,315,-315,343,-343,371,-371,399,-399,434,-434,21,-21,70,-70,126,-126,182,-182,238,-238,294,-294,350,-350,406,-406,462,-462,518,-518,574,-574,630,-630,686,-686,742,-742,798,-798,868,-868,36,-36,120,-120,216,-216,312,-312,408,-408,504,-504,600,-600,696,-696,792,-792,888,-888,984,-984,1080,-1080,1176,-1176,1272,-1272,1368,-1368,1488,-1488,56,-56,188,-188,338,-338,488,-488,638,-638,788,-788,938,-938,1088,-1088,1238,-1238,1388,-1388,1538,-1538,1688,-1688,1838,-1838,1988,-1988,2138,-2138,2325,-2325,81,-81,270,-270,486,-486,702,-702,918,-918,1134,-1134,1350,-1350,1566,-1566,1782,-1782,1998,-1998,2214,-2214,2430,-2430,2646,-2646,2862,-2862,3078,-3078,3348,-3348,113,-113,375,-375,675,-675,975,-975,1275,-1275,1575,-1575,1875,-1875,2175,-2175,2475,-2475,2775,-2775,3075,-3075,3375,-3375,3675,-3675,3975,-3975,4275,-4275,4650,-4650,149,-149,498,-498,896,-896,1294,-1294,1692,-1692,2090,-2090,2488,-2488,2886,-2886,3284,-3284,3682,-3682,4080,-4080,4478,-4478,4876,-4876,5274,-5274,5672,-5672,6169,-6169,193,-193,643,-643,1157,-1157,1671,-1671,2185,-2185,2699,-2699,3213,-3213,3727,-3727,4241,-4241,4755,-4755,5269,-5269,5783,-5783,6297,-6297,6811,-6811,7325,-7325,7967,-7967,242,-242,808,-808,1454,-1454,2100,-2100,2746,-2746,3392,-3392,4038,-4038,4684,-4684,5330,-5330,5976,-5976,6622,-6622,7268,-7268,7914,-7914,8560,-8560,9206,-9206,10013,-10013,299,-299,995,-995,1791,-1791,2587,-2587,3383,-3383,4179,-4179,4975,-4975,5771,-5771,6567,-6567,7363,-7363,8159,-8159,8955,-8955,9751,-9751,10547,-10547,11343,-11343,12338,-12338,362,-362,1208,-1208,2174,-2174,3140,-3140,4106,-4106,5072,-5072,6038,-6038,7004,-7004,7970,-7970,8936,-8936,9902,-9902,10868,-10868,11834,-11834,12800,-12800,13766,-13766,14973,-14973,434,-434,1445,-1445,2601,-2601,3757,-3757,4913,-4913,6069,-6069,7225,-7225,8381,-8381,9537,-9537,10693,-10693,11849,-11849,13005,-13005,14161,-14161,15317,-15317,16473,-16473,17918,-17918,512,-512,1705,-1705,3069,-3069,4433,-4433,5797,-5797,7161,-7161,8525,-8525,9889,-9889,11253,-11253,12617,-12617,13981,-13981,15345,-15345,16709,-16709,18073,-18073,19437,-19437,21142,-21142,598,-598,1993,-1993,3587,-3587,5181,-5181,6775,-6775,8369,-8369,9963,-9963,11557,-11557,13151,-13151,14745,-14745,16339,-16339,17933,-17933,19527,-19527,21121,-21121,22715,-22715,24707,-24707]);
 const SEA_RECIPROCAL = [65536, 13107, 4681, 2340, 1365, 873, 606, 436, 329, 255, 202, 164, 135, 113, 96, 82];
 
@@ -309,10 +350,10 @@ function seaDivide(v, reciprocal) {
   return n + Math.sign(v) - Math.sign(n);
 }
 
-// pcm: Int16Array. Returns the chunks, ceil(n / 320) * 228 bytes.
-function seaEncode(pcm) {
-  const bits = 5, limit = 1 << bits, frames = pcm.length;
-  const blocks = Math.ceil(frames / SEA_FRAMES), data = new Uint8Array(blocks * SEA_CHUNK);
+// pcm: Int16Array. Returns the chunks, ceil(n / 320) * seaChunk(bits) bytes.
+function seaEncode(pcm, bits = 5) {
+  const limit = 1 << bits, frames = pcm.length, CHUNK = seaChunk(bits), dqt = seaDqt(bits), wide = 1 << (bits - 5);
+  const blocks = Math.ceil(frames / SEA_FRAMES), data = new Uint8Array(blocks * CHUNK);
   const quant = new Uint8Array(2 * limit + 1);
   let x = limit - 1;
   quant[0] = x;
@@ -324,13 +365,13 @@ function seaEncode(pcm) {
   let state = [0, 0, 0, 0, 0, 0, -8192, 16384], previous = 0;
   const trialCodes = new Uint8Array(SEA_GROUP), bestCodes = new Uint8Array(SEA_GROUP);
   for (let block = 0; block < blocks; block++) {
-    const base = block * SEA_CHUNK;
+    const base = block * CHUNK;
     data[base] = 1; data[base + 1] = 0x40 | bits; data[base + 2] = SEA_GROUP; data[base + 3] = 0x5a;
     for (let i = 0; i < 8; i++) { const v = state[i] & 0xffff; data[base + 4 + 2 * i] = v & 255; data[base + 5 + 2 * i] = v >> 8; }
     for (let group = 0; group < SEA_FRAMES / SEA_GROUP; group++) {
       let bestRank = Infinity, bestState = null, bestSf = 0;
       for (let search = 0; search < 16; search++) {
-        const sf = (search + previous) & 15, trial = state.slice(), reciprocal = SEA_RECIPROCAL[sf];
+        const sf = (search + previous) & 15, trial = state.slice(), reciprocal = SEA_RECIPROCAL[sf] * wide;
         let rank = 0, i;
         for (i = 0; i < SEA_GROUP; i++) {
           const position = block * SEA_FRAMES + group * SEA_GROUP + i;
@@ -340,7 +381,7 @@ function seaEncode(pcm) {
           if (scaled > limit) scaled = limit;
           if (scaled < -limit) scaled = -limit;
           const q = quant[limit + scaled];
-          const residual = SEA_DQT[(sf << bits) + q];
+          const residual = dqt[(sf << bits) + q];
           const reconstructed = seaSat(prediction + residual);
           const error = sample - reconstructed;
           rank += error * error + seaPenalty(trial);
@@ -354,9 +395,9 @@ function seaEncode(pcm) {
       data[base + 20 + (group >> 1)] |= bestSf << ((group & 1) ? 0 : 4);
       for (let i = 0; i < SEA_GROUP; i++) {
         const at = (group * SEA_GROUP + i) * bits;
-        const packed = bestCodes[i] << (11 - (at & 7));
+        const packed = bestCodes[i] << (16 - bits - (at & 7));
         data[base + 28 + (at >> 3)] |= packed >> 8;
-        if ((at & 7) > 3) data[base + 29 + (at >> 3)] |= packed & 255;
+        if ((at & 7) > 8 - bits) data[base + 29 + (at >> 3)] |= packed & 255;
       }
     }
   }
@@ -364,18 +405,18 @@ function seaEncode(pcm) {
 }
 
 // The decoder side, for tools and tests (the device and the simulator have their own).
-function seaDecode(data, frames) {
-  const out = new Int16Array(Math.ceil(frames / SEA_FRAMES) * SEA_FRAMES), st = new Array(8);
-  for (let b = 0; b * SEA_CHUNK < data.length; b++) {
-    const c = data.subarray(b * SEA_CHUNK, (b + 1) * SEA_CHUNK);
+function seaDecode(data, frames, bits = 5) {
+  const out = new Int16Array(Math.ceil(frames / SEA_FRAMES) * SEA_FRAMES), st = new Array(8), CHUNK = seaChunk(bits), dqt = seaDqt(bits);
+  for (let b = 0; b * CHUNK < data.length; b++) {
+    const c = data.subarray(b * CHUNK, (b + 1) * CHUNK);
     for (let i = 0; i < 8; i++) { const v = c[4 + 2 * i] | c[5 + 2 * i] << 8; st[i] = v < 32768 ? v : v - 65536; }
     for (let g = 0; g < SEA_FRAMES / SEA_GROUP; g++) {
       const sf = (c[20 + (g >> 1)] >> ((g & 1) ? 0 : 4)) & 15;
       for (let i = 0; i < SEA_GROUP; i++) {
-        const at = (g * SEA_GROUP + i) * 5;
+        const at = (g * SEA_GROUP + i) * bits;
         let code = 0;
-        for (let k = 0; k < 5; k++) code = (code << 1) | ((c[28 + ((at + k) >> 3)] >> (7 - ((at + k) & 7))) & 1);
-        const residual = SEA_DQT[(sf << 5) + code], value = seaSat(seaPredict(st) + residual);
+        for (let k = 0; k < bits; k++) code = (code << 1) | ((c[28 + ((at + k) >> 3)] >> (7 - ((at + k) & 7))) & 1);
+        const residual = dqt[(sf << bits) + code], value = seaSat(seaPredict(st) + residual);
         seaUpdate(st, value, residual);
         out[b * SEA_FRAMES + g * SEA_GROUP + i] = value;
       }
@@ -386,8 +427,41 @@ function seaDecode(data, frames) {
 
 // ---- Bank building --------------------------------------------------------
 
+// BFP8: block floating point. Groups of 32 samples, each a shift byte (0..8) and 32 signed 8-bit mantissas; a sample is
+// mantissa << shift. The shift is the smallest that keeps the group's rounded mantissas in -128..127. pcm becomes the decoded
+// values (an Int16Array), so the .sf2 export and the tests see what the player plays. The last group is zero padded.
+const BFP_GROUP = 32, BFP_GROUP_BYTES = 33;
+function packBfp8(pcm) {
+  const groups = Math.ceil(pcm.length / BFP_GROUP), out = new Uint8Array(groups * BFP_GROUP_BYTES);
+  for (let g = 0; g < groups; g++) {
+    const from = g * BFP_GROUP, to = Math.min(pcm.length, from + BFP_GROUP);
+    let shift = 0;
+    const fits = sh => { for (let i = from; i < to; i++) { const m = Math.round(pcm[i] / (1 << sh)); if (m > 127 || m < -128) return false; } return true; };
+    while (shift < 8 && !fits(shift)) shift++;
+    out[g * BFP_GROUP_BYTES] = shift;
+    for (let i = from; i < to; i++) {
+      const m = Math.max(-128, Math.min(127, Math.round(pcm[i] / (1 << shift))));
+      out[g * BFP_GROUP_BYTES + 1 + i - from] = m & 255;
+      pcm[i] = m * (1 << shift);
+    }
+  }
+  return out;
+}
+
+// 12-bit samples (multiples of 16 in an Int16Array), two in three bytes: b0 = s0 low 8 bits, b1 = s0 high 4 bits | s1 low 4
+// bits << 4, b2 = s1 high 8 bits. An odd count ends with a half pair (two bytes).
+function pack12(pcm) {
+  const out = new Uint8Array(Math.ceil(pcm.length * 3 / 2));
+  for (let i = 0, o = 0; i < pcm.length; i += 2, o += 3) {
+    const a = (pcm[i] >> 4) & 0xfff, b = i + 1 < pcm.length ? (pcm[i + 1] >> 4) & 0xfff : 0;
+    out[o] = a & 0xff; out[o + 1] = (a >> 8) | ((b & 0xf) << 4);
+    if (o + 2 < out.length) out[o + 2] = b >> 4;
+  }
+  return out;
+}
+
 function buildBank(sf, presetIdx, opt) {
-  const rate = opt.rate, sea = !!opt.sea, bits = sea ? 16 : opt.bits;
+  const rate = opt.rate, sea = !!opt.sea, seaBits = sea ? opt.seaBits || 5 : 0, bfp = !sea && !!opt.bfp, bits = sea || bfp ? 16 : opt.bits;
   // presetIdx: >= 0 one preset, -1 every sample without key mapping, -2 every preset with its key mapping
   const groups = Array.isArray(presetIdx) ? presetIdx.map(i => ({ p: sf.presets[i], zones: presetZones(sf, i) })) :   // a chosen list of presets
     presetIdx === -1 ? [{ p: null, zones: allSampleZones(sf) }]
@@ -402,7 +476,7 @@ function buildBank(sf, presetIdx, opt) {
   }
   let off = 0;
   for (const s of samples) { s.offset = off; off += s.bytes; }
-  return { zones: out, samples, presets, rate, bits, sea, dataBytes: off };
+  return { zones: out, samples, presets, rate, bits, sea, seaBits, bfp, dataBytes: off };
 
   function addZone(z, presetName) {
     const sh = sf.shdr[z.sample];
@@ -442,9 +516,10 @@ function buildBank(sf, presetIdx, opt) {
       const pcm = bits === 8 ? new Int8Array(f.length) : new Int16Array(f.length);
       for (let i = 0; i < f.length; i++) {
         pcm[i] = bits === 8 ? Math.max(-128, Math.min(127, Math.round(f[i] / 256)))
+               : bits === 12 ? Math.max(-2048, Math.min(2047, Math.round(f[i] / 16))) * 16   // kept as 16-bit values
                             : Math.max(-32768, Math.min(32767, Math.round(f[i])));
       }
-      const enc = sea ? seaEncode(pcm) : null;               // SEA5 keeps the 16-bit pcm too, for the .sf2 and the tests
+      const enc = sea ? seaEncode(pcm, seaBits) : bfp ? packBfp8(pcm) : bits === 12 ? pack12(pcm) : null;               // SEA keeps the 16-bit pcm too, for the .sf2 and the tests
       s = { id: z.sample, name: sh.name, pcm, enc, ratio, bytes: enc ? enc.length : pcm.byteLength, offset: 0, index: samples.length, rootKey: z.root,
             loopStart: wantLoop ? outLs : 0, loopEnd: wantLoop ? outLs + outLoop : 0, loop: wantLoop };
       cache.set(key, s);
@@ -452,8 +527,16 @@ function buildBank(sf, presetIdx, opt) {
     }
     // Tuning (coarse, fine, the sample's own correction) is not baked into the data, which several zones share: whole
     // semitones move the root key, the rest is a signed fine tune in cents (-50..50) the player applies to the step.
-    const semis = Math.round((z.cents || 0) / 100), fine = Math.round((z.cents || 0) - semis * 100);
-    out.push({ lo: z.lo, hi: z.hi, root: Math.max(0, Math.min(127, z.root - semis)), fine, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
+    // With a scale tuning other than 100 cents a key, the player plays (note - root) * scale + fine cents: the root then moves by
+    // whole multiples of the scale and the fine tune keeps the rest (up to half a scale step; all of it at scale 0).
+    const scale = z.scale === undefined ? 100 : z.scale, cents = z.cents || 0;
+    const semis = scale === 100 ? Math.round(cents / 100) : scale ? Math.round(cents / scale) : 0;
+    const root = Math.max(0, Math.min(127, z.root - semis)), fine = Math.round(cents - (z.root - root) * scale);
+    // The level: SF2 initial attenuation times 0.4, as the EMU hardware and FluidSynth play it, in 0.5 dB steps (FORMAT.md)
+    const atten = Math.max(0, Math.min(255, Math.round((z.atten || 0) * 0.4 / 5)));
+    // the sends in the units of a MIDI channel's (0..127 = 0..100 %): the player adds them to the channel's CC 91 and CC 93
+    const reverb = Math.round((z.reverb || 0) * 127 / 1000), chorus = Math.round((z.chorus || 0) * 127 / 1000);
+    out.push({ lo: z.lo, hi: z.hi, root, fine, pan: z.pan || 0, atten, excl: z.excl || 0, scale, reverb, chorus, mod: z.mod || null, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
                env: envRecord(z.env, z.drum) });
   }
 }
@@ -475,12 +558,39 @@ function envRecord(e, drum) {
   };
 }
 
+// A zone's LFOs, key scaling, filter and modulation envelope in SF2 units, within the SF2 ranges, or null when it has none of them
+// (FORMAT.md, "Modulation"). What has no effect gets its default (an LFO or the envelope with no depth, the resonance of a filter
+// that is off), so that records differing only there are shared.
+function modRecord(m) {
+  const c = (x, lo, hi, d = 0) => Math.max(lo, Math.min(hi, Math.round(x === undefined ? d : x)));
+  const r = {
+    lfoVolume: c(m.lfoVolume, -960, 960), lfoPitch: c(m.lfoPitch, -12000, 12000), vibPitch: c(m.vibPitch, -12000, 12000),
+    lfoDelay: c(m.lfoDelay, -12000, 5000, -12000), lfoFreq: c(m.lfoFreq, -16000, 4500), vibDelay: c(m.vibDelay, -12000, 5000, -12000),
+    vibFreq: c(m.vibFreq, -16000, 4500), keyHold: c(m.keyHold, -1200, 1200), keyDecay: c(m.keyDecay, -1200, 1200),
+    filterFc: c(m.filterFc, 1500, 13500, 13500), filterQ: c(m.filterQ, 0, 960), envFc: c(m.envFc, -12000, 12000), lfoFc: c(m.lfoFc, -12000, 12000),
+    envDelay: c(m.envDelay, -12000, 5000, -12000), envAttack: c(m.envAttack, -12000, 8000, -12000), envHold: c(m.envHold, -12000, 5000, -12000),
+    envDecay: c(m.envDecay, -12000, 8000, -12000), envSustain: c(m.envSustain, 0, 1000), envRelease: c(m.envRelease, -12000, 8000, -12000),
+    envPitch: c(m.envPitch, -12000, 12000),
+  };
+  // the filter is off (13500 cents, 20 kHz) unless its cutoff can come down: from the start, the envelope going down or the LFO
+  const filter = r.filterFc < 13500 || r.envFc < 0 || r.lfoFc !== 0;
+  if (!filter) Object.assign(r, { filterQ: 0, envFc: 0, lfoFc: 0 });
+  if (!r.lfoVolume && !r.lfoPitch && !r.lfoFc) { r.lfoDelay = -12000; r.lfoFreq = 0; }
+  if (!r.vibPitch) { r.vibDelay = -12000; r.vibFreq = 0; }
+  if (!r.envFc && !r.envPitch) Object.assign(r, { envDelay: -12000, envAttack: -12000, envHold: -12000, envDecay: -12000, envSustain: 0, envRelease: -12000 });
+  return r.lfoVolume || r.lfoPitch || r.vibPitch || r.keyHold || r.keyDecay || filter || r.envPitch ? r : null;
+}
+const MOD_FIELDS = ['lfoVolume', 'lfoPitch', 'vibPitch', 'lfoDelay', 'lfoFreq', 'vibDelay', 'vibFreq', 'keyHold', 'keyDecay',
+  'filterFc', 'filterQ', 'envFc', 'lfoFc', 'envDelay', 'envAttack', 'envHold', 'envDecay', 'envSustain', 'envRelease', 'envPitch'];
+const MOD_GENS = [13, 5, 6, 21, 22, 23, 24, 39, 40, 8, 9, 11, 10, 25, 26, 27, 28, 29, 30, 7];   // the SF2 generator of each field
+const MOD_DEFAULTS = [0, 0, 0, -12000, 0, -12000, 0, 0, 0, 13500, 0, 0, 0, -12000, -12000, -12000, -12000, 0, -12000, 0];   // and its SF2 default
+
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
-//   header (48) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
-//   key maps (128 bytes per preset) | zones (24 each) | envelopes (12 each) | sample data (each sample padded to 4 bytes)
+//   header (68) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
+//   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (40 each) | sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 48, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ENV = 12;
+const FM1B_HEADER = 68, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 40;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -490,14 +600,22 @@ function writeFm1(bank) {
   const np = presets.length, nz = bank.zones.length;
 
   const offPitch = FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
-  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offEnv = offZone + FM1B_ZONE * nz;
+  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offExtra = offZone + FM1B_ZONE * nz, offEnv = offExtra + FM1B_ZONE_EXTRA * nz;
   const envs = [], envIndex = new Map();                    // envelopes are shared between zones
   for (const z of bank.zones) {
     const e = z.env || envRecord(null, false), k = [e.attack, e.hold, e.decay, e.sustain, e.release, e.fixed].join();
     if (!envIndex.has(k)) { envIndex.set(k, envs.length); envs.push(e); }
     z.envIndex = envIndex.get(k);
   }
-  const offSmp = offEnv + FM1B_ENV * envs.length;
+  const mods = [], modIndex = new Map();                    // so are the modulation records; a zone without one has 0
+  for (const z of bank.zones) {
+    z.modNumber = 0;
+    if (!z.mod) continue;
+    const k = MOD_FIELDS.map(f => z.mod[f]).join();
+    if (!modIndex.has(k)) { mods.push(z.mod); modIndex.set(k, mods.length); }
+    z.modNumber = modIndex.get(k);                           // the record's index plus 1
+  }
+  const offMod = offEnv + FM1B_ENV * envs.length, offSmp = offMod + FM1B_MOD * mods.length;
   let end = offSmp;
   for (const s of bank.samples) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
 
@@ -505,10 +623,17 @@ function writeFm1(bank) {
   out.set([0x46, 0x4d, 0x31, 0x42]);                       // 'FM1B'
   dv.setUint16(4, 1, true);                                // version
   // flags: bit 0 = 16-bit samples, bit 1 = SEA5 chunks (the zone then holds ceil(length / 320) chunks of 228 bytes)
-  dv.setUint16(6, bank.sea ? 2 : bank.bits === 16 ? 1 : 0, true);
+  // bit 2 = 12-bit samples, two in three bytes (see pack12); bits 8..11 = SEA code bits, 0 for 5 (so a SEA5 bank is what it always was)
+  // bit 3 = BFP8 (see packBfp8)
+  dv.setUint16(6, bank.sea ? 2 | (bank.seaBits && bank.seaBits !== 5 ? bank.seaBits << 8 : 0) : bank.bfp ? 8 : bank.bits === 16 ? 1 : bank.bits === 12 ? 4 : 0, true);
   dv.setUint32(8, bank.rate, true);
   dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
   dv.setUint32(44, offEnv, true);                          // envelope table
+  dv.setUint32(48, offExtra, true);                        // zone levels, exclusive classes, scale tunings and sends
+  dv.setUint32(52, FM1B_ZONE_EXTRA, true);                 // their size per zone
+  dv.setUint32(56, mods.length ? offMod : 0, true);         // modulation records: LFOs and key scaling
+  dv.setUint32(60, mods.length, true);
+  dv.setUint32(64, FM1B_MOD, true);                        // their size
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -536,7 +661,14 @@ function writeFm1(bank) {
     out[o + 16] = z.root; out[o + 17] = z.loop ? 1 : 0;
     dv.setUint16(o + 18, z.envIndex, true);
     dv.setInt16(o + 20, z.fine || 0, true);
+    dv.setInt16(o + 22, z.pan || 0, true);
+    const x = offExtra + i * FM1B_ZONE_EXTRA;
+    out[x] = z.atten || 0; out[x + 1] = z.excl || 0;
+    dv.setUint16(x + 2, z.scale === undefined ? 100 : z.scale, true);
+    out[x + 4] = z.reverb || 0; out[x + 5] = z.chorus || 0;
+    dv.setUint16(x + 6, z.modNumber, true);
   });
+  mods.forEach((m, i) => MOD_FIELDS.forEach((f, j) => dv.setInt16(offMod + i * FM1B_MOD + j * 2, m[f], true)));
   envs.forEach((e, i) => {
     const o = offEnv + i * FM1B_ENV;
     dv.setUint16(o, e.attack, true); dv.setUint16(o + 2, e.hold, true); dv.setUint16(o + 4, e.decay, true);
@@ -616,7 +748,7 @@ function records(size, items, fn) {
 
 function writeSf2(bank, name) {
   const pcm16 = s => {
-    if (bank.bits === 16) return s.pcm;
+    if (bank.bits !== 8) return s.pcm;
     const o = new Int16Array(s.pcm.length);
     for (let i = 0; i < o.length; i++) o[i] = s.pcm[i] * 256;
     return o;
@@ -659,12 +791,21 @@ function writeSf2(bank, name) {
   const inst = records(22, pl.concat([null]), (dv, u8, o, p) => {
     if (p) { putName(u8, o, p.name); dv.setUint16(o + 20, p.first, true); } else { putName(u8, o, 'EOI'); dv.setUint16(o + 20, zones.length, true); }
   });
-  // generators per zone: keyRange, [sampleModes], overridingRootKey, sampleID (last)
+  // generators per zone: keyRange, [sampleModes], [pan], overridingRootKey, sampleID (last)
   const gens = [], bagStart = [];
   for (const z of zones) {
     bagStart.push(gens.length);
     gens.push({ op: 43, lo: z.lo, hi: z.hi });
     if (z.loop) gens.push({ op: 54, u: 1 });
+    if (z.pan) gens.push({ op: 17, u: z.pan & 0xffff });
+    if (z.atten) gens.push({ op: 48, u: Math.round(z.atten * 5 / 0.4) });       // back to SF2 centibels
+    if (Math.trunc((z.fine || 0) / 100)) gens.push({ op: 51, u: Math.trunc(z.fine / 100) & 0xffff });   // SF2 fine tune is -99..99
+    if ((z.fine || 0) % 100) gens.push({ op: 52, u: (z.fine % 100) & 0xffff });
+    if (z.scale !== undefined && z.scale !== 100) gens.push({ op: 56, u: z.scale });
+    if (z.excl) gens.push({ op: 57, u: z.excl });
+    if (z.reverb) gens.push({ op: 16, u: Math.round(z.reverb * 1000 / 127) });   // back to 0.1 %
+    if (z.chorus) gens.push({ op: 15, u: Math.round(z.chorus * 1000 / 127) });
+    if (z.mod) MOD_FIELDS.forEach((f, j) => { if (z.mod[f] !== MOD_DEFAULTS[j]) gens.push({ op: MOD_GENS[j], u: z.mod[f] & 0xffff }); });
     gens.push({ op: 58, u: z.root });
     gens.push({ op: 53, u: z.sample.index });
   }
@@ -734,11 +875,11 @@ function writeSf2(bank, name) {
   function convert() {
     showErr('');
     try {
-      bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value === 'sea' });
+      bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
     } catch (e) { showErr('Konverteringen misslyckades: ' + e.message); return; }
     if (!bank.zones.length) { $('result').hidden = true; showErr('Presetet har inga spelbara ljud.'); return; }
     const bin = writeFm1(bank);
-    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zoner, ' + bank.samples.length + ' unika ljud, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA5' : bank.bits + ' bit') +
+    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zoner, ' + bank.samples.length + ' unika ljud, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
       '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
       (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(mer än enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (ryms i enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
       (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets utanför bank 0/128 ingår inte i .bin)</span>' : '');
@@ -860,7 +1001,7 @@ function writeSf2(bank, name) {
   window.addEventListener('drop', e => e.preventDefault());
 
   $('go').addEventListener('click', convert);
-  const syncCodec = () => { $('bits').disabled = $('codec').value === 'sea'; };   // SEA5 is always coded from 16 bit
+  const syncCodec = () => { $('bits').disabled = $('codec').value !== 'pcm'; };   // SEA is always coded from 16 bit
   $('codec').addEventListener('change', syncCodec);
   syncCodec();
   $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank), baseName + '_fm1.bin', 'application/octet-stream'));

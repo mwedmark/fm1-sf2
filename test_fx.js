@@ -82,5 +82,28 @@ r = run(1, tone(440, 0.5, 1), 0, 0);
 check('pan in the idle state (after silence) still pans', true);
 w.fx_pan(64);
 
+// Sends (sf2fx_mix_sends): master 127 with a send of 30 is master 30 with everything sent, bit for bit, so the new defaults
+// (master 127, channel sends 30 and 20) sound as the old single level did. Reverb only: the chorus LFO's phase is not reset.
+function runSends(seconds, gen, reverb, chorus, rs, cs) {
+  w.fx_set(reverb, chorus);
+  const blocks = Math.ceil(seconds * 44100 / 128), L = new Float64Array(blocks * 128);
+  for (let b = 0; b < blocks; b++) {
+    const h = heap();
+    for (let i = 0; i < 128; i++) h[dryAt + i] = gen(b * 128 + i);
+    if (rs === undefined) w.fx_block(); else w.fx_block_sends(rs, cs);
+    const o = heap();
+    for (let i = 0; i < 128; i++) L[b * 128 + i] = o[outAt + 2 * i];
+  }
+  return L;
+}
+runSends(5, () => 0, 0, 0);
+const oldLevel = runSends(2, tone(440, 0.5, 0.5), 30, 0);
+runSends(5, () => 0, 0, 0);
+const newLevel = runSends(2, tone(440, 0.5, 0.5), 127, 0, 30, 0);
+check('master 127 and send 30 = the old level 30, bit exact', oldLevel.every((v, i) => v === newLevel[i]));
+runSends(5, () => 0, 0, 0);
+const sendOff = runSends(1, tone(440, 0.5, 1), 127, 127, 0, 0);
+check('sends of 0 leave only the dry signal', sendOff.every((v, i) => v === tone(440, 0.5, 1)(i)));
+
 console.log(failed ? failed + ' FAILED' : 'ALL OK');
 process.exit(failed ? 1 : 0);

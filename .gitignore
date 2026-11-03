@@ -4,5 +4,6 @@ fm1_open/app/fm1b_bank_data.inc
 dist/
 test_upload/upload_test.wasm
 test_fx/fx_test.wasm
-test_mt/mt_test.wasm
+test_mt/*.wasm
 emu/
+test_rate/*.wasm
