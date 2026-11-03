@@ -91,8 +91,8 @@ The simulator plays on one sampler track through the panel slot only. **MIDI cha
 ### 3b. The install page: firmware and bank in one go (2026-11-03, not yet run on a device)
 
 ```powershell
-cd D:\gitm1-sf2
-.m1_open\sdk\Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'   # from fm1_open, as in section 1
+cd D:\git\fm1-sf2
+cd fm1_open; .\sdk\Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'; cd ..   # the build of section 1
 node make_install.js [bank.fm1b]     # dist/install/: the last build's package, the bank (default dist/gm_32k.fm1b), manifest.json
 ```
 
