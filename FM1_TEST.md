@@ -1,7 +1,8 @@
 # Checklista: SF2-spelaren på en riktig FM-1
 
-Gäller firmwaren på `sf2-player` från 2026-11-02: 24 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
-SEA6 och BFP8, pan per kanal och SF2-filens egen pan. Bygg om banken med dagens konverterare, annars saknar den pan. Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
+Gäller firmwaren på `sf2-zone-params` från 2026-11-03: 24 röster, spelaren räknar i 32 kHz med omsampling till 44,1 kHz, CPU-spärr,
+SEA6 och BFP8, pan per kanal och SF2-filens egen pan, nivå per zon, hihat-choke och skalstämning. Bygg om banken med dagens konverterare,
+annars saknar den pan och zonnivåer (en gammal bank spelar fortfarande, men allt på full nivå och utan choke). Fyll i kolumnen **Resultat** medan du testar. Avbryt vid första steg som inte beter sig som väntat och skriv ned vad som hände.
 
 ## Det här behövs
 
@@ -70,6 +71,8 @@ Spela `test_emu\midi\mt.mid` och `drums.mid` från Windows till FM-1, en gång p
 | D4 | Sustainpedal. | Toner ligger kvar tills pedalen släpps. | | | |
 | D5 | `pan.mid` (hörlurar): stråkar på kanal 1, CC10 sveper vänster, höger, mitten. | Ljudet glider jämnt utan knaster; PAN-kolumnen följer. | | | |
 | D6 | `drums.mid` igen, med hörlurar. | Trummorna sprids i stereo som i SoundFonten (t.ex. hihat och tom-trummor åt olika håll). | | | |
+| D7 | `hats.mid`: öppen hihat, stängd 0,5 s senare (två gånger), sist en öppen ensam. | Den stängda tystar den öppna direkt; den ensamma klingar ut. | | | |
+| D8 | Spela några program du känner (piano, stråkar, trummor). | Instrumenten är jämnare sinsemellan än förut men totalt svagare: vrid upp MASTER. Inget knaster. | | | |
 
 ## E. Last och CPU-spärr (SEA6)
 
@@ -85,7 +88,7 @@ sänkt gränsen.
 | E5 | `release.mid` | Allt tystnar efter note off | | |
 | E6 | `load24_pan.mid` (alla röster panorerade) | Som E3, högst ett par procent mer | | |
 
-Täta ackord med 24 röster når full nivå (toppvärde 0,875 i emulatorn): lyssna efter distorsion i E3 och E4, det är nivån och inte CPU:n.
+Täta ackord med 24 röster låg förut på full nivå. Med zonnivåerna är mixen ungefär 6 dB svagare (RMS 0,24 mot 0,51 i emulatorn); lyssna ändå efter distorsion i E3 och E4, det är nivån och inte CPU:n.
 
 ## F. Samma sak med BFP8
 

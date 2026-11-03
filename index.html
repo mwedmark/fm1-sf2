@@ -223,6 +223,11 @@ function presetZones(sf, p) {
         loopOffEnd: n(3) + n(50) * 32768,
         // pan in 0.1 % (-500 left .. 500 right): instrument plus preset. The left half of a stereo pair plays as mono, centred.
         pan: sh.type === 4 ? 0 : Math.max(-500, Math.min(500, n(17) + np(17))),
+        // initial attenuation in cB (instrument plus preset), scale tuning in cents per key (100 unless set; the preset's adds),
+        // exclusive class (instrument level only, as the SF2 spec says: a note of the class cuts the others, e.g. hi-hats)
+        atten: Math.max(0, Math.min(1440, n(48) + np(48))),
+        scale: Math.max(0, Math.min(1200, (g(56) ? g(56).s : 100) + np(56))),
+        excl: g(57) ? g(57).u & 127 : 0,
       });
     }
   }
@@ -509,8 +514,14 @@ function buildBank(sf, presetIdx, opt) {
     }
     // Tuning (coarse, fine, the sample's own correction) is not baked into the data, which several zones share: whole
     // semitones move the root key, the rest is a signed fine tune in cents (-50..50) the player applies to the step.
-    const semis = Math.round((z.cents || 0) / 100), fine = Math.round((z.cents || 0) - semis * 100);
-    out.push({ lo: z.lo, hi: z.hi, root: Math.max(0, Math.min(127, z.root - semis)), fine, pan: z.pan || 0, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
+    // With a scale tuning other than 100 cents a key, the player plays (note - root) * scale + fine cents: the root then moves by
+    // whole multiples of the scale and the fine tune keeps the rest (up to half a scale step; all of it at scale 0).
+    const scale = z.scale === undefined ? 100 : z.scale, cents = z.cents || 0;
+    const semis = scale === 100 ? Math.round(cents / 100) : scale ? Math.round(cents / scale) : 0;
+    const root = Math.max(0, Math.min(127, z.root - semis)), fine = Math.round(cents - (z.root - root) * scale);
+    // The level: SF2 initial attenuation times 0.4, as the EMU hardware and FluidSynth play it, in 0.5 dB steps (FORMAT.md)
+    const atten = Math.max(0, Math.min(255, Math.round((z.atten || 0) * 0.4 / 5)));
+    out.push({ lo: z.lo, hi: z.hi, root, fine, pan: z.pan || 0, atten, excl: z.excl || 0, scale, loop: s.loop, loopStart: s.loopStart, loopEnd: s.loopEnd, sample: s, presetName,
                env: envRecord(z.env, z.drum) });
   }
 }
@@ -534,10 +545,10 @@ function envRecord(e, drum) {
 
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
-//   header (48) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
-//   key maps (128 bytes per preset) | zones (24 each) | envelopes (12 each) | sample data (each sample padded to 4 bytes)
+//   header (52) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) |
+//   key maps (128 bytes per preset) | zones (24 each) | zone levels (4 each) | envelopes (12 each) | sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 48, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ENV = 12;
+const FM1B_HEADER = 52, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 4, FM1B_ENV = 12;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -547,7 +558,7 @@ function writeFm1(bank) {
   const np = presets.length, nz = bank.zones.length;
 
   const offPitch = FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
-  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offEnv = offZone + FM1B_ZONE * nz;
+  const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offExtra = offZone + FM1B_ZONE * nz, offEnv = offExtra + FM1B_ZONE_EXTRA * nz;
   const envs = [], envIndex = new Map();                    // envelopes are shared between zones
   for (const z of bank.zones) {
     const e = z.env || envRecord(null, false), k = [e.attack, e.hold, e.decay, e.sustain, e.release, e.fixed].join();
@@ -568,6 +579,7 @@ function writeFm1(bank) {
   dv.setUint32(8, bank.rate, true);
   dv.setUint16(12, np, true); dv.setUint16(14, nz, true);
   dv.setUint32(44, offEnv, true);                          // envelope table
+  dv.setUint32(48, offExtra, true);                        // zone levels, exclusive classes and scale tunings
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -596,6 +608,9 @@ function writeFm1(bank) {
     dv.setUint16(o + 18, z.envIndex, true);
     dv.setInt16(o + 20, z.fine || 0, true);
     dv.setInt16(o + 22, z.pan || 0, true);
+    const x = offExtra + i * FM1B_ZONE_EXTRA;
+    out[x] = z.atten || 0; out[x + 1] = z.excl || 0;
+    dv.setUint16(x + 2, z.scale === undefined ? 100 : z.scale, true);
   });
   envs.forEach((e, i) => {
     const o = offEnv + i * FM1B_ENV;
@@ -726,6 +741,11 @@ function writeSf2(bank, name) {
     gens.push({ op: 43, lo: z.lo, hi: z.hi });
     if (z.loop) gens.push({ op: 54, u: 1 });
     if (z.pan) gens.push({ op: 17, u: z.pan & 0xffff });
+    if (z.atten) gens.push({ op: 48, u: Math.round(z.atten * 5 / 0.4) });       // back to SF2 centibels
+    if (Math.trunc((z.fine || 0) / 100)) gens.push({ op: 51, u: Math.trunc(z.fine / 100) & 0xffff });   // SF2 fine tune is -99..99
+    if ((z.fine || 0) % 100) gens.push({ op: 52, u: (z.fine % 100) & 0xffff });
+    if (z.scale !== undefined && z.scale !== 100) gens.push({ op: 56, u: z.scale });
+    if (z.excl) gens.push({ op: 57, u: z.excl });
     gens.push({ op: 58, u: z.root });
     gens.push({ op: 53, u: z.sample.index });
   }

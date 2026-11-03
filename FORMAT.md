@@ -5,10 +5,10 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (48) | pitch table | bank map | presets | key maps | zones | envelopes | sample data
+header (52) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | sample data
 ```
 
-## Header (48 bytes)
+## Header (52 bytes)
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ header (48) | pitch table | bank map | presets | key maps | zones | envelopes | 
 | 36 | u32 | offset of the sample data |
 | 40 | u32 | file size |
 | 44 | u32 | offset of the envelope table, 0 = none (every zone then plays with the default envelope) |
+| 48 | u32 | offset of the zone levels, 0 = none. Only there when the pitch table starts at 52 or later: banks made before 2026-11-03 have a 48-byte header, and the player reads the field only when offset 16 says the header is that long |
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit
@@ -94,6 +95,21 @@ lowest-numbered zone wins, so the CPU never has to choose.
 
 Zones that use the same sample point at the same data.
 
+## Zone levels: 4 bytes each
+
+One per zone, in the zone table's order. A bank without them (header offset 48 is 0, or a 48-byte header) plays every zone at full
+level, with no exclusive class and 100 cents a key.
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | u8 | level in 0.5 dB steps below full (0..255). The converter writes SF2 initial attenuation (generator 48, instrument plus preset) times 0.4, as the EMU hardware and FluidSynth play it |
+| 1 | u8 | exclusive class (generator 57), 0 = none. A note of a class fades out the voices of the same class, preset and channel in about 5 ms (a closed hi-hat cuts the open one) |
+| 2 | u16 | scale tuning in cents a key (generator 56, 0..1200), 100 the normal keyboard |
+
+With a scale tuning other than 100 a note plays `(note - root) * scale + fine` cents from the sample's pitch: whole semitones from the
+pitch table, the rest (0..99 cents) as the fine tune is. The converter then moves the root by whole multiples of the scale and keeps the
+rest of the zone's tuning in `fine`, so `fine` may be outside -50..50 for those zones (all of the tuning at scale 0).
+
 ## Lookup in C
 
 ```c
@@ -117,8 +133,8 @@ const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, u
 
 ## What is left out
 
-Envelopes, filters, modulation, velocity layers (the layer that answers to velocity 100 is used), stereo (the left channel is used),
-fine tuning and sample start offsets.
+Filters, the modulation envelope and LFOs, velocity layers (the layer that answers to velocity 100 is used), stereo (the left channel
+is used), per-zone reverb and chorus sends, and sample start offsets.
 
 ## Envelopes: 12 bytes each
 

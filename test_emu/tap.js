@@ -3,7 +3,6 @@
 window.__cap = [];
 const orig = AudioNode.prototype.connect, mute = new URLSearchParams(location.search).has('mute');
 AudioNode.prototype.connect = function (dest, ...a) {
-  if (mute && dest instanceof AudioDestinationNode) return dest;
   if (typeof AudioWorkletNode !== 'undefined' && this instanceof AudioWorkletNode && !this.__tapped) {
     this.__tapped = true;
     const an = this.context.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0;
@@ -17,5 +16,6 @@ AudioNode.prototype.connect = function (dest, ...a) {
       window.__cap.push({ t: +this.context.currentTime.toFixed(2), pk: +pk.toFixed(4), rms: +Math.sqrt(rms / 2048).toFixed(4), cen: den > 0 ? Math.round(num / den) : 0 });
     }, 100);
   }
+  if (mute && dest instanceof AudioDestinationNode) return dest;   // after the tap: the analyser still hears it
   return orig.call(this, dest, ...a);
 };

@@ -23,6 +23,8 @@ struct voice {
     uint8_t held;                             /* released while the channel's sustain pedal was down: releases with the pedal */
     uint8_t cut;                              /* fading out fast to make room (the voice limit): no longer counts as sounding */
     uint16_t lfo;                             /* vibrato phase, moved on only while the channel's modulation wheel is up */
+    uint8_t exclusive;                        /* the zone's exclusive class (SF2 generator 57), 0: none */
+    int16_t preset;                           /* the preset it plays: an exclusive class holds within one preset */
     /* Pan: the zone's own (SF2 generator 17, -64..64) plus the channel's CC 10. A panned voice fades its far side by side_gain
      * (Q8): it is added to the side buffer (1: left, 2: right) that the mix takes away from that channel. 0: centred. */
     int8_t zone_pan;
@@ -37,6 +39,7 @@ static struct {
     const int16_t *dqt;
     uint32_t bytes, rate, format, sea_bits, chunk_bytes;   /* format: FORMAT_*; SEA: code bits and 28 + 40 * bits bytes per chunk */
     uint32_t pitch, bankmap, presets, keymaps, zones, envs, env_count, preset_count, zone_count;
+    uint32_t extras;  /* the zone levels, exclusive classes and scale tunings (4 bytes a zone), 0: none (a bank made before them) */
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
@@ -148,10 +151,11 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.keymaps = rd32(image + 28);
     bank.zones = rd32(image + 32);
     bank.envs = rd32(image + 44);
+    bank.extras = bank.pitch >= 52U ? rd32(image + 48) : 0U;  /* a 52-byte header has the offset; banks before it end at 48 */
     bank.env_count = 0;
     if (bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
         !region_ok(bank.presets, 24ULL * bank.preset_count) || !region_ok(bank.keymaps, 128ULL * bank.preset_count) ||
-        !region_ok(bank.zones, 24ULL * bank.zone_count))
+        !region_ok(bank.zones, 24ULL * bank.zone_count) || (bank.extras && (bank.extras % 4U || !region_ok(bank.extras, 4ULL * bank.zone_count))))
         return -1;
     if (bank.envs) {
         bank.env_count = (bank.bytes - (bank.envs <= bank.bytes ? bank.envs : bank.bytes)) / 12U;
@@ -379,15 +383,34 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         end = start = 0; /* no loop */
     uint32_t env_number = rd16(zone + 18);
     const uint8_t *env = bank.envs && env_number < bank.env_count ? bank.image + bank.envs + env_number * 12U : default_env;
+    /* The zone's level (0.5 dB steps), exclusive class and scale tuning (cents a key): FORMAT.md, "Zone levels". */
+    const uint8_t *extra = bank.extras ? bank.image + bank.extras + (first + key) * 4U : NULL;
+    uint32_t atten = extra ? extra[0] : 0U, exclusive = extra ? extra[1] & 127U : 0U, scale = extra ? rd16(extra + 2) : 100U;
     int index = (int)note - (int)zone[16] + 64;
+    int32_t fine = (int16_t)rd16(zone + 20);                  /* cents, -50..50 at 100 cents a key: 2^(x/1200) to second order */
+    if (scale != 100U) {                                      /* (note - root) * scale + fine cents: whole semitones from the table */
+        int32_t cents = ((int)note - (int)zone[16]) * (int32_t)(scale > 1200U ? 1200U : scale) + fine;
+        int32_t semis = cents >= 0 ? cents / 100 : -((99 - cents) / 100);
+        index = semis + 64;
+        fine = cents - semis * 100;                           /* 0..99 */
+    }
     index = index < 0 ? 0 : index > 127 ? 127 : index;
     uint32_t pitch = rd32(bank.image + bank.pitch + (uint32_t)index * 4U);
-    int32_t fine = (int16_t)rd16(zone + 20);                  /* cents, -50..50: 2^(x/1200) to second order */
     if (fine) {
         int32_t t = fine * 3785 / 100;                        /* x * ln 2 in Q16 */
         pitch = (uint32_t)(((uint64_t)pitch * (uint32_t)(65536 + t + ((t * t) >> 17))) >> 16);
     }
 
+    if (exclusive)                                            /* a closed hi-hat cuts the open one: the class's other notes end fast */
+        for (unsigned i = 0; i < FM1B_VOICES; ++i) {
+            struct voice *o = &voices[i];
+            if (o->active && !o->cut && o->exclusive == exclusive && o->preset == preset_index && o->channel == channel && o->owner == owner) {
+                o->cut = 1;                                   /* fading: it no longer counts as sounding */
+                o->held = 0;
+                o->phase = RELEASE;
+                o->release = CUT_RELEASE;
+            }
+        }
     voices_fit(voice_limit - 1U);                             /* room for this one under the limit */
     unsigned slot = FM1B_VOICES, oldest = 0;
     for (unsigned i = 0; i < FM1B_VOICES; ++i) {
@@ -419,6 +442,10 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     if (channel_cents[channel] || channel_mod[channel])
         retune(v);
     v->gain = (int32_t)((int64_t)velocity * level * 1073741824LL / (127 * 127 * 4));
+    if (atten)                                                /* 0.5 dB a step: 2^(-atten * 99.66 / 1200) */
+        v->gain = (int32_t)(((int64_t)v->gain * cents_factor(-(int32_t)((atten * 99658U + 500U) / 1000U))) >> 16);
+    v->exclusive = (uint8_t)exclusive;
+    v->preset = (int16_t)preset_index;
     /* envelope: the attack starts from silence; a step is ENV_STEP frames */
     uint32_t attack_steps = (rd16(env) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U, hold_steps = (rd16(env + 2) * (uint32_t)ENV_STEPS_PER_S1000 + 500U) / 1000U;
     attack_steps = attack_steps ? attack_steps : 1U;

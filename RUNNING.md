@@ -54,6 +54,7 @@ node test_fx.js               # reverb and chorus (sf2fx.c), master levels times
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 node test_formats.js          # SEA5, SEA6, BFP8, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
 node test_rate.js             # the output stage at 32 kHz + resampler against 44.1 kHz: pitch, level, brightness, release, vibrato, reverb
+node test_zone.js             # zone level, exclusive class (hi-hat choke), scale tuning: converter against 1mgm.sf2, then fm1b.c
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
@@ -259,6 +260,17 @@ emulator from the speakers), one session, which again read about 7 points over t
 
 So the 32-voice firmware is for BFP8 banks: `dist\sf2player_32v_32k.fwsc`. For SEA6 the 24-voice one is kept,
 `dist\sf2player_24v_32k.fwsc` (built with `FM1B_VOICES 24U`). Image 422 588 bytes; the SRAM check passes.
+
+**Zone level, exclusive class, scale tuning (2026-11-03).** The converter keeps three more SF2 generators per zone, in a table of 4 bytes
+a zone after the zone table (FORMAT.md, "Zone levels"; the header is 52 bytes, and banks with the old 48-byte header still play, at full
+level). Level: initial attenuation times 0.4 (EMU and FluidSynth), 482 of 1mgm.sf2's 569 zones are 0.5-15 dB down; one multiply per note.
+Exclusive class: a note fades the voices of its class on the same channel and preset out in about 5 ms (the kit's hi-hats 42, 44, 46 are
+class 1). Scale tuning: 42 zones play 50 cents a key. `test_zone.js`, 26 checks. The banks grow by 4 bytes a zone (BFP8 456 936 bytes,
+97.9 %). fm1-emu, 240 MHz, silent, 32-voice build, SEA6, one session: `hats.script` (open hat, closed hat 0.5 s later): with the old
+bank (`gm_32k_nopan`) the open hat rings 0.7 s past the closed one, with the new one the sound ends 0.3 s after it. `load24_all`: load
+66-70 % new against 68-73 % old, so the cost is not measurable; RMS 0.24 against 0.51, as that program's zones are about 6 dB down in
+the SoundFont: the mix is quieter and dense chords saturate less, turn MASTER up to match. Images: 32 voices 423 740 bytes, 24 voices
+423 612.
 
 Cost: a channel that never gets bend or the wheel plays exactly as before (the tests check it bit for bit). A bend recomputes the step of
 that channel's voices once; the wheel does it once per 32 frames per voice while it is up. In fm1-emu at 240 MHz, 8 voices held on a flute
