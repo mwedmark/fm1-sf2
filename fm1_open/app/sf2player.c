@@ -251,7 +251,7 @@ static void channels_update(const struct fm1b_status *st)
     d = put_number(d, st->voice_limit, 0);              /* the CPU guard's limit: FM1B_VOICES unless it ran short */
     *d = 0;
     line_show(0, 8, line, 2, WHITE);
-    line_show(1, 28, "CH PRG NAME    LVL PAN BEND MOD REV CHO P", 1, GREY);
+    line_show(1, 28, "CH PRG NAME   LVL PAN BEND MOD REV CHO P", 1, GREY);
     for (unsigned c = 0; c < FM1B_CHANNELS; ++c) {
         struct fm1b_channel info;
         fm1b_channel_info(c, &info);
@@ -264,18 +264,18 @@ static void channels_update(const struct fm1b_status *st)
         uint16_t color;
         if (c == 9U) {                                        /* transfer.c: channel 10 always plays the kit */
             d = put_text(d, "KIT ");
-            d = put_padded(d, st->drums ? st->drum_name : "-", 7);
+            d = put_padded(d, st->drums ? st->drum_name : "-", 6);
             color = ORANGE;
         } else if (info.own) {
             if (info.kit) d = put_text(d, "KIT");
             else d = put_number(d, info.program + 1, 3);
             *d++ = ' ';
-            d = put_padded(d, info.name, 7);
+            d = put_padded(d, info.name, 6);
             color = WHITE;
         } else {
             d = put_number(d, st->program + 1, 3);
             *d++ = ' ';
-            d = put_padded(d, st->name, 7);
+            d = put_padded(d, st->name, 6);
             color = GREY;
         }
         *d++ = ' ';
@@ -299,7 +299,7 @@ static void channels_update(const struct fm1b_status *st)
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
     }
-    line_show(18, 228, "HOME K1 CH SEL PRG MST VOL K2 PAN K3/4 FX", 1, GREY);
+    line_show(18, 228, "HOME K1 CH SEL PRG MST VOL K2 PAN K3/4FX", 1, GREY);
 }
 
 static void screen_update(void)
