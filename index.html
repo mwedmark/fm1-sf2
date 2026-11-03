@@ -587,10 +587,11 @@ const MOD_DEFAULTS = [0, 0, 0, -12000, 0, -12000, 0, 0, 0, 13500, 0, 0, 0, -1200
 
 // FM1B bank (see FORMAT.md). Everything is little endian and 4-byte aligned, so the CPU can use the
 // file in place: a lookup is a few indexed loads and never a search.
-//   header (68) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
-//   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (40 each) | sample data (each sample padded to 4 bytes)
+//   header (76) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
+//   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (40 each) | layers (4 a preset, 4 an entry) |
+//   sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
-const FM1B_HEADER = 68, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 40;
+const FM1B_HEADER = 76, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 40;
 
 function writeFm1(bank) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
@@ -615,7 +616,23 @@ function writeFm1(bank) {
     if (!modIndex.has(k)) { mods.push(z.mod); modIndex.set(k, mods.length); }
     z.modNumber = modIndex.get(k);                           // the record's index plus 1
   }
-  const offMod = offEnv + FM1B_ENV * envs.length, offSmp = offMod + FM1B_MOD * mods.length;
+  // Stacked layers: the key map gives the lowest zone of a key; every zone that covers a key some lower zone of its preset also
+  // covers is an entry (lo, hi, zone within the preset), and the player starts it as well.
+  const layers = presets.map(p => {
+    const list = [];
+    for (let k = 1; k < p.count; k++) {
+      const z = bank.zones[p.first + k];
+      for (let j = 0; j < k; j++) {
+        const o = bank.zones[p.first + j];
+        if (o.lo <= z.hi && o.hi >= z.lo) { list.push([z.lo, z.hi, k]); break; }
+      }
+    }
+    return list;
+  });
+  const nLayers = layers.reduce((a, l) => a + l.length, 0);
+  bank.layerEntries = nLayers;
+  const offMod = offEnv + FM1B_ENV * envs.length, offLayer = offMod + FM1B_MOD * mods.length;
+  const offSmp = offLayer + (nLayers ? 4 * np + 4 * nLayers : 0);
   let end = offSmp;
   for (const s of bank.samples) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
 
@@ -634,6 +651,8 @@ function writeFm1(bank) {
   dv.setUint32(56, mods.length ? offMod : 0, true);         // modulation records: LFOs and key scaling
   dv.setUint32(60, mods.length, true);
   dv.setUint32(64, FM1B_MOD, true);                        // their size
+  dv.setUint32(68, nLayers ? offLayer : 0, true);           // stacked layers: a (first, count) a preset, then the entries
+  dv.setUint32(72, nLayers, true);
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -669,6 +688,13 @@ function writeFm1(bank) {
     dv.setUint16(x + 6, z.modNumber, true);
   });
   mods.forEach((m, i) => MOD_FIELDS.forEach((f, j) => dv.setInt16(offMod + i * FM1B_MOD + j * 2, m[f], true)));
+  if (nLayers) {
+    let e = 0;
+    layers.forEach((list, pi) => {
+      dv.setUint16(offLayer + pi * 4, e, true); dv.setUint16(offLayer + pi * 4 + 2, list.length, true);
+      for (const [lo, hi, k] of list) { const o = offLayer + 4 * np + 4 * e++; out[o] = lo; out[o + 1] = hi; out[o + 2] = k; }
+    });
+  }
   envs.forEach((e, i) => {
     const o = offEnv + i * FM1B_ENV;
     dv.setUint16(o, e.attack, true); dv.setUint16(o + 2, e.hold, true); dv.setUint16(o + 4, e.decay, true);

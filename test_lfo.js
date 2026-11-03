@@ -40,8 +40,8 @@ source.forEach((s, i) => {
   modOk += JSON.stringify(r) === JSON.stringify(s.mod);
   if (r) { ++withMod; vib += !!(r.lfoPitch || r.vibPitch); trem += !!r.lfoVolume; keyed += !!(r.keyHold || r.keyDecay); }
 });
-check(offMod && offMod % 4 === 0 && dv.getUint32(16, true) === 68 && M === 40 && dv.getUint32(36, true) === offMod + M * nMod,
-  `header offset 56 points at ${nMod} modulation records of ${M} bytes (offset 64), right before the sample data`);
+check(offMod && offMod % 4 === 0 && dv.getUint32(16, true) === 76 && M === 40 && (dv.getUint32(68, true) || dv.getUint32(36, true)) === offMod + M * nMod,
+  `header offset 56 points at ${nMod} modulation records of ${M} bytes (offset 64), right before the layers and the sample data`);
 check(modOk === source.length && vib > 0 && trem > 0 && keyed > 0,
   `every zone points at its own LFOs and key scaling (${withMod} zones: ${vib} with vibrato, ${trem} with tremolo, ${keyed} with key scaling)`);
 const program = (p, n) => { const pr = bank.presets.find(x => x.bank === 0 && x.preset === p);

@@ -73,6 +73,7 @@ static struct {
     uint32_t extra_size;  /* their bytes a zone: 8, or 4 in a 52-byte header (no sends) */
     uint32_t mods, mod_count;  /* the modulation records (LFOs, key scaling, filter), 0: none (a header under 64 bytes) */
     uint32_t mod_size;         /* their bytes: 40, or 20 in a 64-byte header (no filter) */
+    uint32_t layers, layer_count;   /* stacked layers: (first, count) a preset, then the entries; 0: none (a header under 76 bytes) */
     int32_t preset; /* -1: none selected */
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
@@ -87,7 +88,8 @@ static unsigned voice_limit = FM1B_VOICES, voices_cut;
 enum { CUT_RELEASE = 13500 };
 enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA, FORMAT_BFP8 };
 enum { BFP_GROUP = 32, BFP_GROUP_BYTES = 33 };   /* BFP8: a shift byte, then 32 signed 8-bit mantissas */
-enum { MOD_RECORD_LFO = 20, MOD_RECORD_FILTER = 40 };   /* a modulation record: up to its LFOs, up to its filter (i16 in SF2 units) */
+enum { MOD_RECORD_LFO = 20, MOD_RECORD_FILTER = 40 };
+enum { NOTE_LAYERS = 4 };   /* the zones one note starts at most: the key map's and up to three stacked on it */   /* a modulation record: up to its LFOs, up to its filter (i16 in SF2 units) */
 enum { MENV_DELAY, MENV_ATTACK, MENV_HOLD, MENV_DECAY, MENV_SUSTAIN, MENV_RELEASE, MENV_ONE = 1 << 24 };
 /* A cutoff of 0 cents (8.176 Hz) as a fraction of the rate, Q32. */
 static const uint32_t FILTER_BASE = (uint32_t)((8176ULL * 4294967296ULL + 500ULL * FM1B_RATE) / (1000ULL * FM1B_RATE));
@@ -201,8 +203,12 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.mods = bank.pitch >= 64U ? rd32(image + 56) : 0U;   /* a 64-byte header has the modulation records */
     bank.mod_count = bank.mods ? rd32(image + 60) : 0U;
     bank.mod_size = bank.pitch >= 68U ? rd32(image + 64) : MOD_RECORD_LFO;   /* a 68-byte header has their size */
+    bank.layers = bank.pitch >= 76U ? rd32(image + 68) : 0U;   /* a 76-byte header has the stacked layers */
+    bank.layer_count = bank.layers ? rd32(image + 72) : 0U;
     bank.env_count = 0;
-    if ((bank.mods && (bank.mods % 4U || bank.mod_count > 65535U || bank.mod_size < MOD_RECORD_LFO || bank.mod_size > 256U ||
+    if ((bank.layers && (bank.layers % 4U || bank.layer_count > 65535U ||
+                         !region_ok(bank.layers, 4ULL * bank.preset_count + 4ULL * bank.layer_count))) ||
+        (bank.mods && (bank.mods % 4U || bank.mod_count > 65535U || bank.mod_size < MOD_RECORD_LFO || bank.mod_size > 256U ||
                        bank.mod_size % 4U || !region_ok(bank.mods, (uint64_t)bank.mod_size * bank.mod_count))) || bank.rate < 4000 || bank.rate > 96000 || !region_ok(bank.pitch, 512) || !region_ok(bank.bankmap, 512) ||
         !region_ok(bank.presets, 24ULL * bank.preset_count) || !region_ok(bank.keymaps, 128ULL * bank.preset_count) ||
         !region_ok(bank.zones, 24ULL * bank.zone_count) || (bank.extras && (bank.extras % 4U || bank.extra_size < 4U || bank.extra_size > 64U || bank.extra_size % 4U ||
@@ -624,6 +630,9 @@ FM1_DSP_CODE void fm1b_voice_limit(unsigned limit)
 }
 FM1_DSP_CODE unsigned fm1b_voices_sounding(void) { return voices_sounding(); }
 
+static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner, unsigned channel, unsigned note, unsigned velocity,
+                                                             unsigned level, unsigned drum,
+                       int32_t preset_index, uint32_t number, int32_t shown);
 static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigned note, unsigned velocity, unsigned level, unsigned drum)
 {
     if (!fm1b_ready() || note > 127 || velocity > 127 || level > 127 || (drum && bank.drum_preset < 0))
@@ -646,7 +655,44 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     uint32_t first = rd16(preset), count = rd16(preset + 2);
     if (key == 0xff || key >= count || first + key >= bank.zone_count)
         return;
-    const uint8_t *zone = bank.image + bank.zones + (first + key) * 24U;
+    /* The key map's zone, and the zones stacked on it at this key (FORMAT.md, "Layers"): all of them sound, as in the SoundFont. */
+    uint32_t keys[NOTE_LAYERS];
+    unsigned n = 0;
+    keys[n++] = key;
+    if (bank.layers) {
+        const uint8_t *index = bank.image + bank.layers + (uint32_t)preset_index * 4U;
+        uint32_t e = rd16(index), left = rd16(index + 2);
+        for (; left && e < bank.layer_count && n < NOTE_LAYERS; ++e, --left) {
+            const uint8_t *entry = bank.image + bank.layers + bank.preset_count * 4U + e * 4U;
+            if (note >= entry[0] && note <= entry[1] && entry[2] != key && entry[2] < count && first + entry[2] < bank.zone_count)
+                keys[n++] = entry[2];
+        }
+    }
+    n = n > voice_limit ? voice_limit : n;
+    /* A closed hi-hat cuts the open one: the class's other notes end fast. All layers first, so that one layer never cuts another. */
+    for (unsigned l = 0; l < n && bank.extras; ++l) {
+        uint32_t exclusive = bank.image[bank.extras + (first + keys[l]) * bank.extra_size + 1] & 127U;
+        if (exclusive)
+            for (unsigned i = 0; i < FM1B_VOICES; ++i) {
+                struct voice *o = &voices[i];
+                if (o->active && !o->cut && o->exclusive == exclusive && o->preset == preset_index && o->channel == channel && o->owner == owner) {
+                    o->cut = 1;                               /* fading: it no longer counts as sounding */
+                    o->held = 0;
+                    o->phase = RELEASE;
+                    o->release = CUT_RELEASE;
+                }
+            }
+    }
+    voices_fit(voice_limit - n);                              /* room for these under the limit */
+    for (unsigned l = 0; l < n; ++l)
+        zone_start(owner, channel, note, velocity, level, drum, preset_index, first + keys[l], l ? -1 : (int32_t)keys[l]);
+}
+/* One zone of a note: a voice for it, the oldest if none is free. shown is the zone's number in its preset for the panel's
+ * status, or -1 for a stacked layer (the status shows the key map's zone). */
+static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner, unsigned channel, unsigned note, unsigned velocity,
+                                                             unsigned level, unsigned drum, int32_t preset_index, uint32_t number, int32_t shown)
+{
+    const uint8_t *zone = bank.image + bank.zones + number * 24U;
     uint32_t data = rd32(zone), length = rd32(zone + 4), start = rd32(zone + 8), end = rd32(zone + 12);
     uint64_t span = bank.format == FORMAT_SEA ? (uint64_t)((length + 319U) / 320U) * bank.chunk_bytes
                   : bank.format == FORMAT_PCM12 ? ((uint64_t)length * 3U + 1U) / 2U
@@ -664,7 +710,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     uint32_t env_number = rd16(zone + 18);
     const uint8_t *env = bank.envs && env_number < bank.env_count ? bank.image + bank.envs + env_number * 12U : default_env;
     /* The zone's level (0.5 dB steps), exclusive class and scale tuning (cents a key): FORMAT.md, "Zone levels". */
-    const uint8_t *extra = bank.extras ? bank.image + bank.extras + (first + key) * bank.extra_size : NULL;
+    const uint8_t *extra = bank.extras ? bank.image + bank.extras + number * bank.extra_size : NULL;
     const uint8_t *sends = extra && bank.extra_size >= 6U ? extra + 4 : NULL;
     uint32_t atten = extra ? extra[0] : 0U, exclusive = extra ? extra[1] & 127U : 0U, scale = extra ? rd16(extra + 2) : 100U;
     int index = (int)note - (int)zone[16] + 64;
@@ -682,17 +728,6 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         pitch = (uint32_t)(((uint64_t)pitch * (uint32_t)(65536 + t + ((t * t) >> 17))) >> 16);
     }
 
-    if (exclusive)                                            /* a closed hi-hat cuts the open one: the class's other notes end fast */
-        for (unsigned i = 0; i < FM1B_VOICES; ++i) {
-            struct voice *o = &voices[i];
-            if (o->active && !o->cut && o->exclusive == exclusive && o->preset == preset_index && o->channel == channel && o->owner == owner) {
-                o->cut = 1;                                   /* fading: it no longer counts as sounding */
-                o->held = 0;
-                o->phase = RELEASE;
-                o->release = CUT_RELEASE;
-            }
-        }
-    voices_fit(voice_limit - 1U);                             /* room for this one under the limit */
     unsigned slot = FM1B_VOICES, oldest = 0;
     for (unsigned i = 0; i < FM1B_VOICES; ++i) {
         if (!voices[i].active) { slot = i; break; }
@@ -813,9 +848,11 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
     v->release = (uint16_t)rd16(env + 8);
     v->fixed = (uint8_t)(rd16(env + 10) & 1U);
     v->phase = ATTACK;
+    if (shown < 0)
+        return;
     bank.last_note = (int32_t)note;
     bank.last_drum = (int32_t)drum;
-    bank.last_zone = (int32_t)key;
+    bank.last_zone = shown;
     bank.last_voice = (int32_t)slot;
     bank.last_zone_record = zone;
     bank.last_env = env;

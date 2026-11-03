@@ -117,7 +117,8 @@ for (const [program, note] of [[73, 69], [0, 60], [0, 84], [40, 55]]) {
 // The voice limit and the CPU guard (sf2out_load), on the 32 kHz build as the device runs it.
 {
   const w = engines[1], blocks = n => { for (let i = 0; i < n; ++i) w.rt_block(); };
-  if (w.rt_bind(bank.length) !== 0 || w.rt_program(73) !== 0) throw new Error('bank');
+  // Recorder (74): one zone a key, so one voice a note (the flute, 73, has two layers)
+  if (w.rt_bind(bank.length) !== 0 || w.rt_program(74) !== 0) throw new Error('bank');
   w.rt_fx(0, 0);
   const notes = [48, 52, 55, 60, 64, 67, 72, 76, 79, 84];
   for (const n of notes) { w.rt_note(0, n, 100); blocks(2); }

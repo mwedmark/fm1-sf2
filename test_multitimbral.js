@@ -335,7 +335,9 @@ w.mt_note(3, NOTE, 100);
 w.mt_note(3, NOTE + 4, 100);
 w.mt_block();
 check(w.mt_info(3, 0) === 1 && w.mt_info(3, 2) === program && w.mt_info(3, 1) === 0, 'the channel reports its own program');
-check(w.mt_info(3, 4) === 64 && w.mt_info(3, 7) === 2 && w.mt_info(3, 6) === 2, 'the channel reports its wheel, note count and voices');
+// the flute has two layers: two notes, four voices
+check(w.mt_info(3, 4) === 64 && w.mt_info(3, 7) === 2 && w.mt_info(3, 6) === w.mt_voices() && w.mt_voices() >= 2,
+  `the channel reports its wheel, note count and voices (${w.mt_info(3, 6)})`);
 check(w.mt_info(4, 0) === 0 && w.mt_info(4, 6) === 0 && w.mt_info(4, 8) === 127, 'a silent channel follows the panel at full volume');
 
 // 15. The channel page's KNOB2: back to following the panel.
