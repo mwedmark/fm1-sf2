@@ -96,7 +96,8 @@ Found, 2026-11-04:
 - **The sinc again, with the 4-point interpolation (2026-11-04).** Same bank size (BFP8 464 580 bytes); the converter takes 21 s for
   1mgm.sf2 in Node against 1.5 s. `spectra` mean, before / sinc: lowest band +1.8 / -0.5, 1k -1.0 / -1.2, 2k -1.3 / -1.8, 4k -2.2 / -3.5,
   8k -3.8 / -6.1, 16k -10.2 / -12.0 dB. Africa 4k / 8k -2.9 / -6.2 against -4.3 / -9.2 (spectral distance 4.7 / 5.4 dB), Dancing Queen
-  8k -3.1 / -7.5 (5.7 / 7.0 dB). So the sinc is cleaner below 1 kHz and further from FluidSynth above it; not made the standard.
+  8k -3.1 / -7.5 (5.7 / 7.0 dB). So the sinc is cleaner below 1 kHz and further from FluidSynth above it. By ear (the user, same day)
+  the old resampler sounds better: the sinc is dropped, and the old `resample()` stays.
   **Why:** 1mgm.sf2 plays its short samples far below their pitch (Tinker Bell's agogo, root 107, on keys 0-127; E Piano 1's
   coldglass7wave, root 65, from key 0). A note n semitones under the root takes its treble from the sample's content up to
   16 kHz * 2^(n/12), and the 32 kHz bank has nothing above 16 kHz: what FluidSynth plays from 16-22 kHz of the 44.1 kHz sample is gone,
