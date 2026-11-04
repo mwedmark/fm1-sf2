@@ -69,9 +69,15 @@ void fm1b_channel_bend(unsigned channel, unsigned value);
 struct fm1b_channel {
     char name[21];
     uint8_t own, kit, program, volume, expression, mod, pedal, voices, notes, reverb, chorus, pan;   /* pan: CC 10, 64 the centre */
+    uint8_t muted, solo, silent;               /* fm1b_channel_mute / fm1b_channel_solo; silent: muted, or another channel is soloed */
     int16_t bend_cents;
 };
 void fm1b_channel_info(unsigned channel, struct fm1b_channel *info);
+/* Mute and solo (the panel's channel page). A silent channel (muted, or another channel soloed) fades out in about 20 ms, its
+ * voices then stop (they cost nothing), and its new notes are not started; they still count in fm1b_channel.notes. Back on,
+ * it fades in and its next notes sound. solo: the one channel heard, or -1 for none. Kept until the next fm1b_bind(). */
+void fm1b_channel_mute(unsigned channel, unsigned on);
+void fm1b_channel_solo(int channel);
 /* How many channels have a preset of their own: 0 while a single preset plays on all of them. */
 unsigned fm1b_multitimbral(void);
 /* Add `frames` mono Q23 samples to out, unpanned. Only the voices started by `owner` sound: the browser simulator has several

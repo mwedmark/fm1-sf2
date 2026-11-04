@@ -110,9 +110,21 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
 enum { GUARD_HIGH = 80, GUARD_LOW = 60, GUARD_HOLD = 8 /* blocks after a cut: the faded voices' load leaves over 5 ms */,
        GUARD_CALM = 86 /* blocks under GUARD_LOW before a voice comes back: 0.25 s */, GUARD_FLOOR = 4 };
 static unsigned guard_limit = FM1B_VOICES, guard_hold, guard_calm;
+static uint32_t load_average;                           /* Q8 percent, a block weighs 1/32: about 0.1 s */
+static volatile uint32_t load_peak;
+void sf2out_cpu(unsigned *average, unsigned *peak)
+{
+    *average = (load_average + 128U) >> 8;
+    *peak = load_peak;
+    load_peak = 0;                                      /* a block that ends just now may be lost from the next peak: harmless */
+}
 FM1_DSP_CODE void sf2out_load(uint32_t used, uint32_t block)
 {
     uint64_t percent = block ? (uint64_t)used * 100U / block : 0;
+    uint32_t p = percent > 999U ? 999U : (uint32_t)percent;
+    load_average += ((int32_t)(p << 8) - (int32_t)load_average) >> 5;
+    if (p > load_peak)
+        load_peak = p;
     if (guard_hold) {
         --guard_hold;
         return;

@@ -470,5 +470,87 @@ w.mt_drum(9, panned, 100);
 pn = renderPan(4);
 check(pn.flags === 8 && pn.r.every(v => v === 0), 'CC10 0 moves a panned drum all the way left');
 
+// 18. Mute and solo (the channel page's ARP and SEQ). A silent channel fades out in about 20 ms, without a jump, its voices then
+// stop, its new notes are not started (but counted), and the other channels are bit for bit what they are alone.
+const FADE_BLOCKS = Math.ceil(44100 * 0.02 / BLOCK);  // 7 blocks of 128 at 44.1 kHz
+const peakOf = a => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+const blockPeaks = a => Array.from({ length: a.length / BLOCK }, (_, b) => peakOf(a.subarray(b * BLOCK, (b + 1) * BLOCK)));
+const maxJump = a => a.reduce((m, v, i) => i ? Math.max(m, Math.abs(v - a[i - 1])) : m, 0);
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+const held = render(LONG);
+const heldJump = maxJump(held.slice(-50 * BLOCK));
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+render(LONG);
+w.mt_mute(0, 1);
+check(w.mt_info(0, 12) === 1 && w.mt_info(0, 14) === 1 && w.mt_info(0, 13) === 0, 'the channel reports muted and silent');
+const fade = render(FADE_BLOCKS + 3);
+const peaks = blockPeaks(fade);
+check(peaks[0] > 0 && peaks.slice(1).every((p, i) => p <= peaks[i]), 'mute fades a sounding note out, block by block');
+check(peaks[Math.floor(FADE_BLOCKS / 2)] > 0, 'the fade is not a cut: it still sounds after 10 ms');
+check(peaks.slice(FADE_BLOCKS + 1).every(p => p === 0), 'and it is silent after about 20 ms');
+check(maxJump(fade) <= heldJump * 1.5, 'no click: the fade jumps no more than the held note itself');
+check(w.mt_voices() === 0 && w.mt_info(0, 6) === 0, 'a faded voice stops (it costs nothing)');
+const notesBefore = w.mt_info(0, 7);
+w.mt_note(0, NOTE + 4, 100);
+check(sumAbs(render(20)) === 0 && w.mt_voices() === 0, 'a new note on a muted channel is not heard, not started');
+check(w.mt_info(0, 7) === ((notesBefore + 1) & 255), 'but the channel page still sees it arrive');
+w.mt_note(0, NOTE + 4, 0);
+w.mt_mute(0, 0);
+check(w.mt_info(0, 12) === 0 && w.mt_info(0, 14) === 0, 'unmuted');
+render(FADE_BLOCKS + 1);
+w.mt_note(0, NOTE, 100);
+check(same(render(LONG), held), 'after unmute a note sounds bit for bit as it did before');
+// The other channel goes on as it is alone.
+fresh(SUSTAIN);
+w.mt_note(1, NOTE + 7, 100);
+const fifthAlone = render(LONG);
+fresh(SUSTAIN);
+w.mt_mute(0, 1);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+check(same(render(LONG), fifthAlone), 'a muted channel leaves the others bit exact');
+// Solo: only that channel; on another channel it moves there; -1 clears it.
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100);
+const rootAlone = render(LONG);
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+const both = render(LONG);
+fresh(SUSTAIN);
+w.mt_solo(1);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+check(same(render(LONG), fifthAlone), 'solo on channel 2: only channel 2 is heard, bit exact');
+check(w.mt_info(1, 13) === 1 && w.mt_info(1, 14) === 0 && w.mt_info(0, 14) === 1 && w.mt_info(0, 12) === 0,
+  'the soloed channel reports solo, the others silent but not muted');
+fresh(SUSTAIN);
+w.mt_solo(1);
+w.mt_solo(0);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+check(same(render(LONG), rootAlone) && w.mt_info(1, 13) === 0, 'solo moved to channel 1');
+fresh(SUSTAIN);
+w.mt_solo(0);
+w.mt_solo(-1);
+render(FADE_BLOCKS + 1);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+check(same(render(LONG), both) && w.mt_info(1, 14) === 0, 'no solo: both are heard again');
+fresh(SUSTAIN);
+w.mt_note(0, NOTE, 100); w.mt_note(1, NOTE + 7, 100);
+render(LONG);
+w.mt_solo(1);
+render(FADE_BLOCKS + 2);
+check(w.mt_voices() === 1 && w.mt_info(0, 6) === 0 && w.mt_info(1, 6) === 1, 'solo while they play: the others fade and stop');
+fresh(SUSTAIN);
+w.mt_solo(0); w.mt_mute(0, 1);
+w.mt_note(0, NOTE, 100);
+check(sumAbs(render(20)) === 0, 'muted wins over solo');
+fresh(SUSTAIN);
+w.mt_mute(0, 1); w.mt_solo(3);
+w.mt_panel_note(NOTE, 100);
+check(sumAbs(render(20)) > 0, "the panel's own keys (program page) are never silenced");
+fresh(SUSTAIN);
+w.mt_mute(0, 1);
+check(w.mt_info(0, 12) === 1 && (w.mt_bind(bank.length), w.mt_info(0, 12) === 0), 'a new bank forgets mute and solo');
+
 console.log(`${checks - failed}/${checks} checks passed`);
 process.exit(failed ? 1 : 0);

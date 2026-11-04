@@ -119,6 +119,18 @@ static uint16_t channel_rpn[CHANNEL_SLOTS];
 static uint8_t channel_reverb[CHANNEL_SLOTS], channel_chorus[CHANNEL_SLOTS];
 /* Pan (MIDI CC 10; the panel's channel page), 0..127, 64 the centre: it moves the zones' own pan, as an SF2 player does. */
 static uint8_t channel_pan[CHANNEL_SLOTS];
+/* Mute and solo, set by the panel (fm1b_channel_mute, fm1b_channel_solo): a bit per channel, and the soloed channel or -1.
+ * channel_gate is each channel's fade, Q14, moved once a block towards 0 while the channel is silent and back to SCALE_ONE;
+ * at SCALE_ONE it is not applied at all. The panel's own slot is never silenced. */
+static volatile uint32_t mute_mask;
+static volatile int32_t solo_channel = -1;
+static uint16_t channel_gate[CHANNEL_SLOTS];
+enum { GATE_FRAMES = FM1B_RATE / 50U };   /* the fade: 20 ms, a few blocks, each a 32-frame ramp of the voices: no click */
+static inline __attribute__((always_inline)) uint32_t silent_mask(void)
+{
+    int32_t solo = solo_channel;
+    return (mute_mask | (solo >= 0 ? ~(1U << solo) : 0U)) & ((1U << FM1B_CHANNELS) - 1U);
+}
 /* The balance law sf2fx uses for the whole mix: the near side keeps its level, the far one is sqrt(1 - |p| / 64), so a
  * centred voice sounds as it did before pan existed. This is 256 minus that, in Q8, for |p| = 0..64. */
 static const uint16_t pan_far_cut[65] = {
@@ -155,7 +167,10 @@ static void channels_reset(void)
         channel_reverb[c] = FM1B_REVERB_SEND;
         channel_chorus[c] = FM1B_CHORUS_SEND;
         channel_pan[c] = 64;
+        channel_gate[c] = SCALE_ONE;
     }
+    mute_mask = 0;
+    solo_channel = -1;
     bank.last_program_channel = bank.last_program = -1;
 }
 
@@ -674,6 +689,8 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
         return;
     }
     ++channel_notes[channel];
+    if ((silent_mask() >> channel) & 1U)                      /* muted, or another channel soloed: not heard, not started */
+        return;
     uint32_t key = bank.image[bank.keymaps + (uint32_t)preset_index * 128U + note];
     const uint8_t *preset = bank.image + bank.presets + (uint32_t)preset_index * 24U;
     uint32_t first = rd16(preset), count = rd16(preset + 2);
@@ -960,8 +977,30 @@ void fm1b_channel_info(unsigned channel, struct fm1b_channel *info)
     info->chorus = channel_chorus[channel];
     info->pan = channel_pan[channel];
     info->notes = channel_notes[channel];
+    info->muted = (mute_mask >> channel) & 1U;
+    info->solo = solo_channel == (int32_t)channel;
+    info->silent = (silent_mask() >> channel) & 1U;
     for (unsigned i = 0; i < FM1B_VOICES; ++i)
         info->voices += voices[i].active && voices[i].channel == channel;
+}
+void fm1b_channel_mute(unsigned channel, unsigned on)
+{
+    if (channel < FM1B_CHANNELS)
+        mute_mask = on ? mute_mask | 1U << channel : mute_mask & ~(1U << channel);
+}
+void fm1b_channel_solo(int channel) { solo_channel = channel >= 0 && channel < (int)FM1B_CHANNELS ? channel : -1; }
+/* Each channel's fade one block on, before the voices of the block run (the audio side). */
+static FM1_DSP_CODE void gates_update(unsigned frames)
+{
+    uint32_t silent = silent_mask(), step = (SCALE_ONE * frames + GATE_FRAMES - 1U) / GATE_FRAMES;
+    for (unsigned c = 0; c < FM1B_CHANNELS; ++c) {
+        uint32_t gate = channel_gate[c];
+        if ((silent >> c) & 1U)
+            gate = gate > step ? gate - step : 0U;
+        else if (gate < SCALE_ONE)
+            gate = gate + step < SCALE_ONE ? gate + step : SCALE_ONE;
+        channel_gate[c] = (uint16_t)gate;
+    }
 }
 unsigned fm1b_has_drums(void) { return bank.image && bank.drum_preset >= 0; }
 unsigned fm1b_multitimbral(void)
@@ -1175,7 +1214,15 @@ static FM1_DSP_CODE void env_step(struct voice *v)
             v->lfo = (uint16_t)(v->lfo + LFO_STEP);
         retune(v);
     }
-    int32_t next = (int32_t)((((int64_t)v->gain * target >> 24) * channel_scale[v->channel]) >> 14);   /* the channel's volume applies live */
+    uint32_t scale = channel_scale[v->channel], gate = channel_gate[v->channel];
+    if (gate != SCALE_ONE) {                                  /* mute or solo fades it */
+        if (!gate && (v->level < 0 ? -v->level : v->level) < ENV_STEP) {   /* faded out (the ramp leaves under ENV_STEP): it stops, so it costs nothing */
+            v->active = 0;
+            return;
+        }
+        scale = (scale * gate) >> 14;
+    }
+    int32_t next = (int32_t)((((int64_t)v->gain * target >> 24) * scale) >> 14);   /* the channel's volume applies live */
     if (v->lfos & 2U)                                         /* tremolo */
         next = (int32_t)(((int64_t)next * v->tremolo) >> 16);
     v->level_step = (next - v->level) / ENV_STEP;
@@ -1320,6 +1367,7 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_filtered(struct voice *
 FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
 {
     queue_drain();
+    gates_update(frames);
     if (!bank.image)
         return;
     for (unsigned n = 0; n < FM1B_VOICES; ++n)
@@ -1346,6 +1394,7 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
                                         uint8_t sends[2])
 {
     queue_drain();
+    gates_update(frames);
     sends[0] = last_sends[0];
     sends[1] = last_sends[1];
     if (!bank.image)

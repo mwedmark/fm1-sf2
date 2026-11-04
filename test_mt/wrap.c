@@ -40,7 +40,7 @@ EXPORT unsigned mt_status(unsigned field)                /* 0 channels, 1 progra
 EXPORT void mt_panel_drum(unsigned note, unsigned velocity) { fm1b_drum_note(0, note, velocity, 100); }
 EXPORT unsigned mt_has_drums(void) { return fm1b_has_drums(); }
 EXPORT void mt_bend(unsigned channel, unsigned value) { fm1b_channel_bend(channel, value); }
-EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 program, 3 bend cents, 4 mod, 5 pedal, 6 voices, 7 notes, 8 volume, 9 reverb, 10 chorus, 11 pan */
+EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 program, 3 bend cents, 4 mod, 5 pedal, 6 voices, 7 notes, 8 volume, 9 reverb, 10 chorus, 11 pan, 12 muted, 13 solo, 14 silent */
 {
     struct fm1b_channel c;
     fm1b_channel_info(channel, &c);
@@ -56,6 +56,9 @@ EXPORT int mt_info(unsigned channel, unsigned field)    /* 0 own, 1 kit, 2 progr
     case 9: return c.reverb;
     case 10: return c.chorus;
     case 11: return c.pan;
+    case 12: return c.muted;
+    case 13: return c.solo;
+    case 14: return c.silent;
     default: return c.volume;
     }
 }
@@ -74,3 +77,5 @@ EXPORT unsigned mt_block_sends(void)                     /* one block as board/a
 }
 EXPORT unsigned mt_voice_max(void) { return FM1B_VOICES; }
 EXPORT void mt_limit(unsigned limit) { fm1b_voice_limit(limit); }
+EXPORT void mt_mute(unsigned channel, unsigned on) { fm1b_channel_mute(channel, on); }
+EXPORT void mt_solo(int channel) { fm1b_channel_solo(channel); }
