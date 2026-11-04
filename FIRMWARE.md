@@ -133,4 +133,12 @@ Per MIDI channel in `fm1b.c`. A voice keeps the step of its note (`base_step`) a
 recomputes the step of the channel's voices when it arrives; the wheel adds a triangle vibrato (5.5 Hz, +-50 cents at 127), moved on in
 `env_step` once per 32 frames, and only while the wheel is up. The sustain pedal marks a released note `held` instead of releasing it, and
 pedal up releases those. `fm1b_channel_info()` gives the panel's channel page (HOME) each channel's program, levels, bend, wheel, pedal,
-voices and a note counter. The sample loop itself is unchanged.
+voices, a note counter and its mute / solo state. The sample loop itself is unchanged.
+
+**Mute and solo** (2026-11-04): on the channel page ARP mutes / unmutes the selected channel and SEQ solos it (again: no solo), while
+it plays; the row's last column shows `M` / `S`, a silent row is dark grey, the title says `SOLO`, and the ARP / SEQ LEDs show the
+selected channel's state. `fm1b_channel_mute()` / `fm1b_channel_solo()` set a mask and a channel the audio side reads once a block;
+each channel has a gate (Q14) that fades in 20 ms and multiplies its volume in `env_step` only while it is not at one (no cost
+otherwise, output bit exact). A faded voice stops and a silent channel's note-ons are not started, so mute saves CPU. **MASTER** is
+always the main volume (`groove_master_update`); the selected channel's volume (CC 7) is on **ALGORITHM** (encoder 1). See RUNNING.md
+section 7.

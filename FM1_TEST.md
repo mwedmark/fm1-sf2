@@ -10,6 +10,7 @@ med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus, L
 | Vad | Var |
 | --- | --- |
 | SF2-firmwaren | `dist\sf2player_32v_32k.fwsc` (32 röster) |
+| SF2-firmwaren med mute/solo (C8-C13) | `dist\sf2player_32v_mute.fwsc` (2026-11-04: ARP mute, SEQ solo, ALGORITHM kanalvolym, MASTER alltid huvudvolym; samma bank) |
 | Reserv om det knastrar | `dist\sf2player_24v_32k.fwsc` (24 röster, samma bank) |
 | Originalfirmwaren (V15) | `fm1_open\sdk\firmware\FM-1_015.fwsc` |
 | Workbench för att flasha | <https://open.m-vave.com/fm1-workbench> (Chrome eller Edge, USB-kabel) |
@@ -60,9 +61,12 @@ banken i ett svep. Notera i så fall tid och vad sidan visade för varje steg.
 | C5 | KNOB2 (pan), KNOB3 (master reverb), KNOB4 (master chorus) på huvudsidan. | Värdena ändras på rad 9 och hörs. | |
 | C6 | HOME: kanalsidan. KNOB1 flyttar markören, SELECT byter kanalens program, KNOB3/4 kanalens reverb/chorus. | Raden och kolumnerna REV/CHO ändras. Tangenterna spelar markerad kanal. | |
 | C7 | Titta på rubriken `CHANNELS n/32` och raden `VOICES n/32` medan du spelar. | Talet efter snedstrecket är 32. | |
-| C8 | Kanalsidan: vrid MASTER ned och upp medan du spelar. | Bara markerad kanals LVL ändras och hörs; ingen hoppande volym. Båda ändlägena ger 0 och 127. | |
-| C9 | Tillbaka till huvudsidan (HOME) utan att röra MASTER, vrid sedan lite. | Utnivån hoppar inte, den följer knappen därifrån. | |
+| C8 | Kanalsidan: vrid ALGORITHM ned och upp medan du spelar. | Bara markerad kanals LVL ändras (4 steg per klick, 0..127) och hörs. | |
+| C9 | Kanalsidan och huvudsidan: vrid MASTER. | Hela utnivån ändras på båda sidorna (MASTER är alltid huvudvolymen); ingen kanals LVL ändras. | |
 | C10 | Kanalsidan: KNOB2 åt båda hållen, med hörlurar. | Kolumnen PAN visar `L..`/` C `/`R..`, ljudet flyttar sig. | |
+| C11 | Spela `mt.mid` (eller en MIDI-fil med flera kanaler). Kanalsidan: markera kanal 2, tryck ARP. Tryck ARP igen. | Kanal 2 tystnar mjukt, utan klick, medan resten spelar vidare; raden blir mörkgrå med `M` sist och ARP lyser. Igen: nästa ton på kanalen hörs, `M` och lampan släcks. | |
+| C12 | Markera en kanal, tryck SEQ. Flytta markören till en annan kanal och tryck SEQ. Tryck SEQ igen. | Bara den kanalen hörs (`S` sist, övriga rader mörkgrå, rubriken säger `SOLO`, SEQ lyser på den raden). Solot flyttar till den nya kanalen. Igen: alla hörs, `SOLO` försvinner. | |
+| C13 | Mute på en kanal som spelar många toner, titta på `CHANNELS n/32`. | Röstantalet sjunker när kanalen tystnat (tystade kanaler kostar ingen CPU). | |
 
 ## D. MIDI in (USB, DIN, BLE)
 

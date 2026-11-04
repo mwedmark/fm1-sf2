@@ -67,6 +67,9 @@ void sf2player_channel_follow(unsigned channel)
     fm1b_channel_follow(channel);
     fm1_device_irq_restore(flags);
 }
+/* Mute and solo only write a word the audio side reads once a block: no lock needed. */
+static void sf2player_channel_mute(unsigned channel, unsigned on) { fm1b_channel_mute(channel, on); }
+static void sf2player_channel_solo(int channel) { fm1b_channel_solo(channel); }
 void sf2player_channel_bend(unsigned channel, unsigned value)
 {
     uint32_t flags = fm1_device_irq_save();
@@ -99,7 +102,7 @@ static const uint8_t punctuation[][6] = {
     {'-', 8, 8, 8, 8, 8}, {'/', 0x60, 0x18, 6, 1, 0}, {'+', 8, 8, 0x3e, 8, 8}, {'%', 0x63, 0x13, 8, 0x64, 0x63},
     {'.', 0, 0x60, 0x60, 0, 0}, {':', 0, 0x36, 0x36, 0, 0}, {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'(', 0, 0x1c, 0x22, 0x41, 0},
     {')', 0, 0x41, 0x22, 0x1c, 0}};
-enum { WHITE = 0xffff, GREY = 0x8410, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
+enum { WHITE = 0xffff, GREY = 0x8410, DIM = 0x4208, DARK_GREEN = 0x0300, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
        LINE_CHARS = 41, LINES = 20, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
 static char shown[LINES][LINE_CHARS + 1];
@@ -239,8 +242,9 @@ static char *put_padded(char *d, const char *s, unsigned width)
     for (; n < width; ++n) *d++ = ' ';
     return d;
 }
-/* CH PRG NAME LVL PAN BEND MOD REV CHO P: green while it plays, white with a program of its own, grey while it follows the panel's,
- * orange for the kit on channel 10. */
+/* CH PRG NAME LVL PAN BEND MOD REV CHO and a flag: green while it plays, white with a program of its own, grey while it follows
+ * the panel's, orange for the kit on channel 10; a silent channel (muted, or another one soloed) is dark grey, dark green while
+ * notes arrive. The flag: M muted, S soloed, else P while the pedal is down. The title says SOLO while a channel is soloed. */
 static void channels_update(const struct fm1b_status *st)
 {
     char line[LINE_CHARS + 1], *d;
@@ -249,9 +253,16 @@ static void channels_update(const struct fm1b_status *st)
     d = put_number(d, st->voices, 0);
     *d++ = '/';
     d = put_number(d, st->voice_limit, 0);              /* the CPU guard's limit: FM1B_VOICES unless it ran short */
+    unsigned soloed = 0;
+    for (unsigned c = 0; c < FM1B_CHANNELS; ++c) {
+        struct fm1b_channel info;
+        fm1b_channel_info(c, &info);
+        soloed |= info.solo;
+    }
+    if (soloed) d = put_text(d, " SOLO");
     *d = 0;
-    line_show(0, 8, line, 2, WHITE);
-    line_show(1, 28, "CH PRG NAME   LVL PAN BEND MOD REV CHO P", 1, GREY);
+    line_show(0, 8, line, 2, soloed ? YELLOW : WHITE);
+    line_show(1, 28, "CH PRG NAME   LVL PAN BEND MOD REV CHO F", 1, GREY);
     for (unsigned c = 0; c < FM1B_CHANNELS; ++c) {
         struct fm1b_channel info;
         fm1b_channel_info(c, &info);
@@ -291,15 +302,19 @@ static void channels_update(const struct fm1b_status *st)
         *d++ = ' ';
         d = put_value3(d, info.chorus, 0);
         *d++ = ' ';
-        *d++ = info.pedal ? 'P' : ' ';
+        *d++ = info.muted ? 'M' : info.solo ? 'S' : info.pedal ? 'P' : ' ';
         *d = 0;
-        if (info.voices || now - channel_hit[c] < 250U)
+        unsigned playing = info.voices || now - channel_hit[c] < 250U;
+        if (info.silent)
+            color = playing ? DARK_GREEN : DIM;
+        else if (playing)
             color = GREEN;
         line_back = c == cursor ? CURSOR_BACK : BACKGROUND;
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
     }
-    line_show(18, 228, "HOME K1 CH SEL PRG MST VOL K2 PAN K3/4FX", 1, GREY);
+    line_show(19, 218, "ARP MUTE  SEQ SOLO  ALGORITHM VOLUME", 1, GREY);
+    line_show(18, 228, "HOME K1 CH SEL PRG K2 PAN K3/4 FX", 1, GREY);
 }
 
 static void screen_update(void)
@@ -461,6 +476,7 @@ static void channel_program_step(unsigned channel, int clicks)
 }
 
 static uint32_t previous_keys, previous_buttons;
+static unsigned leds_shown = 0xffU;                       /* what the ARP and SEQ LEDs show (bit 0 mute, bit 1 solo); 0xff: unknown */
 static uint8_t sounding_channel[KEYS];                     /* per key: the MIDI channel it started a note on, 255: the panel's */
 static uint8_t sounding[KEYS];                           /* the note each key started, so a release stops that one */
 static unsigned program;
@@ -477,66 +493,38 @@ void groove_screen_init(void)
     program = 0;
     page = 0;
     cursor = 0;
+    leds_shown = 0xffU;
     memset(shown, 0, sizeof shown);
     memset(shown_color, 0, sizeof shown_color);
     memset(shown_back, 0, sizeof shown_back);
     bar_drawn = 1000;
 }
-/* The MASTER knob: the output level on the program page, the selected channel's volume (CC 7) on the channel page. It is a
- * potentiometer, so the value it sets moves with it instead of jumping to where it points: turned up, the value covers what
- * is left above it in what is left of the knob's travel, and the same downwards. Both ends of the knob are both ends of the
- * value, and while the channel page is never opened the output level is where the knob points, as before. The value is
- * worked out from where the turn began (anchor), so rounding does not add up over the many small steps of one turn. */
-static unsigned knob_at = 0xffffU, master_at;            /* the knob's last position, the output level's as a knob position */
-static unsigned anchor_at, anchor_value, anchor_target = 0xffffU;
-static int anchor_dir;
-static unsigned knob_follow(unsigned value, unsigned top, unsigned from, unsigned to)
+/* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only). */
+enum { BUTTON_ARP = 10, BUTTON_SEQ = 11 };
+static void leds_update(void)
 {
-    if (to > from)
-        return value + ((top - value) * (to - from) + (1023U - from) / 2U) / (1023U - from);
-    return value - (value * (from - to) + from / 2U) / from;
-}
-static void master_knob(unsigned adc)
-{
-    if (adc > 1023U)
-        return;
-    if (knob_at > 1023U) {                                    /* the first reading */
-        knob_at = master_at = adc;
-        (void)groove_master_update(adc);
-        return;
-    }
-    unsigned distance = adc > knob_at ? adc - knob_at : knob_at - adc;
-    if (!distance || (distance < 4U && adc > 4U && adc < 1019U))   /* the ADC's noise, except at the ends */
-        return;
     struct fm1b_channel info;
-    if (page)
+    unsigned leds = 0;
+    if (page) {
         fm1b_channel_info(cursor, &info);
-    unsigned current = page ? info.volume : master_at, target = page ? cursor : 255U;
-    int dir = adc > knob_at ? 1 : -1;
-    if (target != anchor_target || dir != anchor_dir) {      /* a new turn: from here */
-        anchor_target = target;
-        anchor_dir = dir;
-        anchor_at = knob_at;
-        anchor_value = current;
+        leds = info.muted | info.solo << 1;
     }
-    unsigned value = knob_follow(anchor_value, page ? 127U : 1023U, anchor_at, adc);
-    knob_at = adc;
-    if (!page) {
-        master_at = value;
-        (void)groove_master_update(value);
-    } else if (value != current)
-        sf2player_channel_control(cursor, 7U, value);
+    if (leds == leds_shown)
+        return;
+    leds_shown = leds;
+    fm1_led_set(BUTTON_ARP, (int)(leds & 1U));
+    fm1_led_set(BUTTON_SEQ, (int)(leds >> 1));
 }
 void groove_screen_control(void)
 {
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
     struct fm1_controls controls;
     fm1_controls_read(&controls);
-    master_knob(controls.knob);                               /* the volume knob; without it the output stays muted */
-    /* The knobs: SELECT (encoder 0) programs, KNOB1 (2) the channel page's cursor, KNOB2 (3) pan, KNOB3 (4) reverb and
-     * KNOB4 (5) chorus. On the program page SELECT picks the panel's program, KNOB2 pans the whole mix and KNOB3/KNOB4 set
-     * the effects' master levels; on the channel page SELECT picks the selected channel's program, KNOB2 sets its pan (CC 10)
-     * and KNOB3/KNOB4 its sends. MASTER: master_knob. */
+    (void)groove_master_update(controls.knob);               /* MASTER: the output level on every page; without it the output stays muted */
+    /* The knobs: SELECT (encoder 0) programs, ALGORITHM (1) the selected channel's volume, KNOB1 (2) the channel page's
+     * cursor, KNOB2 (3) pan, KNOB3 (4) reverb and KNOB4 (5) chorus. On the program page SELECT picks the panel's program,
+     * KNOB2 pans the whole mix and KNOB3/KNOB4 set the effects' master levels; on the channel page SELECT picks the selected
+     * channel's program, ALGORITHM sets its volume (CC 7), KNOB2 its pan (CC 10) and KNOB3/KNOB4 its sends. */
     if (controls.encoders[0] && !page) {
         int step = controls.encoders[0] > 0 ? 1 : -1;
         for (int clicks = controls.encoders[0] * step; clicks > 0; --clicks)
@@ -548,6 +536,12 @@ void groove_screen_control(void)
         cursor = (unsigned)(moved < 0 ? 0 : moved > (int)FM1B_CHANNELS - 1 ? (int)FM1B_CHANNELS - 1 : moved);
         if (controls.encoders[0])
             channel_program_step(cursor, controls.encoders[0]);
+        if (controls.encoders[1]) {                           /* ALGORITHM: the selected channel's volume, 4 steps a click */
+            struct fm1b_channel info;
+            fm1b_channel_info(cursor, &info);
+            int volume = (int)info.volume + controls.encoders[1] * 4;
+            sf2player_channel_control(cursor, 7U, (unsigned)(volume < 0 ? 0 : volume > 127 ? 127 : volume));
+        }
     }
     for (unsigned which = 4; which <= 5; ++which) {
         if (!controls.encoders[which])
@@ -584,6 +578,17 @@ void groove_screen_control(void)
         page ^= 1U;
         page_clear();
     }
+    if (page && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
+        struct fm1b_channel info;
+        fm1b_channel_info(cursor, &info);
+        sf2player_channel_mute(cursor, !info.muted);
+    }
+    if (page && (pressed & (1U << BUTTON_SEQ))) {             /* SEQ: solo the selected channel; again on it: no solo */
+        struct fm1b_channel info;
+        fm1b_channel_info(cursor, &info);
+        sf2player_channel_solo(info.solo ? -1 : (int)cursor);
+    }
+    leds_update();
     if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */
         octave += (int)((pressed >> 1) & 1U) - (int)(pressed & 1U);
         octave = octave < -2 ? -2 : octave > 2 ? 2 : octave;

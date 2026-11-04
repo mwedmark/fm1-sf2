@@ -48,8 +48,9 @@ Each one compiles the real C source to WebAssembly with the WASI SDK on the firs
 
 ```bash
 cd D:/git/fm1-sf2
-node test_multitimbral.js     # 63 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
-                              # RPN range, modulation wheel, sustain pedal, what the channel page reads, the effect sends. Uses dist/gm_32k.fm1b
+node test_multitimbral.js     # 93 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
+                              # RPN range, modulation wheel, sustain pedal, what the channel page reads, the effect sends, pan,
+                              # mute and solo. Uses dist/gm_32k.fm1b
 node test_fx.js               # reverb and chorus (sf2fx.c), master levels times sends
 node test_upload.js           # the SysEx bank upload (sf2_upload.c)
 node test_formats.js          # SEA5, SEA6, BFP8, 8-, 12- and 16-bit banks play exactly their decoded samples (needs 1mgm.sf2)
@@ -266,7 +267,8 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 
 - Flash the package with the M-VAVE workbench (<https://open.m-vave.com/fm1-workbench>). Back up first and keep the device powered.
 - Send a bank over USB MIDI from the converter page ("Skicka till FM-1"). The panel shows `UPLOAD n Rx` and then the program.
-- Panel: SELECT program, OCT-/OCT+ octave, SCL drums, HOME channel page, KNOB2 pan, KNOB3 reverb, KNOB4 chorus (see section 7).
+- Panel: SELECT program, OCT-/OCT+ octave, SCL drums, HOME channel page, MASTER main volume, KNOB2 pan, KNOB3 reverb, KNOB4 chorus;
+  on the channel page ALGORITHM channel volume, ARP mute, SEQ solo (see section 7).
   Pan (then on KNOB3, and CC10) was reported working after it was added.
 
 ## 6. Playing it from Windows
@@ -295,22 +297,41 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received. **HOME** switches to the channel page:
 one row per MIDI channel with its program and name (grey: it follows the panel's program; white: a program of its own; orange: the kit on
 channel 10; green: it plays now; the name is cut to 7 characters), level (volume x expression), pan (`L64`..` C `..`R64`), bend in semitones,
-modulation wheel and `P` while the pedal is down. HOME again goes back.
+modulation wheel, and a flag in the last column: `M` muted, `S` soloed, else `P` while the pedal is down. A silent channel (muted, or
+another one soloed) is dark grey, dark green while its notes arrive; the title says `SOLO` (yellow) while a channel is soloed. HOME again goes back.
 The knobs are the same on both pages, only what they act on changes:
 
 | Knob | Program page (the start) | Channel page (HOME) |
 |---|---|---|
 | SELECT | The panel's program | The selected channel's program; below the first, the channel follows the panel again (channel 10 stays the kit) |
 | KNOB1 | - | Moves the cursor (the highlighted row) |
-| MASTER | Output level | The selected channel's volume (CC7) |
+| MASTER | Output level | Output level (the same: MASTER is always the synth's main volume) |
+| ALGORITHM | - | The selected channel's volume (CC7), 4 steps a click |
 | KNOB2 | Pan of the whole mix (a balance) | The selected channel's pan (CC10) |
 | KNOB3 | Master reverb, 0..127 | The selected channel's reverb send (CC91) |
 | KNOB4 | Master chorus, 0..127 | The selected channel's chorus send (CC93) |
 
-MASTER is a potentiometer, so it never jumps: the value moves with the knob, from where it is, so that both ends of the knob reach
-both ends of the value (turned up, the value covers what is left above it in what is left of the travel; the same downwards). While
-the channel page is never opened the output level is where the knob points, as before. Leaving the channel page leaves the output
-level where it was until MASTER is turned again.
+Two buttons act on the selected channel, on the channel page only, while it plays:
+
+| Button | Channel page |
+|---|---|
+| ARP (button 10) | Mute / unmute the selected channel. The ARP LED is lit while the selected channel is muted |
+| SEQ (button 11) | Solo the selected channel (all other channels silent); again on the same channel: no solo; on another channel: the solo moves there. The SEQ LED is lit while the selected channel is the soloed one |
+
+A silent channel (muted, or not the soloed one; a muted channel stays silent when soloed) fades out in 20 ms (`fm1b.c`
+`channel_gate`, one step a block, each a 32-frame ramp of the voices: no click). Its voices then stop, so a muted channel costs no CPU
+and frees its voices for the others, and its new notes are not started (the row still flashes when they arrive). Unmuted, it fades in
+and its next notes sound; notes held across the mute do not come back. The panel's own keys on the program page are never silenced.
+Mute and solo are kept until a new bank is bound, not saved. Until 2026-11-04 MASTER set the selected channel's volume on the channel
+page (from 2026-11-02); the user wanted MASTER as the main volume everywhere, so the channel's volume moved to ALGORITHM (encoder 1,
+the knob the stock firmware uses for the DX7 algorithm).
+
+Checked (2026-11-04): `test_multitimbral.js` (19 mute/solo checks: the fade is monotone, still sounding after 10 ms and silent after
+20 ms, the voices stop, a muted channel leaves the others bit exact, unmute and no solo are bit exact again). fm1-emu at 240 MHz,
+BFP8, `test_emu/mute.script` (flute on channels 1 and 2, C4 and G4; HOME; ARP; ARP and C4 again; SEQ; SEQ and G4 again; ALGORITHM 16
+clicks down; MASTER to 300), RMS from the tap: both 0.067, channel 1 muted 0.041, unmuted 0.068, channel 1 soloed 0.053, no solo
+0.068, ALGORITHM -64 on channel 1 0.043, MASTER down 0.014. The emulator draws no LCD, so the screen and the LEDs are for the device
+(FM1_TEST.md C8-C13). Image 435 068 bytes (+576).
 
 What a channel gets of an effect is master x send. The defaults (master 127, sends 30 and 20) sound bit for bit as the single global
 level of 30 and 20 did before (`test_fx.js` checks it). On the channel page the panel's keys play the selected channel.
