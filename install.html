@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Installera på FM-1</title>
+<title>Install on FM-1</title>
 <!-- Installs the SF2 player on an FM-1 in one go: the firmware with the SDK's own browser updater (fm1_open/sdk/WebUpdate.js, the
      protocol M-VAVE's workbench uses), then the bank with the player's SysEx upload (sf2_upload.c, as index.html sends it).
      Serve the repository (python -m http.server 8765) and open http://localhost:8765/install.html; node make_install.js puts the
@@ -61,52 +61,52 @@
 </head>
 <body>
 <main>
-  <h1>Installera på FM-1</h1>
-  <p class="sub">Firmware och ljudbank i ett steg, över USB-MIDI. Använd Chrome eller Edge.</p>
+  <h1>Install on FM-1</h1>
+  <p class="sub">Firmware and sound bank in one go, over USB-MIDI. Use Chrome or Edge.</p>
 
   <section class="panel">
-    <h2>Det här installeras</h2>
+    <h2>What gets installed</h2>
     <dl>
-      <dt>Firmware</dt><dd id="fwInfo">Läser in …</dd>
-      <dt>Ljudbank</dt><dd id="bankInfo">Läser in …</dd>
+      <dt>Firmware</dt><dd id="fwInfo">Loading …</dd>
+      <dt>Sound bank</dt><dd id="bankInfo">Loading …</dd>
     </dl>
     <details style="margin-top:10px">
-      <summary>Välj en annan bank</summary>
-      <p class="muted">En FM1B-bank från konverteraren (knappen som sparar <code>_fm1.bin</code>), eller en <code>.fm1b</code>.</p>
+      <summary>Choose another bank</summary>
+      <p class="muted">An FM1B bank from the converter (the button that saves <code>_fm1.bin</code>), or a <code>.fm1b</code> file.</p>
       <input type="file" id="bankFile" accept=".fm1b,.bin">
     </details>
   </section>
 
   <section class="panel">
-    <h2>Steg</h2>
+    <h2>Steps</h2>
     <ol class="steps">
-      <li id="s-connect"><span class="dot">1</span><div><div class="step-title">Hitta FM-1</div><div class="step-note">Via USB-MIDI. Webbläsaren frågar om MIDI/SysEx.</div></div><span class="step-pct"></span></li>
-      <li id="s-firmware"><span class="dot">2</span><div><div class="step-title">Firmware</div><div class="step-note">Hoppas över om FM-1 redan har just den här versionen.</div></div><span class="step-pct"></span></li>
-      <li id="s-bank"><span class="dot">3</span><div><div class="step-title">Ljudbank</div><div class="step-note">Raderar och skriver samplingsflashen, kontrollerar sedan summan.</div></div><span class="step-pct"></span></li>
+      <li id="s-connect"><span class="dot">1</span><div><div class="step-title">Find the FM-1</div><div class="step-note">Over USB-MIDI. The browser asks for MIDI/SysEx access.</div></div><span class="step-pct"></span></li>
+      <li id="s-firmware"><span class="dot">2</span><div><div class="step-title">Firmware</div><div class="step-note">Skipped if the FM-1 already has this exact version.</div></div><span class="step-pct"></span></li>
+      <li id="s-bank"><span class="dot">3</span><div><div class="step-title">Sound bank</div><div class="step-note">Erases and writes the sample flash, then checks the checksum.</div></div><span class="step-pct"></span></li>
     </ol>
-    <label class="check"><input type="checkbox" id="doFirmware" checked> Installera firmware</label>
-    <label class="check"><input type="checkbox" id="doBank" checked> Skicka ljudbanken</label>
+    <label class="check"><input type="checkbox" id="doFirmware" checked> Install firmware</label>
+    <label class="check"><input type="checkbox" id="doBank" checked> Send the sound bank</label>
     <progress id="progress" max="100" value="0" hidden></progress>
     <div class="actions">
-      <button class="primary" id="install" disabled>Installera</button>
+      <button class="primary" id="install" disabled>Install</button>
       <span class="muted" id="duration"></span>
     </div>
     <p id="message" role="status"></p>
-    <p class="warn">Dra inte ur kabeln och låt FM-1 ha ström tills sidan säger att det är klart. Stäng andra program och flikar som använder FM-1:s MIDI-port (Workbench, DAW, MIDIberry).</p>
+    <p class="warn">Do not unplug the cable, and keep the FM-1 powered until the page says it is done. Close other programs and tabs that use the FM-1's MIDI port (Workbench, DAW, MIDIberry).</p>
   </section>
 
   <details class="panel" id="logBox">
-    <summary>Logg: MIDI-portar och omstarter</summary>
+    <summary>Log: MIDI ports and restarts</summary>
     <pre id="log"></pre>
   </details>
 
   <details class="panel">
-    <summary>Om något går fel</summary>
+    <summary>If something goes wrong</summary>
     <ul class="muted">
-      <li>Firmwaren skrivs av M-VAVE:s egen uppdateringsladdare, samma väg som Workbench. Om den avbryts: koppla in igen och kör sidan en gång till, den fortsätter där FM-1 är.</li>
-      <li>Kör FM-1 originalfirmwaren (V15) eller en annan firmware, installera SF2-firmwaren med <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> första gången. Sidan flashar bara över SF2-spelarens egen firmware.</li>
-      <li>Banken ligger i samplingsflashen och finns kvar när firmwaren uppdateras. Den behöver bara skickas när den har ändrats.</li>
-      <li>Under banköverföringen visar FM-1 <code>UPLOAD n Rx</code>; <code>R0</code> är bra, <code>R3</code> är ett flashfel.</li>
+      <li>The firmware is written by M-VAVE's own update loader, the same route Workbench uses. If it is interrupted, plug in again and run the page once more; it continues from where the FM-1 is.</li>
+      <li>If the FM-1 runs the original firmware (V15) or another firmware, install the SF2 firmware with <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> the first time. This page only flashes over the SF2 player's own firmware.</li>
+      <li>The bank lives in the sample flash and stays there when the firmware is updated. It only needs to be sent when it has changed.</li>
+      <li>During the bank transfer the FM-1 shows <code>UPLOAD n Rx</code>; <code>R0</code> is good, <code>R3</code> is a flash error.</li>
     </ul>
   </details>
 </main>
@@ -120,18 +120,18 @@
   let manifest, pkg, bank, bankName = '', busy = false;
 
   // The SDK's updater reports its phases in Chinese; these are the ones a normal update passes.
-  const PHASES = { '准备升级程序': 'Startar uppdateringsläget', '等待升级设备重新连接': 'Väntar på att FM-1 startar om i uppdateringsläge',
-    '写入固件': 'Skriver firmwaren', '重启并核对新版本': 'Startar om och kontrollerar versionen', '更新完成': 'Firmwaren är installerad' };
+  const PHASES = { '准备升级程序': 'Starting update mode', '等待升级设备重新连接': 'Waiting for the FM-1 to restart in update mode',
+    '写入固件': 'Writing the firmware', '重启并核对新版本': 'Restarting and checking the version', '更新完成': 'The firmware is installed' };
   const ERRORS = [
-    [/USB 连接已断开|USB 意外断开/, 'USB-anslutningen bröts. Koppla in FM-1 igen och kör sidan en gång till.'],
-    [/打开 MIDI 端口超时/, 'MIDI-porten gick inte att öppna. Stäng andra MIDI-program och flikar och försök igen.'],
-    [/设备未响应|未回复型号/, 'FM-1 svarar inte på uppdateringsfrågan. Starta om FM-1, koppla in USB igen och försök på nytt.'],
-    [/未发现完整的 MIDI/, 'Ingen FM-1 hittades bland MIDI-portarna. Är den påslagen och inkopplad med en datakabel?'],
-    [/多台/, 'Flera möjliga FM-1 hittades. Koppla bara in en.'],
-    [/等待设备重连超时/, 'FM-1 kom inte tillbaka efter omstarten. Låt sidan vara öppen, koppla in igen och kör en gång till.'],
-    [/版本校验不一致/, 'FM-1 startade om men rapporterar en annan version än den som skrevs.'],
+    [/USB 连接已断开|USB 意外断开/, 'The USB connection was lost. Plug the FM-1 in again and run the page once more.'],
+    [/打开 MIDI 端口超时/, 'The MIDI port could not be opened. Close other MIDI programs and tabs and try again.'],
+    [/设备未响应|未回复型号/, 'The FM-1 does not answer the update query. Restart the FM-1, plug USB in again and try again.'],
+    [/未发现完整的 MIDI/, 'No FM-1 among the MIDI ports. Is it switched on and connected with a data cable?'],
+    [/多台/, 'Several possible FM-1s were found. Connect only one.'],
+    [/等待设备重连超时/, 'The FM-1 did not come back after the restart. Keep the page open, plug in again and run once more.'],
+    [/版本校验不一致/, 'The FM-1 restarted but reports a different version than the one written.'],
   ];
-  const swedish = e => { const m = e && e.message || String(e); const hit = ERRORS.find(([re]) => re.test(m)); return hit ? hit[1] + ' (' + m + ')' : m; };
+  const explain = e => { const m = e && e.message || String(e); const hit = ERRORS.find(([re]) => re.test(m)); return hit ? hit[1] + ' (' + m + ')' : m; };
 
   // A step's state and note; no note for an idle step puts its first text back.
   for (const li of document.querySelectorAll('ol.steps li')) { li.dataset.n = li.querySelector('.dot').textContent; li.dataset.note = li.querySelector('.step-note').textContent; }
@@ -183,7 +183,7 @@
       output.send(frame);
     });
   }
-  const UPLOAD_ERRORS = { 1: 'felaktig ram', 2: 'utanför flashen', 3: 'flashfel', 4: 'kontrollsumman stämmer inte', 5: 'ingen överföring pågår' };
+  const UPLOAD_ERRORS = { 1: 'malformed frame', 2: 'outside the flash', 3: 'flash error', 4: 'checksum mismatch', 5: 'no transfer in progress' };
 
   // The FM-1 running the SF2 player, found and checked with the updater's own identity query; its ports for the bank.
   async function findPlayer(access, waitMs) {
@@ -195,37 +195,37 @@
       if (device) {
         const { input, output } = device.link, identity = device.identity;
         await device.link.close();
-        if (identity !== pkg.product) throw new Error('FM-1 kör ' + identity + ', inte SF2-spelaren (' + pkg.product + ').');
+        if (identity !== pkg.product) throw new Error('The FM-1 runs ' + identity + ', not the SF2 player (' + pkg.product + ').');
         return { input, output };
       }
-      if (Date.now() > end) throw new Error('Hittade ingen FM-1 som kör SF2-spelaren.');
+      if (Date.now() > end) throw new Error('Found no FM-1 running the SF2 player.');
       await sleep(700);
     }
   }
   async function sendBank(access) {
-    step('bank', 'run', 'Söker FM-1 …');
+    step('bank', 'run', 'Looking for the FM-1 …');
     const { input, output } = await findPlayer(access, 30000);
-    if ($('s-connect').dataset.state !== 'done') step('connect', 'done', 'Hittade FM-1 med SF2-spelaren.');
+    if ($('s-connect').dataset.state !== 'done') step('connect', 'done', 'Found the FM-1 with the SF2 player.');
     await input.open(); await output.open();
     const frames = uploadFrames(bank), started = Date.now();
     try {
       for (const [i, frame] of frames.entries()) {
         const last = i === frames.length - 1, pct = Math.round(100 * i / frames.length);
-        step('bank', 'run', i === 0 ? 'Raderar samplingsflashen (upp till en minut) …' : last ? 'Kontrollerar banken …' : 'Skickar ' + kb(Math.min(bank.length, (i - 1) * 448)) + ' av ' + kb(bank.length), i ? pct : undefined);
+        step('bank', 'run', i === 0 ? 'Erasing the sample flash (up to a minute) …' : last ? 'Checking the bank …' : 'Sending ' + kb(Math.min(bank.length, (i - 1) * 448)) + ' of ' + kb(bank.length), i ? pct : undefined);
         progress(pct);
         let status = -1;
         for (let attempt = 0; attempt < 3 && status < 0; attempt++) {   // a lost frame is sent again: writing the same bytes twice is harmless
           try { status = await exchange(output, input, frame, i === 0 ? 90000 : last ? 30000 : 4000); } catch (e) { if (i === 0) break; }
         }
-        if (status < 0) throw new Error(i === 0 ? 'FM-1 svarade inte när flashen skulle raderas. Titta på raden UPLOAD på FM-1:s skärm.' : 'FM-1 slutade svara vid ram ' + (i + 1) + ' av ' + frames.length + '.');
-        if (status !== 0) throw new Error('FM-1 avvisade ram ' + (i + 1) + ': ' + (UPLOAD_ERRORS[status] || 'fel ' + status) + '.');
+        if (status < 0) throw new Error(i === 0 ? 'The FM-1 did not answer when the flash was to be erased. Look at the UPLOAD line on the FM-1\'s screen.' : 'The FM-1 stopped answering at frame ' + (i + 1) + ' of ' + frames.length + '.');
+        if (status !== 0) throw new Error('The FM-1 rejected frame ' + (i + 1) + ': ' + (UPLOAD_ERRORS[status] || 'error ' + status) + '.');
       }
     } finally { await Promise.allSettled([input.close(), output.close()]); }
-    step('bank', 'done', bankName + ' ligger i FM-1 (' + kb(bank.length) + ', ' + Math.round((Date.now() - started) / 1000) + ' s).', 100);
+    step('bank', 'done', bankName + ' is on the FM-1 (' + kb(bank.length) + ', ' + Math.round((Date.now() - started) / 1000) + ' s).', 100);
   }
 
   async function installFirmware(access) {
-    step('firmware', 'run', 'Ansluter …');
+    step('firmware', 'run', 'Connecting …');
     let lastPhase = '';
     // reconnect: the SDK waits 40 s; give Windows time to install the update loader's USB device the first time
     const updater = new FM1Web.Updater(access, pkg, (phase, pct) => {
@@ -238,9 +238,9 @@
       const d = updater.diagnostics, seen = JSON.stringify([d && d.attempts, device && device.identity]);
       if (seen !== updater.lastSeen) {
         updater.lastSeen = seen;
-        if (device) log('svar: "' + device.identity + '"');
-        for (const a of (d && d.attempts) || []) log('inget svar från "' + a.input + '" / "' + a.output + '": ' + a.error);
-        if (!device && d && !d.attempts.length) log('inga FM-1-portar; ingångar: ' + (d.inputs.join(', ') || 'inga') + '; utgångar: ' + (d.outputs.join(', ') || 'inga'));
+        if (device) log('reply: "' + device.identity + '"');
+        for (const a of (d && d.attempts) || []) log('no reply from "' + a.input + '" / "' + a.output + '": ' + a.error);
+        if (!device && d && !d.attempts.length) log('no FM-1 ports; inputs: ' + (d.inputs.join(', ') || 'none') + '; outputs: ' + (d.outputs.join(', ') || 'none'));
       }
       return device;
     };
@@ -265,63 +265,63 @@
     let device;
     try { device = await updater.connect(); }
     catch (e) { await updater.disconnect().catch(() => {}); throw e; }
-    step('connect', 'done', 'Hittade FM-1: ' + device.identity + '.');
+    step('connect', 'done', 'Found FM-1: ' + device.identity + '.');
     if (device.migration || device.legacy) {
       await updater.disconnect();
-      throw new Error('FM-1 kör ' + device.identity + ', inte SF2-spelarens firmware. Installera den med Workbench första gången; därefter fungerar den här sidan.');
+      throw new Error('The FM-1 runs ' + device.identity + ', not the SF2 player firmware. Install it with Workbench the first time; after that this page works.');
     }
-    if (device.same) { await updater.disconnect(); step('firmware', 'skip', 'Redan installerad, samma version.'); return; }
+    if (device.same) { await updater.disconnect(); step('firmware', 'skip', 'Already installed, same version.'); return; }
     progress(0);
     await updater.install();                                   // writes, restarts, and checks the version the FM-1 reports
-    step('firmware', 'done', 'Installerad och kontrollerad (' + pkg.release_version + ', ' + manifest.firmware.voices + ' röster).', 100);
+    step('firmware', 'done', 'Installed and checked (' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices).', 100);
   }
 
   async function install() {
     if (busy) return;
     const doFw = $('doFirmware').checked, doBank = $('doBank').checked;
-    if (!doFw && !doBank) { message('Välj firmware, ljudbank eller båda.', 'bad'); return; }
-    if (!navigator.requestMIDIAccess) { message('Webbläsaren saknar Web MIDI. Använd Chrome eller Edge.', 'bad'); return; }
+    if (!doFw && !doBank) { message('Choose firmware, sound bank or both.', 'bad'); return; }
+    if (!navigator.requestMIDIAccess) { message('This browser has no Web MIDI. Use Chrome or Edge.', 'bad'); return; }
     busy = true; $('install').disabled = true; message(''); progress(null);
     for (const s of ['connect', 'firmware', 'bank']) step(s, '', undefined);
     const started = Date.now();
     let current = 'connect';
     try {
-      step('connect', 'run', 'Väntar på MIDI-tillstånd …');
+      step('connect', 'run', 'Waiting for MIDI permission …');
       const access = await navigator.requestMIDIAccess({ sysex: true });
-      if (!access.sysexEnabled) throw new Error('Tillåt MIDI och SysEx för sidan.');
+      if (!access.sysexEnabled) throw new Error('Allow MIDI and SysEx for this page.');
       for (const p of [...access.inputs.values(), ...access.outputs.values()]) log('port: ' + portText(p));
       const known = new Map([...access.inputs.values(), ...access.outputs.values()].map(p => [p.id, p.state]));
       access.onstatechange = e => {                              // plugged in or out; the page's own open and close are not logged
         if (known.get(e.port.id) === e.port.state) return;
-        known.set(e.port.id, e.port.state); log('port ändrad: ' + portText(e.port));
+        known.set(e.port.id, e.port.state); log('port changed: ' + portText(e.port));
       };
-      step('connect', 'run', 'Söker FM-1 …');
+      step('connect', 'run', 'Looking for the FM-1 …');
       if (doFw) { current = 'firmware'; await installFirmware(access); }
-      else { step('firmware', 'skip', 'Hoppas över.'); }
+      else { step('firmware', 'skip', 'Skipped.'); }
       if (doBank) {
         current = 'bank';
         await sendBank(access);
-      } else step('bank', 'skip', 'Hoppas över.');
+      } else step('bank', 'skip', 'Skipped.');
       progress(null);
-      message('Klart. FM-1 spelar banken direkt; den finns kvar när du stänger av.', 'ok');
-      $('duration').textContent = 'Tog ' + Math.round((Date.now() - started) / 1000) + ' s.';
+      message('Done. The FM-1 plays the bank right away; it stays when you switch off.', 'ok');
+      $('duration').textContent = 'Took ' + Math.round((Date.now() - started) / 1000) + ' s.';
     } catch (e) {
       if (current === 'firmware' && $('s-connect').dataset.state === 'run') { current = 'connect'; step('firmware', ''); }
-      step(current, 'fail', swedish(e));
-      log('fel: ' + (e && e.message || e));
+      step(current, 'fail', explain(e));
+      log('error: ' + (e && e.message || e));
       $('logBox').open = true;
-      message('Installationen stannade. Se steget ovan.', 'bad');
+      message('The installation stopped. See the step above.', 'bad');
     } finally { busy = false; $('install').disabled = false; }
   }
   window.addEventListener('beforeunload', e => { if (busy) { e.preventDefault(); e.returnValue = ''; } });
 
   function showBank(bytes, name) {
-    if (bytes.length < 76 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'FM1B') throw new Error(name + ' är ingen FM1B-bank.');
-    if (bytes.length > 466944) throw new Error(name + ' (' + kb(bytes.length) + ') är större än FM-1:s samplingsflash (456 KB).');
+    if (bytes.length < 76 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'FM1B') throw new Error(name + ' is not an FM1B bank.');
+    if (bytes.length > 466944) throw new Error(name + ' (' + kb(bytes.length) + ') is larger than the FM-1\'s sample flash (456 KB).');
     const dv = new DataView(bytes.buffer, bytes.byteOffset), flags = dv.getUint16(6, true), presets = dv.getUint16(12, true);
     const format = flags & 8 ? 'BFP8' : flags & 2 ? 'SEA' : flags & 4 ? '12-bit' : flags & 1 ? '16-bit' : '8-bit';
     bank = bytes; bankName = name;
-    $('bankInfo').textContent = name + ': ' + kb(bytes.length) + ' (' + (100 * bytes.length / 466944).toFixed(1) + ' % av flashen), ' + presets + ' program, ' + format + ', ' + dv.getUint32(8, true) + ' Hz';
+    $('bankInfo').textContent = name + ': ' + kb(bytes.length) + ' (' + (100 * bytes.length / 466944).toFixed(1) + ' % of the flash), ' + presets + ' programs, ' + format + ', ' + dv.getUint32(8, true) + ' Hz';
   }
   $('bankFile').addEventListener('change', async () => {
     const f = $('bankFile').files[0]; if (!f) return;
@@ -332,18 +332,18 @@
   (async () => {
     try {
       const r = await fetch('dist/install/manifest.json', { cache: 'no-store' });
-      if (!r.ok) throw new Error('dist/install/manifest.json saknas. Kör node make_install.js efter att firmwaren byggts.');
+      if (!r.ok) throw new Error('dist/install/manifest.json is missing. Run node make_install.js after building the firmware.');
       manifest = await r.json();
       pkg = await FM1Web.prepare(manifest.firmware);            // fetches the package and checks its SHA-256, header and loader
-      $('fwInfo').textContent = 'SF2-spelaren ' + pkg.release_version + ', ' + manifest.firmware.voices + ' röster, ' + kb(pkg.bytes) + ', bygge ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
+      $('fwInfo').textContent = 'SF2 player ' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices, ' + kb(pkg.bytes) + ', build ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
       const b = await fetch(manifest.bank.url, { cache: 'no-store' });
       const bytes = new Uint8Array(await b.arrayBuffer());
-      if (bytes.length !== manifest.bank.bytes || crc32(bytes) !== manifest.bank.crc32) throw new Error('Banken i dist/install stämmer inte med manifestet. Kör node make_install.js igen.');
+      if (bytes.length !== manifest.bank.bytes || crc32(bytes) !== manifest.bank.crc32) throw new Error('The bank in dist/install does not match the manifest. Run node make_install.js again.');
       showBank(bytes, manifest.bank.source.split('/').pop());
       $('install').disabled = false;
     } catch (e) {
-      message(swedish(e), 'bad');
-      if (!pkg) $('fwInfo').textContent = 'Kunde inte läsas.';
+      message(explain(e), 'bad');
+      if (!pkg) $('fwInfo').textContent = 'Could not be read.';
     }
   })();
 })();

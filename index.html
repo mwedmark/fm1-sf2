@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SF2 till FM-1</title>
+<title>SF2 to FM-1</title>
 <style>
   :root {
     --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66;
@@ -55,12 +55,12 @@
 </head>
 <body>
 <main>
-  <h1>SF2 till FM-1</h1>
-  <p class="sub">Dra in en SoundFont. Allt sker i webbläsaren, filen lämnar aldrig datorn.</p>
+  <h1>SF2 to FM-1</h1>
+  <p class="sub">Drop in a SoundFont. Everything happens in the browser; the file never leaves your computer.</p>
 
   <label id="drop" for="file" tabindex="0">
-    <strong id="dropTitle">Släpp en .sf2-fil här</strong>
-    <span>eller klicka för att välja</span>
+    <strong id="dropTitle">Drop an .sf2 file here</strong>
+    <span>or click to choose one</span>
     <input id="file" type="file" accept=".sf2">
   </label>
 
@@ -68,55 +68,55 @@
     <p class="meta" id="info"></p>
     <label class="f"><span>Preset</span><select id="preset"></select></label>
     <div class="row">
-      <label class="f"><span>Kodning</span>
+      <label class="f"><span>Encoding</span>
         <select id="codec">
-          <option value="sea">SEA5 (FM-1:s eget format, 5,7 bit/sample)</option>
-          <option value="sea6">SEA6 (6,7 bit/sample, ca 5 dB mindre brus)</option>
-          <option value="bfp8" selected>BFP8 (8 bit med skala per 32 sampel, 8,25 bit/sample, lätt att avkoda)</option>
-          <option value="pcm">Rå PCM</option>
+          <option value="sea">SEA5 (the FM-1's own format, 5.7 bit/sample)</option>
+          <option value="sea6">SEA6 (6.7 bit/sample, about 5 dB less noise)</option>
+          <option value="bfp8" selected>BFP8 (8 bit with a scale per 32 samples, 8.25 bit/sample, easy to decode)</option>
+          <option value="pcm">Raw PCM</option>
         </select></label>
-      <label class="f"><span>Samplingsfrekvens</span>
+      <label class="f"><span>Sample rate</span>
         <select id="rate">
-          <option value="32000" selected>32 000 Hz (SEA)</option>
-          <option value="11029">11 029 Hz (FM-1 ÷ 4)</option>
-          <option value="14706">14 706 Hz (FM-1 ÷ 3)</option>
-          <option value="22059">22 059 Hz (FM-1 ÷ 2)</option>
-          <option value="44118">44 118 Hz (FM-1, hel)</option>
-          <option value="8000">8 000 Hz</option>
-          <option value="11025">11 025 Hz</option>
-          <option value="22050">22 050 Hz</option>
-          <option value="44100">44 100 Hz</option>
+          <option value="32000" selected>32,000 Hz (SEA)</option>
+          <option value="11029">11,029 Hz (FM-1 ÷ 4)</option>
+          <option value="14706">14,706 Hz (FM-1 ÷ 3)</option>
+          <option value="22059">22,059 Hz (FM-1 ÷ 2)</option>
+          <option value="44118">44,118 Hz (FM-1, full)</option>
+          <option value="8000">8,000 Hz</option>
+          <option value="11025">11,025 Hz</option>
+          <option value="22050">22,050 Hz</option>
+          <option value="44100">44,100 Hz</option>
         </select></label>
-      <label class="f"><span>Bitdjup</span>
+      <label class="f"><span>Bit depth</span>
         <select id="bits">
           <option value="8" selected>8 bit</option>
           <option value="12">12 bit</option>
           <option value="16">16 bit</option>
         </select></label>
     </div>
-    <div class="actions"><button id="go" class="primary">Konvertera</button></div>
+    <div class="actions"><button id="go" class="primary">Convert</button></div>
   </section>
 
   <section id="result" class="panel" hidden>
     <p class="meta" id="summary"></p>
     <div class="actions">
-      <button id="dlSf2">Ladda ned .sf2</button>
-      <button id="dlBin">Ladda ned .bin</button>
-      <button id="sendFm1" title="Skriver banken i FM-1:s flash över MIDI (SF2-spelarens firmware, Chrome/Edge med Web MIDI)">Skicka till FM-1</button>
-      <select id="midiOut" aria-label="MIDI-utgång till FM-1" hidden></select>
+      <button id="dlSf2">Download .sf2</button>
+      <button id="dlBin">Download .bin</button>
+      <button id="sendFm1" title="Writes the bank to the FM-1's flash over MIDI (SF2 player firmware, Chrome/Edge with Web MIDI)">Send to FM-1</button>
+      <select id="midiOut" aria-label="MIDI output to the FM-1" hidden></select>
     </div>
     <p class="meta" id="sendStatus" hidden></p>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Ljud</th><th class="n">Toner</th><th class="n">Grundton</th><th>Loop</th><th class="n">Byte</th></tr></thead>
+        <thead><tr><th>Sound</th><th class="n">Notes</th><th class="n">Root</th><th>Loop</th><th class="n">Bytes</th></tr></thead>
         <tbody id="zones"></tbody>
       </table>
     </div>
   </section>
   <section id="play" class="panel" hidden>
-    <label class="f"><span>Provspela i FM-1-simulatorn</span><select id="program"></select></label>
-    <div id="keys" class="keys" role="group" aria-label="Pianotangenter"></div>
-    <p class="meta" id="playHelp">Klicka på tangenterna eller spela med datorns tangentbord: a w s e d f t g y h u j k. Oktav ned/upp: z / x.</p>
+    <label class="f"><span>Try it in the FM-1 simulator</span><select id="program"></select></label>
+    <div id="keys" class="keys" role="group" aria-label="Piano keys"></div>
+    <p class="meta" id="playHelp">Click the keys or play with the computer keyboard: a w s e d f t g y h u j k. Octave down/up: z / x.</p>
   </section>
   <p id="err" class="warn" role="alert" hidden></p>
 </main>
@@ -132,7 +132,7 @@ function parseSf2(buf) {
   const dv = new DataView(buf);
   const u8 = new Uint8Array(buf);
   const str = (o, n) => { let s = ''; for (let i = 0; i < n; i++) { const c = u8[o + i]; if (!c) break; s += String.fromCharCode(c); } return s; };
-  if (buf.byteLength < 12 || str(0, 4) !== 'RIFF' || str(8, 4) !== 'sfbk') throw new Error('Det här är ingen SF2-fil (RIFF/sfbk saknas).');
+  if (buf.byteLength < 12 || str(0, 4) !== 'RIFF' || str(8, 4) !== 'sfbk') throw new Error('This is not an SF2 file (no RIFF/sfbk).');
 
   const chunks = {};
   let smplOff = 0, smplLen = 0;
@@ -150,8 +150,8 @@ function parseSf2(buf) {
     pos += 8 + size + (size & 1);
   }
   for (const k of ['phdr', 'pbag', 'pgen', 'inst', 'ibag', 'igen', 'shdr'])
-    if (!chunks[k]) throw new Error('SF2-filen saknar chunken ' + k + '.');
-  if (!smplLen) throw new Error('SF2-filen har ingen 16-bitars sampledata (smpl).');
+    if (!chunks[k]) throw new Error('The SF2 file has no ' + k + ' chunk.');
+  if (!smplLen) throw new Error('The SF2 file has no 16-bit sample data (smpl).');
 
   const recs = (name, size, fn) => {
     const c = chunks[name], out = [];
@@ -885,12 +885,12 @@ function writeSf2(bank, name) {
     $('info').textContent = fmtBytes(file.size) + ', ' + sf.presets.length + ' presets, ' + (sf.shdr.length - 1) + ' samples';
     const sel = $('preset'); sel.textContent = '';
     const allP = document.createElement('option');
-    allP.value = -2; allP.textContent = 'Alla presets med tonmappning (' + sf.presets.length + ' instrument)';
+    allP.value = -2; allP.textContent = 'All presets with key mapping (' + sf.presets.length + ' instruments)';
     sel.appendChild(allP);
     let pick = 0;
     sf.presets.forEach((p, i) => {
       const o = document.createElement('option');
-      o.value = i; o.textContent = (p.bank === 128 ? 'Trummor ' : 'Bank ' + p.bank + ' / ') + String(p.preset).padStart(3, '0') + '  ' + p.name;
+      o.value = i; o.textContent = (p.bank === 128 ? 'Drums ' : 'Bank ' + p.bank + ' / ') + String(p.preset).padStart(3, '0') + '  ' + p.name;
       sel.appendChild(o);
       if (p.bank === 0 && p.preset === 0 && !pick) pick = i;   // option 0 is "all", presets follow
     });
@@ -902,17 +902,17 @@ function writeSf2(bank, name) {
     showErr('');
     try {
       bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
-    } catch (e) { showErr('Konverteringen misslyckades: ' + e.message); return; }
-    if (!bank.zones.length) { $('result').hidden = true; showErr('Presetet har inga spelbara ljud.'); return; }
+    } catch (e) { showErr('The conversion failed: ' + e.message); return; }
+    if (!bank.zones.length) { $('result').hidden = true; showErr('The preset has no playable sounds.'); return; }
     const bin = writeFm1(bank);
-    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zoner, ' + bank.samples.length + ' unika ljud, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
+    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zones, ' + bank.samples.length + ' unique sounds, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
       '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
-      (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(mer än enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (ryms i enhetens samplebank på ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
-      (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets utanför bank 0/128 ingår inte i .bin)</span>' : '');
+      (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(more than the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (fits in the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
+      (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets outside bank 0/128 are not in the .bin)</span>' : '');
     const tb = $('zones'); tb.textContent = '';
     for (const z of bank.zones) {
       const tr = document.createElement('tr');
-      [z.presetName ? z.presetName + ': ' + z.sample.name : z.sample.name, noteName(z.lo) + ' – ' + noteName(z.hi), noteName(z.root), z.loop ? 'ja' : 'nej', z.sample.bytes.toLocaleString('sv-SE')]
+      [z.presetName ? z.presetName + ': ' + z.sample.name : z.sample.name, noteName(z.lo) + ' – ' + noteName(z.hi), noteName(z.root), z.loop ? 'yes' : 'no', z.sample.bytes.toLocaleString('en-US')]
         .forEach((t, i) => { const td = document.createElement('td'); td.textContent = t; if (i === 4) td.className = 'n'; tr.appendChild(td); });
       tb.appendChild(tr);
     }
@@ -932,7 +932,7 @@ function writeSf2(bank, name) {
         const raw = Uint8Array.from(atob(FM1_WASM_B64), ch => ch.charCodeAt(0));
         c = (await WebAssembly.instantiate(raw, {})).instance.exports;
         c._initialize(); c.sim_boot(1);
-        if (c.sim_select(0, 5) !== 0) throw new Error('Simulatorn kunde inte välja samplerspåret.');
+        if (c.sim_select(0, 5) !== 0) throw new Error('The simulator could not select the sampler track.');
       }
       if (!ctx) {
         ctx = new AudioContext({ sampleRate: 44100 });
@@ -959,7 +959,7 @@ function writeSf2(bank, name) {
         const p = dv.getUint16(bankMap + slot * 2, true);
         if (p === 0xffff) continue;
         let name = ''; for (let i = 0; i < 20 && bin[presets + p * 24 + 4 + i]; i++) name += String.fromCharCode(bin[presets + p * 24 + 4 + i]);
-        out.push({ slot, label: (slot < 128 ? 'Bank 0 / ' : 'Trummor ') + String(slot % 128).padStart(3, '0') + '  ' + name.trim() });
+        out.push({ slot, label: (slot < 128 ? 'Bank 0 / ' : 'Drums ') + String(slot % 128).padStart(3, '0') + '  ' + name.trim() });
       }
       return out;
     }
@@ -968,14 +968,14 @@ function writeSf2(bank, name) {
       if (!has) return;
       try {
         await start();
-        if (bin.length > c.sim_melodic_capacity()) throw new Error('Banken är för stor för simulatorn.');
+        if (bin.length > c.sim_melodic_capacity()) throw new Error('The bank is too large for the simulator.');
         new Uint8Array(c.memory.buffer, c.sim_melodic_buffer(), bin.length).set(bin);
-        if (c.sim_melodic_load(bin.length) !== 0) throw new Error('Simulatorn avvisade banken.');
+        if (c.sim_melodic_load(bin.length) !== 0) throw new Error('The simulator rejected the bank.');
         const sel = $('program'); sel.textContent = '';
         for (const p of programs(bin)) { const o = document.createElement('option'); o.value = p.slot; o.textContent = p.label; sel.appendChild(o); }
         select();
         loaded = true; $('play').hidden = false; drawKeys();
-      } catch (e) { showErr('Provspelning: ' + e.message); }
+      } catch (e) { showErr('Simulator: ' + e.message); }
     }
     function select() {
       const slot = +$('program').value;
@@ -1031,7 +1031,7 @@ function writeSf2(bank, name) {
   $('codec').addEventListener('change', syncCodec);
   syncCodec();
   $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank), baseName + '_fm1.bin', 'application/octet-stream'));
-  // ---- Skicka banken till FM-1 (SF2-spelarens firmware tar emot den som SysEx och skriver den i flashen) ----
+  // ---- Send the bank to the FM-1 (the SF2 player firmware receives it as SysEx and writes it to flash) ----
   const send = { access: null, busy: false };
   function sendMsg(text, bad) { const el = $('sendStatus'); el.hidden = !text; el.textContent = text || ''; el.className = bad ? 'meta warn' : 'meta'; }
   function midiPorts() {
@@ -1057,31 +1057,31 @@ function writeSf2(bank, name) {
       output.send(frame);
     });
   }
-  const SEND_ERRORS = { 1: 'felaktig ram', 2: 'utanför flashen', 3: 'flashfel', 4: 'kontrollsumman stämmer inte', 5: 'ingen överföring pågår' };
+  const SEND_ERRORS = { 1: 'malformed frame', 2: 'outside the flash', 3: 'flash error', 4: 'checksum mismatch', 5: 'no transfer in progress' };
   async function sendBank() {
     if (send.busy || !bank) return;
     const bin = writeFm1(bank);
-    if (bin.length > FM1_SAMPLE_BANK) { sendMsg('Banken (' + fmtBytes(bin.length) + ') är större än flashen (' + fmtBytes(FM1_SAMPLE_BANK) + ').', true); return; }
-    if (!navigator.requestMIDIAccess) { sendMsg('Webbläsaren saknar Web MIDI. Använd Chrome eller Edge.', true); return; }
+    if (bin.length > FM1_SAMPLE_BANK) { sendMsg('The bank (' + fmtBytes(bin.length) + ') is larger than the flash (' + fmtBytes(FM1_SAMPLE_BANK) + ').', true); return; }
+    if (!navigator.requestMIDIAccess) { sendMsg('This browser has no Web MIDI. Use Chrome or Edge.', true); return; }
     try {
       if (!send.access) send.access = await navigator.requestMIDIAccess({ sysex: true });
-      if (!midiPorts()) { sendMsg('Ingen MIDI-utgång hittades. Anslut FM-1 med USB och försök igen.', true); return; }
+      if (!midiPorts()) { sendMsg('No MIDI output found. Connect the FM-1 over USB and try again.', true); return; }
       const output = send.access.outputs.get($('midiOut').value);
       const input = [...send.access.inputs.values()].find(i => i.name === output.name) || [...send.access.inputs.values()].find(i => /fm-?1/i.test(i.name));
-      if (!input) { sendMsg('Hittade ingen MIDI-ingång som hör till ' + output.name + ' (svaret från FM-1 behövs).', true); return; }
+      if (!input) { sendMsg('Found no MIDI input belonging to ' + output.name + ' (the FM-1\'s reply is needed).', true); return; }
       await input.open(); await output.open();
       send.busy = true; $('sendFm1').disabled = true;
       const frames = uploadFrames(bin);
       for (const [i, frame] of frames.entries()) {
-        sendMsg(i === 0 ? 'Raderar flashen i FM-1 ...' : i === frames.length - 1 ? 'Kontrollerar banken ...' : 'Skickar ' + Math.round(100 * i / frames.length) + ' %');
+        sendMsg(i === 0 ? 'Erasing the FM-1\'s flash ...' : i === frames.length - 1 ? 'Checking the bank ...' : 'Sending ' + Math.round(100 * i / frames.length) + ' %');
         let status = -1;
         for (let attempt = 0; attempt < 3 && status < 0; attempt++) {     // a lost frame is sent again: writing the same bytes twice is harmless
           try { status = await exchange(output, input, frame, i === 0 ? 30000 : 3000); } catch (e) { if (i === 0) break; }
         }
-        if (status < 0) throw new Error('FM-1 svarar inte. Kör den SF2-spelarens firmware?');
-        if (status !== 0) throw new Error('FM-1 avvisade ramen ' + (i + 1) + ': ' + (SEND_ERRORS[status] || 'fel ' + status));
+        if (status < 0) throw new Error('The FM-1 does not answer. Is it running the SF2 player firmware?');
+        if (status !== 0) throw new Error('The FM-1 rejected frame ' + (i + 1) + ': ' + (SEND_ERRORS[status] || 'error ' + status));
       }
-      sendMsg('Klart: ' + fmtBytes(bin.length) + ' ligger i FM-1:s flash och spelas direkt. Den ligger kvar när den stängs av.');
+      sendMsg('Done: ' + fmtBytes(bin.length) + ' is in the FM-1\'s flash and plays right away. It stays when the FM-1 is switched off.');
     } catch (e) {
       sendMsg(e.message || String(e), true);
     } finally {
