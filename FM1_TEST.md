@@ -67,6 +67,7 @@ banken i ett svep. Notera i så fall tid och vad sidan visade för varje steg.
 | C11 | Spela `mt.mid` (eller en MIDI-fil med flera kanaler). Kanalsidan: markera kanal 2, tryck ARP. Tryck ARP igen. | Kanal 2 tystnar mjukt, utan klick, medan resten spelar vidare; raden blir mörkgrå med `M` sist och ARP lyser. Igen: nästa ton på kanalen hörs, `M` och lampan släcks. | |
 | C12 | Markera en kanal, tryck SEQ. Flytta markören till en annan kanal och tryck SEQ. Tryck SEQ igen. | Bara den kanalen hörs (`S` sist, övriga rader mörkgrå, rubriken säger `SOLO`, SEQ lyser på den raden). Solot flyttar till den nya kanalen. Igen: alla hörs, `SOLO` försvinner. | |
 | C13 | Mute på en kanal som spelar många toner, titta på `CHANNELS n/32`. | Röstantalet sjunker när kanalen tystnat (tystade kanaler kostar ingen CPU). | |
+| C14 | Spela en tät MIDI-fil, titta på `CPU a% MAX p%` (huvudsidan: raden VOICES; kanalsidan: näst sista raden). | Värdena följer musiken; MAX står kvar ungefär en sekund. Raden blir orange när spärren sänkt röstgränsen. Notera CPU och MAX när gränsen sjunker. | |
 
 ## D. MIDI in (USB, DIN, BLE)
 
@@ -92,10 +93,11 @@ Spela `test_emu\midi\mt.mid` och `drums.mid` från Windows till FM-1, en gång p
 
 ## E. Last och CPU-spärr
 
-Spela filerna en i taget. Lyssna efter knaster och avbrott, och titta på raden `VOICES n/32`: står det `CPU` efter har spärren
-sänkt gränsen.
+Spela filerna en i taget. Lyssna efter knaster och avbrott, och titta på raden `VOICES n/32 CPU a% MAX p%`: `a` är ljudavbrottets
+medellast, `p` det högsta blocket den senaste sekunden. Är talet efter snedstrecket under 32 (och raden orange) har spärren sänkt
+gränsen. Kanalsidan visar samma CPU-värden på näst sista raden. Skriv gärna ned CPU och MAX i kolumnen.
 
-| # | Fil | Väntat i emulatorn (240 MHz) | Knaster? | `CPU` visas? |
+| # | Fil | Väntat i emulatorn (240 MHz) | Knaster? | CPU / MAX, gräns under 32? |
 | --- | --- | --- | --- | --- |
 | E1 | `load24_all.mid` | 38-42 % | | |
 | E2 | `load32_plain.mid` | 43-44 % | | |
@@ -107,7 +109,7 @@ sänkt gränsen.
 | E8 | `load32_filter.mid` (32 toner på Saw Wave, Warm Pad, Organ 2, Synth Bass 1, alla med filter) | 60-70 %, topp 76-92 %: `CPU` kan visas | | |
 
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
-Om det knastrar eller `CPU` visas ofta: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).
+Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).
 
 ## G. Avsluta
 

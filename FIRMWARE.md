@@ -142,3 +142,6 @@ each channel has a gate (Q14) that fades in 20 ms and multiplies its volume in `
 otherwise, output bit exact). A faded voice stops and a silent channel's note-ons are not started, so mute saves CPU. **MASTER** is
 always the main volume (`groove_master_update`); the selected channel's volume (CC 7) is on **ALGORITHM** (encoder 1). See RUNNING.md
 section 7.
+
+**CPU on the panel** (2026-11-04): `sf2out_load` also keeps the audio interrupt's load (average over about 0.1 s, highest block), read
+by `sf2out_cpu`; both pages show `CPU a% MAX p%`, orange while the CPU guard holds the voice limit down (RUNNING.md section 7).

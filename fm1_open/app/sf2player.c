@@ -9,6 +9,7 @@
 #include "fm1b_config.h"
 #include "sf2_upload.h"
 #include "sf2fx.h"
+#include "sf2out.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
@@ -187,6 +188,30 @@ static unsigned bar_drawn = 1000;                         /* the level bar's wid
 static uint8_t channel_notes_seen[FM1B_CHANNELS];
 static uint32_t channel_hit[FM1B_CHANNELS];               /* fm1_millis() of the latest note-on seen on the channel */
 
+/* The audio interrupt's share of a block (sf2out_cpu): the average, and the highest block held for a second so it can be read.
+ * Over 80 % the CPU guard lowers the voice limit. Read once a screen update. */
+static unsigned cpu_average, cpu_peak;
+static uint32_t cpu_peak_at;
+static void cpu_read(void)
+{
+    unsigned peak;
+    sf2out_cpu(&cpu_average, &peak);
+    uint32_t now = fm1_millis();
+    if (peak >= cpu_peak || now - cpu_peak_at >= 1000U) {
+        cpu_peak = peak;
+        cpu_peak_at = now;
+    }
+}
+/* "CPU 45% MAX 72%" */
+static char *put_cpu(char *d)
+{
+    d = put_text(d, "CPU ");
+    d = put_number(d, (int32_t)cpu_average, 0);
+    d = put_text(d, "% MAX ");
+    d = put_number(d, (int32_t)cpu_peak, 0);
+    *d++ = '%';
+    return d;
+}
 static void page_clear(void)
 {
     fm1_screen_fill(0, 0, FM1_SCREEN_WIDTH, FM1_SCREEN_HEIGHT, BACKGROUND);
@@ -313,8 +338,10 @@ static void channels_update(const struct fm1b_status *st)
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
     }
-    line_show(19, 218, "ARP MUTE  SEQ SOLO  ALGORITHM VOLUME", 1, GREY);
-    line_show(18, 228, "HOME K1 CH SEL PRG K2 PAN K3/4 FX", 1, GREY);
+    d = put_cpu(put_text(line, "ARP MUTE SEQ SOLO  "));
+    *d = 0;
+    line_show(19, 218, line, 1, st->voice_limit < FM1B_VOICES ? ORANGE : GREY);   /* orange: the guard holds the limit down */
+    line_show(18, 228, "K1 CH SEL PRG ALG VOL K2 PAN K3/4 FX", 1, GREY);
 }
 
 static void screen_update(void)
@@ -322,6 +349,7 @@ static void screen_update(void)
     struct fm1b_status st;
     char line[LINE_CHARS + 1], *d;
     fm1b_status(&st);
+    cpu_read();
     if (!st.ready) {
         if (page) { page = 0; page_clear(); }
         line_show(0, 8, "NO BANK", 2, ORANGE);
@@ -417,10 +445,11 @@ static void screen_update(void)
     d = put_number(d, st.voices, 0);
     d = put_text(d, "/");
     d = put_number(d, st.voice_limit, 0);
-    if (st.voice_limit < FM1B_VOICES) d = put_text(d, " CPU");   /* the guard holds the limit down */
-    if (st.level) { d = put_text(d, "   PHASE "); *d++ = phases[st.phase < 5 ? st.phase : 4]; }
+    *d++ = ' ';
+    d = put_cpu(d);
+    if (st.level) { d = put_text(d, " PHASE "); *d++ = phases[st.phase < 5 ? st.phase : 4]; }
     *d = 0;
-    line_show(6, 140, line, 1, GREY);
+    line_show(6, 140, line, 1, st.voice_limit < FM1B_VOICES ? ORANGE : GREY);   /* orange: the guard holds the limit down */
     upload_line();
     d = put_text(line, "MASTER REV ");
     d = put_number(d, (int32_t)sf2fx_reverb(), 0);

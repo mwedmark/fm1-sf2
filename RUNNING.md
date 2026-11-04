@@ -345,7 +345,19 @@ a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275
 script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
 Limits: 32 voices in total on the device (oldest is stolen first; 8, then 16, then 24 until 2026-11-02), fewer while the CPU guard holds
-the limit down (the panel then shows `VOICES n/limit CPU`).
+the limit down: the number after the slash is then under 32 and the line is orange.
+
+**CPU on the panel (2026-11-04).** The program page's `VOICES n/limit CPU a% MAX p%` and the channel page's bottom line
+`ARP MUTE SEQ SOLO  CPU a% MAX p%` show the audio interrupt's time as a share of a block (2.9 ms), the same figure the CPU guard reads
+(`sf2out_cpu`): `a` the average over about 0.1 s, `p` the highest block, held for a second. Both lines turn orange while the guard
+holds the voice limit under 32. The control task (screen, buttons, MIDI) runs in what is left, so this is not the whole CPU.
+
+Why the limit can stay at e.g. 17 (seen on the FM-1 on 2026-11-04): the guard (`sf2out.c`, `sf2out_load`) looks at every block. One
+block over 80 % sets the limit to the voices sounding then minus one (two over 95 %), and the oldest voices fade out; that is the
+"many sounds muted". Note starts cost the most (a new voice decodes its first groups, a filter is set up), so a chord or a drum hit on
+top of many voices can give one such block even when the average is far lower. The limit then rises only by one voice per 0.25 s, and
+only while every block stays under 60 %: busy music between 60 and 80 % keeps it where it fell. The new display shows whether that
+is what happens (MAX over 80 % while the average is lower). Not changed yet.
 
 **Pan (2026-11-02).** Each voice's pan is its zone's (SF2 generator 17, stored in the zone record, FORMAT.md) plus its channel's CC10,
 with the same balance law as KNOB2: the near side keeps its level, the far side is sqrt(1 - |p| / 64). The engine still mixes one mono
