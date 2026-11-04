@@ -166,9 +166,33 @@ static inline __attribute__((always_inline)) int region_ok(uint32_t offset, uint
     return offset <= bank.bytes && size <= bank.bytes - offset;
 }
 
+/* FM1B_INTERP4: the sample between two frames from four frames (Catmull-Rom, as FluidSynth's 4-point interpolation) in
+ * place of two. Linear interpolation loses -0.7 dB at 4 kHz and -3 dB at 8 kHz of a 32 kHz bank; this keeps the top within
+ * a few tenths of a dB. interp4[i] are the four weights for a fraction of i / 256, Q14, summing to 16384 (2 KB, in RAM). */
+#ifndef FM1B_INTERP4
+#define FM1B_INTERP4 1
+#endif
+#if FM1B_INTERP4
+static int16_t interp4[256][4];
+static void interp4_make(void)
+{
+    for (int32_t i = 0; i < 256; ++i) {                       /* t = i / 256; each weight times 2^25, rounded to Q14 (>> 11) */
+        int32_t t2 = i * i * 256, t3 = i * i * i, t1 = i * 65536;
+        int32_t c0 = (-t3 + 2 * t2 - t1 + 1024) >> 11, c2 = (-3 * t3 + 4 * t2 + t1 + 1024) >> 11, c3 = (t3 - t2 + 1024) >> 11;
+        interp4[i][0] = (int16_t)c0;
+        interp4[i][1] = (int16_t)(16384 - c0 - c2 - c3);
+        interp4[i][2] = (int16_t)c2;
+        interp4[i][3] = (int16_t)c3;
+    }
+}
+#endif
 int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
 {
     fm1b_panic();
+#if FM1B_INTERP4
+    if (!interp4[0][1])
+        interp4_make();
+#endif
     bank.image = NULL;
     bank.preset = -1;
     bank.drum_preset = -1;
@@ -1212,8 +1236,28 @@ static inline __attribute__((always_inline)) void voice_run(struct voice *v, int
             if (le && next >= le)
                 next = ls;
             level += level_step;
+#if FM1B_INTERP4
+            const int16_t *w = interp4[fraction >> 8];
+            int32_t x;
+            uint32_t in = (position - 1U) % BFP_GROUP;
+            if (format == FORMAT_BFP8 && position && in < BFP_GROUP - 3U && position + 2U < length && (!le || position + 2U < le)) {
+                /* the four frames in one group, no loop end among them (29 frames of 32): one shift, after the weighted sum */
+                const uint8_t *group = pcm + ((position - 1U) / BFP_GROUP) * BFP_GROUP_BYTES;
+                const int8_t *m = (const int8_t *)group + 1 + in;
+                unsigned shift = group[0] < 8U ? group[0] : 8U;
+                x = ((m[0] * w[0] + m[1] * w[1] + m[2] * w[2] + m[3] * w[3]) * (1 << shift)) >> 10;
+            } else {
+                uint32_t after = next + 1;                    /* the frame before is the one before in the bank, also at a loop start */
+                if (le && after >= le)
+                    after = ls;
+                int32_t a = sample_at(v, pcm, position, format), b = next < length ? sample_at(v, pcm, next, format) : 0;
+                int32_t p = position ? sample_at(v, pcm, position - 1, format) : a, c = after < length ? sample_at(v, pcm, after, format) : 0;
+                x = (p * w[0] + a * w[1] + b * w[2] + c * w[3]) >> 10;   /* Q4; the weights' sum of magnitudes under 1.25 */
+            }
+#else
             int32_t a = sample_at(v, pcm, position, format), b = next < length ? sample_at(v, pcm, next, format) : 0;
             int32_t x = a * 16 + (((b - a) * (int32_t)(fraction >> 1)) >> 11);   /* Q4; (b - a) * 15 bits stays in 32 */
+#endif
             int32_t y = (int32_t)(((int64_t)x * level) >> 25);
             out[i] += y;
             if (bus) {

@@ -7,3 +7,6 @@ test_fx/fx_test.wasm
 test_mt/*.wasm
 emu/
 test_rate/*.wasm
+tools/fluidsynth/
+test_fluid/*.wasm
+test_fluid/out/
