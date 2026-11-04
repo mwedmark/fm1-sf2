@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installera på FM-1</title>
+<!-- Installs the SF2 player on an FM-1 in one go: the firmware with the SDK's own browser updater (fm1_open/sdk/WebUpdate.js, the
+     protocol M-VAVE's workbench uses), then the bank with the player's SysEx upload (sf2_upload.c, as index.html sends it).
+     Serve the repository (python -m http.server 8765) and open http://localhost:8765/install.html; node make_install.js puts the
+     files it installs in dist/install/. -->
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66;
+    --line: #dcdcd5; --accent: #1f6feb; --accent-ink: #ffffff; --ok: #1a7f37; --warn: #9a6700; --bad: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92;
+      --line: #34342f; --accent: #5b9bff; --accent-ink: #0b1220; --ok: #56d364; --warn: #e3b341; --bad: #ff7b72;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 10px; }
+  dl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  code { font-size: 13px; }
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+  ol.steps li:first-child { border-top: 0; padding-top: 0; }
+  .dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+  li[data-state=run] .dot { border-color: var(--accent); color: var(--accent); }
+  li[data-state=done] .dot { border-color: var(--ok); background: var(--ok); color: var(--panel); }
+  li[data-state=skip] .dot { border-style: dashed; }
+  li[data-state=fail] .dot { border-color: var(--bad); background: var(--bad); color: var(--panel); }
+  .step-title { font-weight: 600; }
+  .step-note { color: var(--muted); font-size: 13px; }
+  li[data-state=fail] .step-note { color: var(--bad); }
+  .step-pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 3.5em; text-align: right; }
+  label.check { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+  button, input { font: inherit; }
+  button { padding: 10px 18px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  progress { width: 100%; height: 8px; accent-color: var(--accent); margin-top: 12px; }
+  #message { min-height: 1.5em; margin: 10px 0 0; }
+  #message.bad { color: var(--bad); }
+  #message.ok { color: var(--ok); font-weight: 600; }
+  .warn { color: var(--warn); font-size: 13px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  input[type=file] { max-width: 100%; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Installera på FM-1</h1>
+  <p class="sub">Firmware och ljudbank i ett steg, över USB-MIDI. Använd Chrome eller Edge.</p>
+
+  <section class="panel">
+    <h2>Det här installeras</h2>
+    <dl>
+      <dt>Firmware</dt><dd id="fwInfo">Läser in …</dd>
+      <dt>Ljudbank</dt><dd id="bankInfo">Läser in …</dd>
+    </dl>
+    <details style="margin-top:10px">
+      <summary>Välj en annan bank</summary>
+      <p class="muted">En FM1B-bank från konverteraren (knappen som sparar <code>_fm1.bin</code>), eller en <code>.fm1b</code>.</p>
+      <input type="file" id="bankFile" accept=".fm1b,.bin">
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>Steg</h2>
+    <ol class="steps">
+      <li id="s-connect"><span class="dot">1</span><div><div class="step-title">Hitta FM-1</div><div class="step-note">Via USB-MIDI. Webbläsaren frågar om MIDI/SysEx.</div></div><span class="step-pct"></span></li>
+      <li id="s-firmware"><span class="dot">2</span><div><div class="step-title">Firmware</div><div class="step-note">Hoppas över om FM-1 redan har just den här versionen.</div></div><span class="step-pct"></span></li>
+      <li id="s-bank"><span class="dot">3</span><div><div class="step-title">Ljudbank</div><div class="step-note">Raderar och skriver samplingsflashen, kontrollerar sedan summan.</div></div><span class="step-pct"></span></li>
+    </ol>
+    <label class="check"><input type="checkbox" id="doFirmware" checked> Installera firmware</label>
+    <label class="check"><input type="checkbox" id="doBank" checked> Skicka ljudbanken</label>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <div class="actions">
+      <button class="primary" id="install" disabled>Installera</button>
+      <span class="muted" id="duration"></span>
+    </div>
+    <p id="message" role="status"></p>
+    <p class="warn">Dra inte ur kabeln och låt FM-1 ha ström tills sidan säger att det är klart. Stäng andra program och flikar som använder FM-1:s MIDI-port (Workbench, DAW, MIDIberry).</p>
+  </section>
+
+  <details class="panel">
+    <summary>Om något går fel</summary>
+    <ul class="muted">
+      <li>Firmwaren skrivs av M-VAVE:s egen uppdateringsladdare, samma väg som Workbench. Om den avbryts: koppla in igen och kör sidan en gång till, den fortsätter där FM-1 är.</li>
+      <li>Kör FM-1 originalfirmwaren (V15) eller en annan firmware, installera SF2-firmwaren med <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> första gången. Sidan flashar bara över SF2-spelarens egen firmware.</li>
+      <li>Banken ligger i samplingsflashen och finns kvar när firmwaren uppdateras. Den behöver bara skickas när den har ändrats.</li>
+      <li>Under banköverföringen visar FM-1 <code>UPLOAD n Rx</code>; <code>R0</code> är bra, <code>R3</code> är ett flashfel.</li>
+    </ul>
+  </details>
+</main>
+<script src="fm1_open/sdk/WebUpdate.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const kb = n => (n / 1024).toFixed(0) + ' KB';
+  let manifest, pkg, bank, bankName = '', busy = false;
+
+  // The SDK's updater reports its phases in Chinese; these are the ones a normal update passes.
+  const PHASES = { '准备升级程序': 'Startar uppdateringsläget', '等待升级设备重新连接': 'Väntar på att FM-1 startar om i uppdateringsläge',
+    '写入固件': 'Skriver firmwaren', '重启并核对新版本': 'Startar om och kontrollerar versionen', '更新完成': 'Firmwaren är installerad' };
+  const ERRORS = [
+    [/USB 连接已断开|USB 意外断开/, 'USB-anslutningen bröts. Koppla in FM-1 igen och kör sidan en gång till.'],
+    [/打开 MIDI 端口超时/, 'MIDI-porten gick inte att öppna. Stäng andra MIDI-program och flikar och försök igen.'],
+    [/设备未响应|未回复型号/, 'FM-1 svarar inte på uppdateringsfrågan. Starta om FM-1, koppla in USB igen och försök på nytt.'],
+    [/未发现完整的 MIDI/, 'Ingen FM-1 hittades bland MIDI-portarna. Är den påslagen och inkopplad med en datakabel?'],
+    [/多台/, 'Flera möjliga FM-1 hittades. Koppla bara in en.'],
+    [/等待设备重连超时/, 'FM-1 kom inte tillbaka efter omstarten. Låt sidan vara öppen, koppla in igen och kör en gång till.'],
+    [/版本校验不一致/, 'FM-1 startade om men rapporterar en annan version än den som skrevs.'],
+  ];
+  const swedish = e => { const m = e && e.message || String(e); const hit = ERRORS.find(([re]) => re.test(m)); return hit ? hit[1] + ' (' + m + ')' : m; };
+
+  // A step's state and note; no note for an idle step puts its first text back.
+  for (const li of document.querySelectorAll('ol.steps li')) { li.dataset.n = li.querySelector('.dot').textContent; li.dataset.note = li.querySelector('.step-note').textContent; }
+  function step(id, state, note, pct) {
+    const li = $('s-' + id);
+    li.dataset.state = state;
+    li.querySelector('.step-note').textContent = note !== undefined ? note : state ? li.querySelector('.step-note').textContent : li.dataset.note;
+    li.querySelector('.step-pct').textContent = pct === undefined ? '' : pct + ' %';
+    li.querySelector('.dot').textContent = state === 'done' ? '✓' : state === 'fail' ? '!' : li.dataset.n;
+  }
+  function message(text, kind) { const el = $('message'); el.textContent = text || ''; el.className = kind || ''; }
+  function progress(value) { const p = $('progress'); p.hidden = value === null; if (value !== null) p.value = value; }
+
+  // ---- The bank upload: F0 7D 'S' 'F' 02 cmd ... F7, answered by cmd | 0x40 and a status (sf2_upload.c) ----
+  function crc32(bytes) { let c = 0xffffffff; for (let i = 0; i < bytes.length; i++) { c ^= bytes[i]; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return (~c) >>> 0; }
+  const num35 = v => [v & 127, (v >>> 7) & 127, (v >>> 14) & 127, (v >>> 21) & 127, (v >>> 28) & 127];
+  function packSysex(bytes) {
+    const out = [];
+    for (let i = 0; i < bytes.length; i += 7) {
+      const n = Math.min(7, bytes.length - i); let high = 0;
+      for (let k = 0; k < n; k++) high |= (bytes[i + k] >> 7) << k;
+      out.push(high); for (let k = 0; k < n; k++) out.push(bytes[i + k] & 127);
+    }
+    return out;
+  }
+  function uploadFrames(bin, chunk = 448) {
+    const head = [0xf0, 0x7d, 0x53, 0x46, 2], frames = [Uint8Array.from([...head, 1, ...num35(bin.length), 0xf7])];
+    for (let at = 0; at < bin.length; at += chunk) frames.push(Uint8Array.from([...head, 2, ...num35(at), ...packSysex(bin.subarray(at, at + chunk)), 0xf7]));
+    frames.push(Uint8Array.from([...head, 3, ...num35(crc32(bin)), 0xf7]));
+    return frames;
+  }
+  function exchange(output, input, frame, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { input.removeEventListener('midimessage', on); reject(new Error('timeout')); }, ms);
+      function on(e) {
+        const d = e.data;
+        if (d.length === 8 && d[0] === 0xf0 && d[1] === 0x7d && d[2] === 0x53 && d[3] === 0x46 && d[4] === 2 && d[5] === (frame[5] | 0x40)) {
+          clearTimeout(timer); input.removeEventListener('midimessage', on); resolve(d[6]);
+        }
+      }
+      input.addEventListener('midimessage', on);
+      output.send(frame);
+    });
+  }
+  const UPLOAD_ERRORS = { 1: 'felaktig ram', 2: 'utanför flashen', 3: 'flashfel', 4: 'kontrollsumman stämmer inte', 5: 'ingen överföring pågår' };
+
+  // The FM-1 running the SF2 player, found and checked with the updater's own identity query; its ports for the bank.
+  async function findPlayer(access, waitMs) {
+    const end = Date.now() + waitMs;
+    for (;;) {
+      const probe = new FM1Web.Updater(access, pkg, () => {});
+      let device = null;
+      try { device = await probe.discover(); } catch (e) { if (e.code === 'AMBIGUOUS') throw e; }
+      if (device) {
+        const { input, output } = device.link, identity = device.identity;
+        await device.link.close();
+        if (identity !== pkg.product) throw new Error('FM-1 kör ' + identity + ', inte SF2-spelaren (' + pkg.product + ').');
+        return { input, output };
+      }
+      if (Date.now() > end) throw new Error('Hittade ingen FM-1 som kör SF2-spelaren.');
+      await sleep(700);
+    }
+  }
+  async function sendBank(access) {
+    step('bank', 'run', 'Söker FM-1 …');
+    const { input, output } = await findPlayer(access, 30000);
+    if ($('s-connect').dataset.state !== 'done') step('connect', 'done', 'Hittade FM-1 med SF2-spelaren.');
+    await input.open(); await output.open();
+    const frames = uploadFrames(bank), started = Date.now();
+    try {
+      for (const [i, frame] of frames.entries()) {
+        const last = i === frames.length - 1, pct = Math.round(100 * i / frames.length);
+        step('bank', 'run', i === 0 ? 'Raderar samplingsflashen (upp till en minut) …' : last ? 'Kontrollerar banken …' : 'Skickar ' + kb(Math.min(bank.length, (i - 1) * 448)) + ' av ' + kb(bank.length), i ? pct : undefined);
+        progress(pct);
+        let status = -1;
+        for (let attempt = 0; attempt < 3 && status < 0; attempt++) {   // a lost frame is sent again: writing the same bytes twice is harmless
+          try { status = await exchange(output, input, frame, i === 0 ? 90000 : last ? 30000 : 4000); } catch (e) { if (i === 0) break; }
+        }
+        if (status < 0) throw new Error(i === 0 ? 'FM-1 svarade inte när flashen skulle raderas. Titta på raden UPLOAD på FM-1:s skärm.' : 'FM-1 slutade svara vid ram ' + (i + 1) + ' av ' + frames.length + '.');
+        if (status !== 0) throw new Error('FM-1 avvisade ram ' + (i + 1) + ': ' + (UPLOAD_ERRORS[status] || 'fel ' + status) + '.');
+      }
+    } finally { await Promise.allSettled([input.close(), output.close()]); }
+    step('bank', 'done', bankName + ' ligger i FM-1 (' + kb(bank.length) + ', ' + Math.round((Date.now() - started) / 1000) + ' s).', 100);
+  }
+
+  async function installFirmware(access) {
+    step('firmware', 'run', 'Ansluter …');
+    const updater = new FM1Web.Updater(access, pkg, (phase, pct) => step('firmware', 'run', PHASES[phase] || phase, pct));
+    let device;
+    try { device = await updater.connect(); }
+    catch (e) { await updater.disconnect().catch(() => {}); throw e; }
+    step('connect', 'done', 'Hittade FM-1: ' + device.identity + '.');
+    if (device.migration || device.legacy) {
+      await updater.disconnect();
+      throw new Error('FM-1 kör ' + device.identity + ', inte SF2-spelarens firmware. Installera den med Workbench första gången; därefter fungerar den här sidan.');
+    }
+    if (device.same) { await updater.disconnect(); step('firmware', 'skip', 'Redan installerad, samma version.'); return; }
+    progress(0);
+    await updater.install();                                   // writes, restarts, and checks the version the FM-1 reports
+    step('firmware', 'done', 'Installerad och kontrollerad (' + pkg.release_version + ', ' + manifest.firmware.voices + ' röster).', 100);
+  }
+
+  async function install() {
+    if (busy) return;
+    const doFw = $('doFirmware').checked, doBank = $('doBank').checked;
+    if (!doFw && !doBank) { message('Välj firmware, ljudbank eller båda.', 'bad'); return; }
+    if (!navigator.requestMIDIAccess) { message('Webbläsaren saknar Web MIDI. Använd Chrome eller Edge.', 'bad'); return; }
+    busy = true; $('install').disabled = true; message(''); progress(null);
+    for (const s of ['connect', 'firmware', 'bank']) step(s, '', undefined);
+    const started = Date.now();
+    let current = 'connect';
+    try {
+      step('connect', 'run', 'Väntar på MIDI-tillstånd …');
+      const access = await navigator.requestMIDIAccess({ sysex: true });
+      if (!access.sysexEnabled) throw new Error('Tillåt MIDI och SysEx för sidan.');
+      step('connect', 'run', 'Söker FM-1 …');
+      if (doFw) { current = 'firmware'; await installFirmware(access); }
+      else { step('firmware', 'skip', 'Hoppas över.'); }
+      if (doBank) {
+        current = 'bank';
+        await sendBank(access);
+      } else step('bank', 'skip', 'Hoppas över.');
+      progress(null);
+      message('Klart. FM-1 spelar banken direkt; den finns kvar när du stänger av.', 'ok');
+      $('duration').textContent = 'Tog ' + Math.round((Date.now() - started) / 1000) + ' s.';
+    } catch (e) {
+      if (current === 'firmware' && $('s-connect').dataset.state === 'run') { current = 'connect'; step('firmware', ''); }
+      step(current, 'fail', swedish(e));
+      message('Installationen stannade. Se steget ovan.', 'bad');
+    } finally { busy = false; $('install').disabled = false; }
+  }
+  window.addEventListener('beforeunload', e => { if (busy) { e.preventDefault(); e.returnValue = ''; } });
+
+  function showBank(bytes, name) {
+    if (bytes.length < 76 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'FM1B') throw new Error(name + ' är ingen FM1B-bank.');
+    if (bytes.length > 466944) throw new Error(name + ' (' + kb(bytes.length) + ') är större än FM-1:s samplingsflash (456 KB).');
+    const dv = new DataView(bytes.buffer, bytes.byteOffset), flags = dv.getUint16(6, true), presets = dv.getUint16(12, true);
+    const format = flags & 8 ? 'BFP8' : flags & 2 ? 'SEA' : flags & 4 ? '12-bit' : flags & 1 ? '16-bit' : '8-bit';
+    bank = bytes; bankName = name;
+    $('bankInfo').textContent = name + ': ' + kb(bytes.length) + ' (' + (100 * bytes.length / 466944).toFixed(1) + ' % av flashen), ' + presets + ' program, ' + format + ', ' + dv.getUint32(8, true) + ' Hz';
+  }
+  $('bankFile').addEventListener('change', async () => {
+    const f = $('bankFile').files[0]; if (!f) return;
+    try { showBank(new Uint8Array(await f.arrayBuffer()), f.name); message(''); } catch (e) { message(e.message, 'bad'); }
+  });
+  $('install').addEventListener('click', install);
+
+  (async () => {
+    try {
+      const r = await fetch('dist/install/manifest.json', { cache: 'no-store' });
+      if (!r.ok) throw new Error('dist/install/manifest.json saknas. Kör node make_install.js efter att firmwaren byggts.');
+      manifest = await r.json();
+      pkg = await FM1Web.prepare(manifest.firmware);            // fetches the package and checks its SHA-256, header and loader
+      $('fwInfo').textContent = 'SF2-spelaren ' + pkg.release_version + ', ' + manifest.firmware.voices + ' röster, ' + kb(pkg.bytes) + ', bygge ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
+      const b = await fetch(manifest.bank.url, { cache: 'no-store' });
+      const bytes = new Uint8Array(await b.arrayBuffer());
+      if (bytes.length !== manifest.bank.bytes || crc32(bytes) !== manifest.bank.crc32) throw new Error('Banken i dist/install stämmer inte med manifestet. Kör node make_install.js igen.');
+      showBank(bytes, manifest.bank.source.split('/').pop());
+      $('install').disabled = false;
+    } catch (e) {
+      message(swedish(e), 'bad');
+      if (!pkg) $('fwInfo').textContent = 'Kunde inte läsas.';
+    }
+  })();
+})();
+</script>
+</body>
+</html>
