@@ -75,6 +75,7 @@ python -m http.server 8765
 Open <http://localhost:8765/index.html> ("SF2 till FM-1"): drop an `.sf2`, convert to an FM1B bank, play it in the simulator,
 or send it to a connected FM-1 ("Skicka till FM-1", Web MIDI over USB). Serve it, do not open the file directly.
 A server on port 8765 was already running when this was written, so check before starting another.
+`.\start_web.ps1` does both: starts the server on 8765 unless one already listens there, and opens `index.html` and `install.html` (section 3b).
 
 Rebuild the simulator after changing `fm1b.c` or `fm1_open\web`:
 
