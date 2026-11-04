@@ -65,6 +65,54 @@ node test_layers.js           # stacked layers: every zone that covers a key sou
 `transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the controllers per channel) or the panel (the `MULTI` line, the channel page).
 Those are only compiled, so test them in the emulator or on the device.
 
+### 2b. Against FluidSynth, the reference (2026-11-04)
+
+`compare_fluid.js` plays the same MIDI on FluidSynth with `1mgm.sf2` and on the player's whole output stage on WebAssembly
+(`test_fluid/wrap.c`: fm1b + sf2fx + sf2out at 32 kHz, resampled to 44.1 kHz, MIDI routed as `transfer.c` does) with `dist/gm_32k.fm1b`,
+reverb and chorus off, one gain for the whole render. FluidSynth 2.6.1 is the Windows zip from github.com/FluidSynth/fluidsynth/releases
+unpacked in `tools/fluidsynth/` (git ignores it). WAVs to listen to, level matched, go to `test_fluid/out/`.
+
+```powershell
+node compare_fluid.js notes                         # velocity sweep, 11 programs: level and brightness per velocity
+node compare_fluid.js spectra                       # all 128 programs at notes 48, 60, 72: FM-1 - FluidSynth by octave band
+node compare_fluid.js midi "MIDIs\TOTO.Africa K.mid" --seconds=60
+```
+
+Found, 2026-11-04:
+- **Velocity:** level per velocity matches within 0.1 dB in every program. FluidSynth does **not** filter by velocity: it adds the
+  SF2 default modulator (velocity to cutoff, -2400 cents) but `fluid_mod_get_value` returns 0 for it ("to stop forcing velocity based
+  filtering"), so the player, which has none, already plays as FluidSynth does.
+- **Treble:** the player is darker. `spectra`, mean over programs (linear interpolation): -1.2 dB at 1 kHz, -1.9 at 2k, -3.0 at 4k, -3.3 at 8k, -5.5 at 16k. MIDI files, 60 s:
+  Africa -4.3 / -7.1 dB at 4k / 8k (spectral distance 4.4 dB), Dancing Queen -1.2 / -4.2, Bach BWV 846 -1.9 / -2.8, Star Wars -1.9 / -5.9.
+  Level over time correlates 0.88-0.99, within 1-1.4 dB on average.
+- **Where it comes from** (`--interp`, `--polyphony`, `--rate`, banks from `make_bank.js` into `test_fluid/out/`): with a 44.1 kHz
+  PCM16 bank, the player at 44.1 kHz and FluidSynth linear (`--interp=1`), every band is within 0.2 dB: the engine is right.
+  BFP8 against PCM16 at 32 kHz: no difference. FluidSynth at 32 voices: no difference. The resampler to 44.1 kHz: no difference.
+  What is left is the 32 kHz bank under the player's linear interpolation, whose gain at a frequency f is about cos(pi f / 32000)
+  (-0.7 dB at 4 kHz, -3 dB at 8 kHz) where FluidSynth's default 4-point interpolation is near flat; part of the tilt from 1 kHz is not explained yet.
+- The converter's `resample()` (box average down, linear up) is flat within 0.7 dB to 8 kHz but adds noise: aliases at -21 dB of a
+  4 kHz tone, -15 dB at 8 kHz. A Kaiser-windowed sinc (tried, kept in `git stash`, "sinc resample") brings them to about -95 dB, the same
+  bank size; against FluidSynth it measures darker (the aliases had filled the treble), so it waits for the interpolation.
+- Per program level: most within 1.5 dB; louder are 73 flute (+4.4), 10 music box (+7.7), 120 guitar fret noise (+8.4), 123 bird (+8.0);
+  quieter 124 telephone (-7.9). Not looked into.
+- **4-point interpolation (`FM1B_INTERP4`, 2026-11-04, on by default; `--linear` in `compare_fluid.js` builds the old one).** Catmull-Rom
+  as FluidSynth: four frames, weights from a 256-row Q14 table (2 KB of RAM, made at the first `fm1b_bind`). For BFP8, when the four
+  frames are in one group with no loop end among them (29 of 32), the shift is read once and put on after the weighted sum (bit exact
+  with the general way). Sound: `spectra` mean 1k -1.0, 2k -1.3, 4k -2.2, 8k -3.8, 16k -10.2 dB (linear: -1.2, -1.9, -3.0, -3.3, -5.5;
+  the energy linear had over 8 kHz is mostly its own aliases); Africa 2k / 4k / 8k -0.4 / -2.9 / -6.2 against -1.4 / -4.3 / -7.1.
+  All the WebAssembly tests pass. **Cost**, fm1-emu at 240 MHz, BFP8, the firmware's busy share of emulated time (`1 - idleShare`, read
+  from `window.__perf`, a line added at the end of the local `emu/main.js`; steady to 0.1 %, unlike the page's `load`):
+
+  | | idle | `load32_plain` (32 flutes) | `load32_filter` (32, filtered) |
+  | --- | --- | --- | --- |
+  | linear | 4.4 % | 31.5 % (page load 41 %) | 48.9 % (62 %) |
+  | 4-point, four `sample_at` | | 48.4 % (63 %) | |
+  | 4-point, BFP8 one-group path | | 41.8 % (68 %) | 59.0 % (88 %) |
+
+  So about +10 points at 32 voices, a voice some 38 % dearer (0.85 % of the CPU against 1.17 %). Image 434 492 bytes (+1.8 KB).
+  The page's `load` (host time) rises more than the busy share; whether the FM-1's own guard (80 %) is reached with 32 filtered
+  voices must be seen on the device.
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell
