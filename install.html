@@ -55,6 +55,7 @@
   .warn { color: var(--warn); font-size: 13px; }
   .muted { color: var(--muted); font-size: 13px; }
   details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  #log { font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 8px 0 0; }
   input[type=file] { max-width: 100%; }
 </style>
 </head>
@@ -93,6 +94,11 @@
     <p id="message" role="status"></p>
     <p class="warn">Dra inte ur kabeln och låt FM-1 ha ström tills sidan säger att det är klart. Stäng andra program och flikar som använder FM-1:s MIDI-port (Workbench, DAW, MIDIberry).</p>
   </section>
+
+  <details class="panel" id="logBox">
+    <summary>Logg: MIDI-portar och omstarter</summary>
+    <pre id="log"></pre>
+  </details>
 
   <details class="panel">
     <summary>Om något går fel</summary>
@@ -136,6 +142,13 @@
     li.querySelector('.step-pct').textContent = pct === undefined ? '' : pct + ' %';
     li.querySelector('.dot').textContent = state === 'done' ? '✓' : state === 'fail' ? '!' : li.dataset.n;
   }
+  // A log of the MIDI ports coming and going and the updater's attempts, to see what the FM-1 shows up as while it restarts.
+  const logStart = Date.now();
+  function log(text) {
+    const el = $('log'), t = ((Date.now() - logStart) / 1000).toFixed(1).padStart(6);
+    el.textContent += t + ' s  ' + text + String.fromCharCode(10); el.scrollTop = el.scrollHeight;
+  }
+  const portText = p => p.type + ' "' + (p.name || '?') + '"' + (p.manufacturer ? ' (' + p.manufacturer + ')' : '') + ' ' + p.state;
   function message(text, kind) { const el = $('message'); el.textContent = text || ''; el.className = kind || ''; }
   function progress(value) { const p = $('progress'); p.hidden = value === null; if (value !== null) p.value = value; }
 
@@ -213,7 +226,42 @@
 
   async function installFirmware(access) {
     step('firmware', 'run', 'Ansluter …');
-    const updater = new FM1Web.Updater(access, pkg, (phase, pct) => step('firmware', 'run', PHASES[phase] || phase, pct));
+    let lastPhase = '';
+    // reconnect: the SDK waits 40 s; give Windows time to install the update loader's USB device the first time
+    const updater = new FM1Web.Updater(access, pkg, (phase, pct) => {
+      if (phase !== lastPhase) { log('updater: ' + phase + ' (' + (PHASES[phase] || phase) + ')'); lastPhase = phase; }
+      step('firmware', 'run', PHASES[phase] || phase, pct);
+    }, { reconnect: 120000 });
+    const discover = updater.discover.bind(updater);
+    updater.discover = async (...args) => {                    // log each identity reply and each port that does not answer
+      const device = await discover(...args);
+      const d = updater.diagnostics, seen = JSON.stringify([d && d.attempts, device && device.identity]);
+      if (seen !== updater.lastSeen) {
+        updater.lastSeen = seen;
+        if (device) log('svar: "' + device.identity + '"');
+        for (const a of (d && d.attempts) || []) log('inget svar från "' + a.input + '" / "' + a.output + '": ' + a.error);
+        if (!device && d && !d.attempts.length) log('inga FM-1-portar; ingångar: ' + (d.inputs.join(', ') || 'inga') + '; utgångar: ' + (d.outputs.join(', ') || 'inga'));
+      }
+      return device;
+    };
+    // The package names the vendor loader, so the SDK waits for "ota-FM-1_015". Started from a tagged update,
+    // that loader answers "ota-FM1C_" + the first 16 hex digits of the build instead. Accept both names.
+    const waitFor = updater.waitFor.bind(updater);
+    updater.waitFor = async (identity, legacyLoader) => {
+      if (identity !== pkg.loaderIdentity || legacyLoader) return waitFor(identity, legacyLoader);
+      const names = [identity, 'ota-FM1C_' + pkg.build_id.slice(0, 16)];
+      const end = Date.now() + updater.timing.reconnect;
+      while (Date.now() < end) {
+        let device = null;
+        try { device = await updater.discover(updater.force); } catch (e) { if (e.code === 'AMBIGUOUS') throw e; }
+        if (device) {
+          if (names.includes(device.identity)) { updater.link = device.link; updater.identity = device.identity; return; }
+          await device.link.close();
+        }
+        await sleep(updater.timing.settle);
+      }
+      throw new Error('等待设备重连超时；请保留这个更新网页，重新连接同一台设备后重试');
+    };
     let device;
     try { device = await updater.connect(); }
     catch (e) { await updater.disconnect().catch(() => {}); throw e; }
@@ -241,6 +289,12 @@
       step('connect', 'run', 'Väntar på MIDI-tillstånd …');
       const access = await navigator.requestMIDIAccess({ sysex: true });
       if (!access.sysexEnabled) throw new Error('Tillåt MIDI och SysEx för sidan.');
+      for (const p of [...access.inputs.values(), ...access.outputs.values()]) log('port: ' + portText(p));
+      const known = new Map([...access.inputs.values(), ...access.outputs.values()].map(p => [p.id, p.state]));
+      access.onstatechange = e => {                              // plugged in or out; the page's own open and close are not logged
+        if (known.get(e.port.id) === e.port.state) return;
+        known.set(e.port.id, e.port.state); log('port ändrad: ' + portText(e.port));
+      };
       step('connect', 'run', 'Söker FM-1 …');
       if (doFw) { current = 'firmware'; await installFirmware(access); }
       else { step('firmware', 'skip', 'Hoppas över.'); }
@@ -254,6 +308,8 @@
     } catch (e) {
       if (current === 'firmware' && $('s-connect').dataset.state === 'run') { current = 'connect'; step('firmware', ''); }
       step(current, 'fail', swedish(e));
+      log('fel: ' + (e && e.message || e));
+      $('logBox').open = true;
       message('Installationen stannade. Se steget ovan.', 'bad');
     } finally { busy = false; $('install').disabled = false; }
   }
