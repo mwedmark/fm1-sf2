@@ -669,15 +669,31 @@ static FM1_DSP_CODE unsigned voices_sounding(void)
         n += voices[i].active && !voices[i].cut;
     return n;
 }
-/* Fade out the oldest sounding voices until at most room sound. guard: the CPU guard lowered the limit (else: room for a note). */
+/* The voice to take for room: one already fading out for room (cut, only when take_cut), else the oldest releasing one (its
+ * key is up: the least missed), else one only the sustain pedal holds, else the oldest. -1: none active. Rank 0 cut,
+ * 1 releasing, 2 held by the pedal, 3 key down; the oldest within a rank. */
+static FM1_DSP_CODE int voice_to_take(unsigned take_cut)
+{
+    int best = -1;
+    unsigned best_rank = 4;
+    for (unsigned i = 0; i < FM1B_VOICES; ++i) {
+        const struct voice *v = &voices[i];
+        if (!v->active || (v->cut && !take_cut))
+            continue;
+        unsigned rank = v->cut ? 0U : v->phase == RELEASE ? 1U : v->held ? 2U : 3U;
+        if (rank < best_rank || (rank == best_rank && (uint32_t)(bank.age - v->age) > (uint32_t)(bank.age - voices[best].age))) {
+            best = (int)i;
+            best_rank = rank;
+        }
+    }
+    return best;
+}
+/* Fade out voices until at most room sound: releasing ones first (voice_to_take). guard: the CPU guard lowered the limit (else:
+ * room for a note). */
 static FM1_DSP_CODE void voices_fit(unsigned room, unsigned guard)
 {
     for (unsigned n = voices_sounding(); n > room; --n) {
-        int oldest = -1;
-        for (unsigned i = 0; i < FM1B_VOICES; ++i)
-            if (voices[i].active && !voices[i].cut &&
-                (oldest < 0 || (uint32_t)(bank.age - voices[i].age) > (uint32_t)(bank.age - voices[oldest].age)))
-                oldest = (int)i;
+        int oldest = voice_to_take(0);
         if (oldest < 0)
             return;
         struct voice *v = &voices[oldest];
@@ -796,14 +812,11 @@ static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner,
         pitch = (uint32_t)(((uint64_t)pitch * (uint32_t)(65536 + t + ((t * t) >> 17))) >> 16);
     }
 
-    unsigned slot = FM1B_VOICES, oldest = 0;
-    for (unsigned i = 0; i < FM1B_VOICES; ++i) {
+    unsigned slot = FM1B_VOICES;
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
         if (!voices[i].active) { slot = i; break; }
-        if ((uint32_t)(bank.age - voices[i].age) > (uint32_t)(bank.age - voices[oldest].age))
-            oldest = i;
-    }
-    if (slot == FM1B_VOICES) {                                /* all busy (some fading): the oldest stops at once */
-        slot = oldest;
+    if (slot == FM1B_VOICES) {                                /* all busy: one fading out for room, else releasing, stops at once */
+        slot = (unsigned)voice_to_take(1);
         if (!voices[slot].cut) drop_count(&voices[slot], 0);
     }
     struct voice *v = &voices[slot];

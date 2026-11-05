@@ -83,7 +83,7 @@ function player(events, seconds, fx) {
     for (let i = 0; i < BLOCK; ++i) { L[b * BLOCK + i] = o[2 * i] / 8388608; R[b * BLOCK + i] = o[2 * i + 1] / 8388608; }
     peakVoices = Math.max(peakVoices, w.cf_sounding());
   }
-  return { L, R, peakVoices, cut: w.cf_cut(), limited: w.cf_limited(), voices: w.cf_voice_max() };
+  return { L, R, peakVoices, cut: w.cf_cut(), held: w.cf_drops(0), tail: w.cf_drops(1), limited: w.cf_limited(), voices: w.cf_voice_max() };
 }
 
 // ---- MIDI files ----
@@ -300,7 +300,7 @@ function midiFile() {
   }
   writeWav(path.join(outDir, name + '_fm1.wav'), ours.L, ours.R, Math.sqrt(sumA / sumB));
   console.log(`${path.basename(file)}: ${seconds.toFixed(1)} s, ${events.length} events, reverb and chorus ${fx ? 'on' : 'off'}; lag ${(d / RATE * 1000).toFixed(1)} ms, gain to match ${f1(g)} dB`);
-  console.log(`player: up to ${ours.peakVoices} of ${ours.voices} voices, ${ours.cut} cut for the limit, the limiter held ${(ours.limited / RATE).toFixed(1)} s`);
+  console.log(`player: up to ${ours.peakVoices} of ${ours.voices} voices, ${ours.cut} cut for the limit (HELD ${ours.held} still sounding, TAIL ${ours.tail} releasing), the limiter held ${(ours.limited / RATE).toFixed(1)} s`);
   console.log(`level over time (100 ms): correlation ${corr.toFixed(3)}, mean |diff| ${mean(diffs.map(Math.abs)).toFixed(2)} dB, 90th percentile ${diffs.map(Math.abs).sort((x, y) => x - y)[Math.floor(diffs.length * 0.9)].toFixed(2)} dB`);
   console.log('octave band (Hz) ' + BANDS.map(f => String(f >= 1000 ? f / 1000 + 'k' : f).padStart(6)).join(''));
   console.log('FM-1 - FS (dB)   ' + BANDS.map((f, k) => f1(dB(sb.bands[k]) + g - dB(sa.bands[k])).padStart(6)).join(''));

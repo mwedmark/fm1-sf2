@@ -300,6 +300,12 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
   `HELD` notes still sounding (key or pedal down) that were cut for a new one, the ones heard as dropped; `TAIL` notes already
   releasing that were cut short; `CPU` voices the CPU guard took. Orange while `HELD` or `CPU` is not 0. In fm1-emu the first 80 s of
   *Never Gonna Give You Up* gave `HELD 379 TAIL 1021 CPU 0` (2026-11-05). `midi_script.js` turns a `.mid` into an fm1-emu script.
+- **Voice stealing (2026-11-05).** When all voices are taken the engine used to take the oldest, even with its key down. Now it takes
+  (`voice_to_take` in `fm1b.c`) one already fading for room, else the oldest releasing note, else one only the sustain pedal holds,
+  else the oldest. The whole song on the PC (`compare_fluid.js midi`, which now prints HELD and TAIL): `HELD` 1 141 -> 490, `TAIL`
+  3 235 -> 5 271; no CPU cost. fm1-emu, the first 80 s (`dist/sf2player_32v_steal.fwsc`): `HELD 181 TAIL 1727 CPU 0` against
+  `HELD 379 TAIL 1021 CPU 0`. On the FM-1 the device reads 60-70 % CPU with peaks to 99 % at 32 voices, so more voices would only
+  bring the guard on. Listen: `test_fluid/out/listen/never_steal_1_before.wav`, `_2_after`, `_3_fluidsynth`.
 - REC shows the info page, REC again goes back (HOME goes to the program or channel page). Firmware: its file name, build time,
   CRC32 and size; bank: its file name and build time (from its info block, FORMAT.md; an older bank has none), CRC32 and size;
   and the `SOUNDSET CHECKSUM`, one CRC32 over the firmware image followed by the bank file. The keys and knobs keep working as on
@@ -383,7 +389,7 @@ Checked in fm1-emu: `test_emu/knob73.script` (73 clicks on SELECT for channel 2,
 a panel key) both sound as program change 73, the flute (RMS 0.095, centroid 275 Hz). The emulator loses clicks when many come in one
 script event (`e0:73`), so the scripts send one click every 30 ms. Script encoders: `e0` SELECT, `e2`..`e5` KNOB1..KNOB4.
 
-Limits: 32 voices in total on the device (oldest is stolen first; 8, then 16, then 24 until 2026-11-02), fewer while the CPU guard holds
+Limits: 32 voices in total on the device (stolen: a releasing note first, then one the pedal holds, then the oldest; since 2026-11-05; 8, then 16, then 24 until 2026-11-02), fewer while the CPU guard holds
 the limit down: the number after the slash is then under 32 and the line is orange.
 
 **CPU on the panel (2026-11-04).** The program page's `VOICES n/limit CPU a% MAX p%` and the channel page's bottom line

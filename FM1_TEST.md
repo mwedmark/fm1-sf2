@@ -13,6 +13,7 @@ med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus, L
 | SF2-firmwaren med mute/solo (C8-C13) | `dist\sf2player_32v_mute.fwsc` (2026-11-04: ARP mute, SEQ solo, ALGORITHM kanalvolym, MASTER alltid huvudvolym; samma bank) |
 | SF2-firmwaren med infosidan (C15) | `dist\sf2player_32v_info.fwsc` (2026-11-05: REC visar firmware, bank och CRC32), med `dist\gm_32k_bfp8.fm1b` (ny, har namn och datum). Förväntade värden i `dist\sf2player_32v_info.txt` |
 | SF2-firmwaren med räknare för tappade toner (C16) | `dist\sf2player_32v_drops.fwsc` (2026-11-05: linjär interpolering igen, raden `DROPPED` på programsidan, SAVE nollställer) |
+| SF2-firmwaren med smartare röststöld (C17) | `dist\sf2player_32v_steal.fwsc` (2026-11-05: utklingande toner tas före hållna) |
 | Reserv om det knastrar | `dist\sf2player_24v_32k.fwsc` (24 röster, samma bank) |
 | Originalfirmwaren (V15) | `fm1_open\sdk\firmware\FM-1_015.fwsc` |
 | Workbench för att flasha | <https://open.m-vave.com/fm1-workbench> (Chrome eller Edge, USB-kabel) |
@@ -72,6 +73,7 @@ banken i ett svep. Notera i så fall tid och vad sidan visade för varje steg.
 | C14 | Spela en tät MIDI-fil, titta på `CPU a% MAX p%` (huvudsidan: raden VOICES; kanalsidan: näst sista raden). | Värdena följer musiken; MAX står kvar ungefär en sekund. Raden blir orange när spärren sänkt röstgränsen. Notera CPU och MAX när gränsen sjunker. | |
 | C15 | Tryck REC. Jämför med `dist\sf2player_32v_info.txt`. Tryck REC igen. Prova också HOME från infosidan. | Sidan `INFO`: firmwarens namn `SF2PLAYER_32V_INFO.FWSC`, byggtid och CRC32; bankens namn `GM_32K_BFP8.FM1B`, byggtid och CRC32; `SOUNDSET CHECKSUM:` med stor text. Alla tre CRC32 som i .txt-filen (firmwarens skiljer sig från 7-Zips värde för .fwsc-filen, det är väntat). REC tillbaka till samma sida; HOME byter sida. | |
 | C16 | Tryck SAVE, spela `MIDIs\R.ASTLEY.Never gonna give you up K.mid` från Windows, titta på raden `DROPPED HELD h TAIL t CPU c`. | `HELD` räknar toner som klippts medan de lät (de du hör falla bort), `TAIL` utklingningar som kortats, `CPU` vad CPU-spärren tog. Notera siffrorna efter låten. `CPU` över 0 betyder att spärren slog till. Emulatorn gav `HELD 379 TAIL 1021 CPU 0` för de första 80 s. | |
+| C17 | Med `sf2player_32v_steal.fwsc`: tryck SAVE, spela samma låt som i C16 och jämför `HELD` med C16. | `HELD` klart lägre än med `_drops` (på PC:n 57 % färre för hela låten), `TAIL` högre. Färre toner hörs falla bort. | |
 
 ## D. MIDI in (USB, DIN, BLE)
 

@@ -30,3 +30,10 @@ EXPORT unsigned cf_cut(void)
     fm1b_status(&st);
     return st.voices_cut;
 }
+/* what the limit took: 0 notes still sounding (HELD), 1 releasing ones (TAIL), 2 the CPU guard's */
+EXPORT unsigned cf_drops(unsigned which)
+{
+    struct fm1b_status st;
+    fm1b_status(&st);
+    return which == 0 ? st.drops_held : which == 1 ? st.drops_tail : st.drops_guard;
+}
