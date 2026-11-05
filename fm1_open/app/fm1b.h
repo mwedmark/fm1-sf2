@@ -100,12 +100,14 @@ struct fm1b_status {
     uint8_t channels, program_channel, program_number;  /* channels with a preset of their own; the latest program change (channel 0..15, 255: none) */
     uint8_t voice_limit;                       /* fm1b_voice_limit(): FM1B_VOICES unless the CPU guard has lowered it */
     uint32_t voices_cut;                       /* voices faded out to keep under the limit, since start */
+    uint32_t drops_held, drops_tail, drops_guard;   /* what the limit took: sounding notes, releasing notes, the CPU guard's (fm1b_drops_reset) */
     int8_t fine;
     uint8_t lo, hi, sustain_percent;
     uint16_t attack_ms, hold_ms;
     uint32_t length, loop_start, loop_end, rate;
 };
 void fm1b_status(struct fm1b_status *status);
+void fm1b_drops_reset(void);
 /* The bound bank as a whole, for the panel's info page: its bytes (NULL: no bank), and the name and date of its info block
  * (FORMAT.md, "Info"), each "" when the bank has none. name has 32 characters at most, date 20. */
 struct fm1b_info {

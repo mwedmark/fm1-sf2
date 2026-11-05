@@ -43,7 +43,7 @@ const sdk = path.join(root, 'fm1_open/build/tools/wasi-sdk-27.0-x86_64-windows')
 const app = path.join(root, 'fm1_open/app');
 const sources = [path.join(root, 'test_fluid/wrap.c'), ...['fm1b.c', 'sf2fx.c', 'sf2out.c'].map(f => path.join(app, f))];
 const inputs = [...sources, ...['fm1b.h', 'fm1b_config.h', 'sf2fx.h', 'sf2out.h', 'fm1b_dqt.inc', 'fm1b_dqt6.inc', 'resample_table.inc'].map(f => path.join(app, f))];
-const linear = 'linear' in opt;                          // --linear: the player's old 2-point interpolation (FM1B_INTERP4 0)
+const linear = !('interp4' in opt);                      // as the firmware: linear (FM1B_INTERP4 0); --interp4 the 4-point one
 const playerRate = +(opt.rate || 32000);                 // --rate=44100: the player at 44.1 kHz (no resampler), for a bank made at that rate
 function engine() {
   const wasm = path.join(root, `test_fluid/player_${playerRate}${linear ? '_linear' : ''}.wasm`);

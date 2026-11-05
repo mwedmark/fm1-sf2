@@ -85,6 +85,15 @@ static struct voice voices[FM1B_VOICES];
 /* The voices that may sound at once (fm1b_voice_limit): FM1B_VOICES unless the audio interrupt runs short of time. Over it, the
  * oldest voices fade out in about 5 ms (CUT_RELEASE per envelope step, from full level to -96 dB in 7 steps). */
 static unsigned voice_limit = FM1B_VOICES, voices_cut;
+/* What the limit took, for the panel (fm1b_drops): notes still sounding (key or pedal down), notes already releasing, and
+ * voices the CPU guard took. Since start or fm1b_drops_reset(). */
+static uint32_t drops_held, drops_tail, drops_guard;
+static FM1_DSP_CODE void drop_count(const struct voice *v, unsigned guard)
+{
+    if (guard) ++drops_guard;
+    else if (v->phase == RELEASE) ++drops_tail;
+    else ++drops_held;
+}
 enum { CUT_RELEASE = 13500 };
 enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA, FORMAT_BFP8 };
 enum { BFP_GROUP = 32, BFP_GROUP_BYTES = 33 };   /* BFP8: a shift byte, then 32 signed 8-bit mantissas */
@@ -185,7 +194,7 @@ static inline __attribute__((always_inline)) int region_ok(uint32_t offset, uint
  * place of two. Linear interpolation loses -0.7 dB at 4 kHz and -3 dB at 8 kHz of a 32 kHz bank; this keeps the top within
  * a few tenths of a dB. interp4[i] are the four weights for a fraction of i / 256, Q14, summing to 16384 (2 KB, in RAM). */
 #ifndef FM1B_INTERP4
-#define FM1B_INTERP4 1
+#define FM1B_INTERP4 0   /* off since 2026-11-05: on the FM-1 it cost voices (more notes dropped); 1 builds it */
 #endif
 #if FM1B_INTERP4
 static int16_t interp4[256][4];
@@ -289,6 +298,7 @@ int fm1b_program(unsigned program_bank, unsigned program)
     bank.last_zone_record = NULL;
     return 0;
 }
+void fm1b_drops_reset(void) { drops_held = drops_tail = drops_guard = 0; }
 void fm1b_info(struct fm1b_info *info)
 {
     memset(info, 0, sizeof *info);
@@ -329,6 +339,9 @@ void fm1b_status(struct fm1b_status *status)
         status->voices += voices[i].active;
     status->voice_limit = (uint8_t)voice_limit;
     status->voices_cut = voices_cut;
+    status->drops_held = drops_held;
+    status->drops_tail = drops_tail;
+    status->drops_guard = drops_guard;
     if (bank.last_note < 0 || !bank.last_zone_record)
         return;
     const uint8_t *zone = bank.last_zone_record, *env = bank.last_env;
@@ -656,8 +669,8 @@ static FM1_DSP_CODE unsigned voices_sounding(void)
         n += voices[i].active && !voices[i].cut;
     return n;
 }
-/* Fade out the oldest sounding voices until at most room sound. */
-static FM1_DSP_CODE void voices_fit(unsigned room)
+/* Fade out the oldest sounding voices until at most room sound. guard: the CPU guard lowered the limit (else: room for a note). */
+static FM1_DSP_CODE void voices_fit(unsigned room, unsigned guard)
 {
     for (unsigned n = voices_sounding(); n > room; --n) {
         int oldest = -1;
@@ -668,6 +681,7 @@ static FM1_DSP_CODE void voices_fit(unsigned room)
         if (oldest < 0)
             return;
         struct voice *v = &voices[oldest];
+        drop_count(v, guard);
         v->cut = 1;
         v->held = 0;
         v->phase = RELEASE;
@@ -678,7 +692,7 @@ static FM1_DSP_CODE void voices_fit(unsigned room)
 FM1_DSP_CODE void fm1b_voice_limit(unsigned limit)
 {
     voice_limit = limit < 1U ? 1U : limit > FM1B_VOICES ? FM1B_VOICES : limit;
-    voices_fit(voice_limit);
+    voices_fit(voice_limit, 1);
 }
 FM1_DSP_CODE unsigned fm1b_voices_sounding(void) { return voices_sounding(); }
 
@@ -737,7 +751,7 @@ static FM1_DSP_CODE void note_apply(const void *owner, unsigned channel, unsigne
                 }
             }
     }
-    voices_fit(voice_limit - n);                              /* room for these under the limit */
+    voices_fit(voice_limit - n, 0);                              /* room for these under the limit */
     for (unsigned l = 0; l < n; ++l)
         zone_start(owner, channel, note, velocity, level, drum, preset_index, first + keys[l], l ? -1 : (int32_t)keys[l]);
 }
@@ -788,8 +802,10 @@ static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner,
         if ((uint32_t)(bank.age - voices[i].age) > (uint32_t)(bank.age - voices[oldest].age))
             oldest = i;
     }
-    if (slot == FM1B_VOICES)
+    if (slot == FM1B_VOICES) {                                /* all busy (some fading): the oldest stops at once */
         slot = oldest;
+        if (!voices[slot].cut) drop_count(&voices[slot], 0);
+    }
     struct voice *v = &voices[slot];
     memset(v, 0, sizeof *v);
     v->active = 1;

@@ -587,7 +587,17 @@ static void screen_update(void)
     } else
         *line = 0;
     line_show(10, 172, line, 1, CYAN);
-    line_show(7, 228, "SEL PRG SCL DRUM HOME CH K2 PAN K3/4 FX", 1, GREY);
+    /* What the voice limit took since start or SAVE: HELD notes still sounding (heard as dropped), TAIL notes already
+     * releasing (cut short), CPU the guard's. Orange while HELD is not 0. */
+    d = put_text(line, "DROPPED HELD ");
+    d = put_number(d, (int32_t)st.drops_held, 0);
+    d = put_text(d, " TAIL ");
+    d = put_number(d, (int32_t)st.drops_tail, 0);
+    d = put_text(d, " CPU ");
+    d = put_number(d, (int32_t)st.drops_guard, 0);
+    *d = 0;
+    line_show(12, 200, line, 1, st.drops_held || st.drops_guard ? ORANGE : GREY);
+    line_show(7, 228, "SEL PRG SCL DRUM HOME CH SAVE ZERO DROPS", 1, GREY);
 }
 
 /* SELECT on the channel page: the next or previous program the bank has, from the channel's own or (while it follows the
@@ -644,7 +654,7 @@ void groove_screen_init(void)
     bar_drawn = 1000;
 }
 /* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only). */
-enum { BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_REC = 13 };
+enum { BUTTON_SAVE = 9, BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_REC = 13 };
 static void leds_update(void)
 {
     struct fm1b_channel info;
@@ -725,6 +735,8 @@ void groove_screen_control(void)
         channels = page == PAGE_CHANNELS;
         page_clear();
     }
+    if (pressed & (1U << BUTTON_SAVE))                        /* SAVE: count the dropped notes from zero (the program page's line) */
+        fm1b_drops_reset();
     if (pressed & (1U << BUTTON_REC)) {                       /* REC: the info page, and back */
         if (page == PAGE_INFO)
             page = info_return;

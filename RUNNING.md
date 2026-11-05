@@ -122,7 +122,7 @@ Found, 2026-11-04:
   WAVs to compare by ear: `test_fluid/out/listen/` (Africa, Dancing Queen and the `spectra` sweep: `_1_before`, `_2_sinc`, `_3_fluidsynth`).
 - Per program level: most within 1.5 dB; louder are 73 flute (+4.4), 10 music box (+7.7), 120 guitar fret noise (+8.4), 123 bird (+8.0);
   quieter 124 telephone (-7.9). Not looked into.
-- **4-point interpolation (`FM1B_INTERP4`, 2026-11-04, on by default; `--linear` in `compare_fluid.js` builds the old one).** Catmull-Rom
+- **4-point interpolation (`FM1B_INTERP4`, 2026-11-04; off again since 2026-11-05, see below; `--interp4` in `compare_fluid.js` builds it).** Catmull-Rom
   as FluidSynth: four frames, weights from a 256-row Q14 table (2 KB of RAM, made at the first `fm1b_bind`). For BFP8, when the four
   frames are in one group with no loop end among them (29 of 32), the shift is read once and put on after the weighted sum (bit exact
   with the general way). Sound: `spectra` mean 1k -1.0, 2k -1.3, 4k -2.2, 8k -3.8, 16k -10.2 dB (linear: -1.2, -1.9, -3.0, -3.3, -5.5;
@@ -139,6 +139,11 @@ Found, 2026-11-04:
   So about +10 points at 32 voices, a voice some 38 % dearer (0.85 % of the CPU against 1.17 %). Image 434 492 bytes (+1.8 KB).
   The page's `load` (host time) rises more than the busy share; whether the FM-1's own guard (80 %) is reached with 32 filtered
   voices must be seen on the device.
+  **Off again (2026-11-05).** On the FM-1, *Never Gonna Give You Up* dropped notes with it that the user did not hear with the
+  linear build (`dist/sf2player_32v_linear.fwsc`, everything else the same); by ear fewer notes drop with linear, so linear is the
+  default again. The song needs more than 32 voices either way: on the PC (`compare_fluid.js midi`) 3 451 voices are cut for the
+  limit with both, and in fm1-emu the CPU guard never cut in (80 s). So on the device the dearer voices likely brought the guard on.
+  The panel's `DROPPED` line (section 5) now shows which it is.
 
 ## 3. The converter and browser simulator (verified)
 
@@ -291,6 +296,10 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 - Send a bank over USB MIDI from the converter page ("Skicka till FM-1"). The panel shows `UPLOAD n Rx` and then the program.
 - Panel: SELECT program, OCT-/OCT+ octave, SCL drums, HOME channel page, MASTER main volume, KNOB2 pan, KNOB3 reverb, KNOB4 chorus;
   on the channel page ALGORITHM channel volume, ARP mute, SEQ solo (see section 7).
+- The program page's `DROPPED HELD h TAIL t CPU c` line counts what the 32-voice limit took since start or SAVE (SAVE zeroes it):
+  `HELD` notes still sounding (key or pedal down) that were cut for a new one, the ones heard as dropped; `TAIL` notes already
+  releasing that were cut short; `CPU` voices the CPU guard took. Orange while `HELD` or `CPU` is not 0. In fm1-emu the first 80 s of
+  *Never Gonna Give You Up* gave `HELD 379 TAIL 1021 CPU 0` (2026-11-05). `midi_script.js` turns a `.mid` into an fm1-emu script.
 - REC shows the info page, REC again goes back (HOME goes to the program or channel page). Firmware: its file name, build time,
   CRC32 and size; bank: its file name and build time (from its info block, FORMAT.md; an older bank has none), CRC32 and size;
   and the `SOUNDSET CHECKSUM`, one CRC32 over the firmware image followed by the bank file. The keys and knobs keep working as on
