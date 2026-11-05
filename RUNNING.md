@@ -188,6 +188,12 @@ FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank a
 V15 refused, no FM-1 found. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
 not been run from this page yet.
 
+**From another computer on the same network (2026-11-05).** The server (`start_web.ps1`) answers on every address and prints them
+(this machine: `http://192.168.50.145:8765/install.html`; Windows Firewall already lets Python in). Chrome gives Web MIDI only to
+`localhost` or HTTPS, so on the other computer, once: `chrome://flags`, *Insecure origins treated as secure*, add
+`http://192.168.50.145:8765`, Relaunch. Without the flag the page says it has no Web MIDI. The packages can also be fetched from
+`http://192.168.50.145:8765/dist/` and flashed with M-VAVE's workbench, which needs no flag.
+
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
 **Quick start** (verified): build the firmware (section 1), then

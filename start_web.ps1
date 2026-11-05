@@ -26,3 +26,10 @@ if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyCon
 $pages = "http://localhost:$Port/index.html", "http://localhost:$Port/install.html"
 $pages | ForEach-Object { Write-Host $_ }
 if (!$NoBrowser) { $pages | ForEach-Object { Start-Process $_ } }
+
+# from another computer on the network: the server answers on every address (python -m http.server), but Chrome gives Web
+# MIDI only to a secure origin, which http://<this address> is not. On that computer, once: chrome://flags, "Insecure origins
+# treated as secure", add the address below, Relaunch. (Or fetch the .fwsc from /dist/ and flash it with M-VAVE's workbench.)
+$lan = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -notmatch '^(127|169\.254)\.' -and $_.InterfaceAlias -notmatch '^vEthernet' -and $_.PrefixOrigin -ne 'WellKnown' }
+foreach ($a in $lan) { Write-Host "From the network ($($a.InterfaceAlias)): http://$($a.IPAddress):$Port/install.html  (Chrome flag needed, see start_web.ps1)" }
