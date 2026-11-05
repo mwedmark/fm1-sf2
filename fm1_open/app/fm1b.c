@@ -965,6 +965,7 @@ static void queue_event(unsigned kind, const void *owner, unsigned channel, unsi
     __asm__ volatile("" ::: "memory");
     queue_head = head + 1U;
 }
+unsigned fm1b_queue_room(void) { return QUEUE_SIZE - (queue_head - queue_tail); }
 void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_event(EVENT_NOTE, owner, PANEL_CHANNEL, note, velocity, level, 0); }
 void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level) { queue_event(EVENT_NOTE, owner, PANEL_CHANNEL, note, velocity, level, 1); }
 void fm1b_channel_note(unsigned channel, unsigned note, unsigned velocity, unsigned level)

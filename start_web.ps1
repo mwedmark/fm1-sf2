@@ -26,6 +26,7 @@ if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyCon
 $pages = "http://localhost:$Port/index.html", "http://localhost:$Port/install.html"
 $pages | ForEach-Object { Write-Host $_ }
 if (!$NoBrowser) { $pages | ForEach-Object { Start-Process $_ } }
+Write-Host "http://localhost:$Port/song.html   (a MIDI file to the FM-1's MIDI file player, RUNNING.md section 3c)"
 
 # from another computer on the network: the server answers on every address (python -m http.server), but Chrome gives Web
 # MIDI only to a secure origin, which http://<this address> is not. On that computer, once: chrome://flags, "Insecure origins

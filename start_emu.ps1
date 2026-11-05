@@ -35,6 +35,7 @@ if ($Update) {
 #    updates" is pressed; every build has its own address (?v= below), so take a kept copy only while the address is the same
 #  - window.__lcd holds the latest screen, so a test can read it while the page is hidden (RUNNING.md section 4)
 #  - window.__perf, the load and idle share a test reads (test_emu\measure_load.ps1)
+#  - window.__midi(bytes) and window.__key(id, down): MIDI into the DIN jack (SysEx too: a song upload) and the panel's buttons, from a test
 $mainJs = Join-Path $emu 'main.js'
 $code = Get-Content $mainJs -Raw
 $patched = $code -replace '(  const kept = await keptEntry\(f\.id\);\r?\n)  if \(kept\) \{', '$1  if (kept && (f.id !== "sf2" || kept.url === f.package)) {   // local: a new build of sf2 is fetched'
@@ -42,6 +43,8 @@ if ($patched -notmatch '__lcd') {
     $patched = $patched -replace '(  if \(!m\.lcd && frame\?\.lcd\) m\.lcd = frame\.lcd;)(\r?\n)', '$1$2  if (m.lcd) window.__lcd = m.lcd;   // local addition: lets a test read the screen while the page is hidden$2'
 }
 if ($patched -notmatch 'window\.__perf') { $patched = $patched.TrimEnd() + "`n`nwindow.__perf = perf;   // local addition: lets a test read load and idleShare`n" }
+if ($patched -notmatch 'window\.__midi') { $patched = $patched.TrimEnd() + "`nwindow.__midi = (bytes) => send({ type: `"midi`", bytes: Array.from(bytes) });   // local addition: a test sends MIDI (SysEx too) into the DIN jack`n" }
+if ($patched -notmatch 'window\.__key') { $patched = $patched.TrimEnd() + "`nwindow.__key = (id, down) => send({ type: `"key`", id, down });   // local addition: a test presses a panel button (ids as in scripts)`n" }
 if ($patched -ne $code) { Set-Content $mainJs $patched -NoNewline }
 if ($patched -notmatch 'a new build of sf2 is fetched') { Write-Warning "main.js changed upstream: a browser may boot an older sf2 build (press Check for firmware updates)" }
 
@@ -60,6 +63,7 @@ if ($stale) {
     node (Join-Path $root 'make_flash_overlay.js') $bank $flash
 }
 Copy-Item (Join-Path $root 'test_emu\*') $emu -Force -Exclude 'cors_server.py'
+Copy-Item (Join-Path $root 'fm1_song.js') $emu -Force               # for test_emu\song_test.js
 $page = Join-Path $emu 'index_tap.html'
 (Get-Content (Join-Path $emu 'index.html') -Raw) -replace '<head>', '<head><script src="tap.js"></script>' | Set-Content $page -NoNewline
 

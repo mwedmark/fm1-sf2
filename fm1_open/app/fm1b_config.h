@@ -11,4 +11,11 @@
  * firmware's sample region, GROOVE_SAMPLE_OFFSET and GROOVE_SAMPLE_BYTES in instrument.h. */
 #define FM1B_FLASH_OFFSET 69632U
 #define FM1B_FLASH_BYTES 466944U
+/* 1: the MIDI file player (song.c): a song converted from a MIDI file by song.html is uploaded over SysEx into RAM and PLAY
+ * plays it. 0 leaves out all of it, its code and its RAM (the song itself is allocated only when one is uploaded). */
+#ifndef FM1_MIDIPLAY
+#define FM1_MIDIPLAY 1
+#endif
+/* The largest song the player takes, in bytes (the heap is about 215 KB, part of it used by the firmware). */
+#define FM1_MIDIPLAY_MAX_BYTES 131072U
 #endif

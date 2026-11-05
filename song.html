@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play on FM-1</title>
+<!-- Sends a MIDI file to an FM-1 running the SF2 player with the MIDI file player (FM1_MIDIPLAY): fm1_song.js turns it into a song,
+     the song goes over SysEx into the FM-1's RAM (sf2_upload.c, commands 4..6) and PLAY on the FM-1, or the buttons here, plays it.
+     Serve the repository (start_web.ps1) and open http://localhost:8765/song.html. -->
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66;
+    --line: #dcdcd5; --accent: #1f6feb; --accent-ink: #ffffff; --ok: #1a7f37; --bad: #c62828; --drop: #eef3fd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92;
+      --line: #34342f; --accent: #5b9bff; --accent-ink: #0b1220; --ok: #56d364; --bad: #ff7b72; --drop: #1b2638;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 10px; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; color: var(--muted); cursor: pointer; }
+  #drop.over { border-color: var(--accent); background: var(--drop); color: var(--ink); }
+  dl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; margin: 14px 0 0; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  button, select { font: inherit; }
+  button { padding: 10px 18px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  select { padding: 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); max-width: 100%; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  progress { width: 100%; height: 8px; accent-color: var(--accent); margin-top: 12px; }
+  #message { min-height: 1.5em; margin: 10px 0 0; }
+  #message.bad { color: var(--bad); }
+  #message.ok { color: var(--ok); font-weight: 600; }
+  .muted { color: var(--muted); font-size: 13px; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Play on FM-1</h1>
+  <p class="sub">A MIDI file into the FM-1's memory, played by the FM-1 itself. Use Chrome or Edge.</p>
+
+  <section class="panel">
+    <h2>MIDI file</h2>
+    <div id="drop" tabindex="0">Drop a <code>.mid</code> file here, or click to choose one</div>
+    <input type="file" id="file" accept=".mid,.midi,audio/midi">
+    <dl id="facts" hidden>
+      <dt>Name</dt><dd id="fName"></dd>
+      <dt>Length</dt><dd id="fLength"></dd>
+      <dt>Events</dt><dd id="fEvents"></dd>
+      <dt>Size</dt><dd id="fSize"></dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>FM-1</h2>
+    <div class="actions" style="margin-top:0">
+      <select id="port" hidden></select>
+      <button class="primary" id="send" disabled>Send to FM-1</button>
+      <button id="play" disabled>Play</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <p id="message" role="status"></p>
+    <p class="muted">The song stays in the FM-1's RAM until it is switched off or another song is sent. PLAY on the FM-1 starts it from the
+      beginning and stops it; the program page shows where it is. It plays through the same path as MIDI in, so the channels page, mute and
+      solo work as usual. The FM-1 needs the SF2 player firmware with the MIDI file player.</p>
+  </section>
+</main>
+<script src="fm1_song.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const S = window.Fm1Song;
+  let song = null, access = null, busy = false;
+
+  const time = (ms) => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const kb = (n) => (n / 1024).toFixed(1) + ' KB';
+  function message(text, kind) { const el = $('message'); el.textContent = text || ''; el.className = kind || ''; }
+  function progress(pct) { const p = $('progress'); p.hidden = pct === null; if (pct !== null) p.value = pct; }
+  function buttons() {
+    $('send').disabled = busy || !song;
+    $('play').disabled = $('stop').disabled = busy;
+  }
+
+  async function load(file) {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      song = S.makeSong(bytes, file.name);
+      $('fName').textContent = song.name || '(no name)';
+      $('fLength').textContent = time(song.ms);
+      $('fEvents').textContent = song.events.toLocaleString('en');
+      $('fSize').textContent = kb(song.song.length) + ' in the FM-1 (the file: ' + kb(bytes.length) + ')';
+      $('facts').hidden = false;
+      message(song.events ? '' : 'The file has no notes.', song.events ? '' : 'bad');
+    } catch (e) {
+      song = null;
+      $('facts').hidden = true;
+      message(e.message || String(e), 'bad');
+    }
+    buttons();
+  }
+  const drop = $('drop');
+  drop.addEventListener('click', () => $('file').click());
+  drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
+  $('file').addEventListener('change', () => $('file').files[0] && load($('file').files[0]));
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); });
+
+  // The FM-1's MIDI ports: the output chosen in the list (the FM-1 when one is named so) and the input of the same name, for its answers.
+  async function ports() {
+    if (!navigator.requestMIDIAccess) throw new Error('This browser has no Web MIDI. Use Chrome or Edge (and localhost or HTTPS, see RUNNING.md).');
+    if (!access) {
+      access = await navigator.requestMIDIAccess({ sysex: true });
+      access.onstatechange = () => fillPorts();
+    }
+    if (!fillPorts()) throw new Error('No MIDI output found. Connect the FM-1 over USB and try again.');
+    const output = access.outputs.get($('port').value);
+    const input = [...access.inputs.values()].find((i) => i.name === output.name) || [...access.inputs.values()].find((i) => /fm-?1/i.test(i.name));
+    if (!input) throw new Error('Found no MIDI input belonging to ' + output.name + ' (the FM-1\'s answer is needed).');
+    await input.open(); await output.open();
+    return { input, output };
+  }
+  function fillPorts() {
+    const sel = $('port'), cur = sel.value;
+    sel.textContent = '';
+    for (const o of access.outputs.values()) sel.add(new Option(o.name, o.id));
+    sel.hidden = sel.options.length < 2;
+    const fm = [...sel.options].find((o) => /fm-?1/i.test(o.text));
+    sel.value = [...sel.options].some((o) => o.value === cur) ? cur : fm ? fm.value : sel.value;
+    return sel.options.length;
+  }
+  // One frame out, its answer in: F0 7D 'S' 'F' 02 cmd|0x40 status F7
+  function exchange({ input, output }, frame, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { input.removeEventListener('midimessage', on); reject(new Error('timeout')); }, ms);
+      function on(e) {
+        const d = e.data;
+        if (d.length === 8 && d[0] === 0xf0 && d[1] === 0x7d && d[2] === 0x53 && d[3] === 0x46 && d[4] === 2 && d[5] === (frame[5] | 0x40)) {
+          clearTimeout(timer); input.removeEventListener('midimessage', on); resolve(d[6]);
+        }
+      }
+      input.addEventListener('midimessage', on);
+      output.send(frame);
+    });
+  }
+  async function send(link, frame, what) {
+    let status = -1;
+    for (let attempt = 0; attempt < 3 && status < 0; attempt++) {   // a lost frame is sent again: writing the same bytes twice is harmless
+      try { status = await exchange(link, frame, 3000); } catch (e) { /* again */ }
+    }
+    if (status < 0) throw new Error('The FM-1 does not answer. Is it running the SF2 player firmware with the MIDI file player?');
+    if (status !== 0) throw new Error('The FM-1 rejected ' + what + ': ' + (S.ERRORS[status] || 'error ' + status));
+  }
+  async function run(work) {
+    if (busy) return;
+    busy = true; buttons(); message('');
+    try { await work(await ports()); }
+    catch (e) { message(e.message || String(e), 'bad'); progress(null); }
+    finally { busy = false; buttons(); }
+  }
+
+  $('send').addEventListener('click', () => run(async (link) => {
+    const frames = S.songFrames(song.song), started = Date.now();
+    for (const [i, frame] of frames.entries()) {
+      message(i === frames.length - 1 ? 'Checking the song …' : 'Sending ' + Math.round(100 * i / frames.length) + ' %');
+      progress(100 * i / frames.length);
+      await send(link, frame, i === 0 ? 'the song' : 'frame ' + (i + 1));
+    }
+    progress(null);
+    message('Done in ' + ((Date.now() - started) / 1000).toFixed(1) + ' s: ' + song.name + ' is in the FM-1. Press PLAY on the FM-1, or Play here.', 'ok');
+  }));
+  $('play').addEventListener('click', () => run(async (link) => { await send(link, S.playFrame(), 'play'); message('Playing.', 'ok'); }));
+  $('stop').addEventListener('click', () => run(async (link) => { await send(link, S.stopFrame(), 'stop'); message('Stopped.'); }));
+  buttons();
+})();
+</script>
+</body>
+</html>

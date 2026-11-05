@@ -14,6 +14,7 @@ med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus, L
 | SF2-firmwaren med infosidan (C15) | `dist\sf2player_32v_info.fwsc` (2026-11-05: REC visar firmware, bank och CRC32), med `dist\gm_32k_bfp8.fm1b` (ny, har namn och datum). Förväntade värden i `dist\sf2player_32v_info.txt` |
 | SF2-firmwaren med räknare för tappade toner (C16) | `dist\sf2player_32v_drops.fwsc` (2026-11-05: linjär interpolering igen, raden `DROPPED` på programsidan, SAVE nollställer) |
 | SF2-firmwaren med smartare röststöld (C17) | `dist\sf2player_32v_steal.fwsc` (2026-11-05: utklingande toner tas före hållna) |
+| SF2-firmwaren med MIDI-filspelaren (C18-C20) | `dist\sf2player_midiplay.fwsc` (grenen `sf2-midiplay`, 2026-11-05: en låt i RAM, PLAY spelar och stoppar). Låtsidan: <http://localhost:8765/song.html> |
 | Reserv om det knastrar | `dist\sf2player_24v_32k.fwsc` (24 röster, samma bank) |
 | Originalfirmwaren (V15) | `fm1_open\sdk\firmware\FM-1_015.fwsc` |
 | Workbench för att flasha | <https://open.m-vave.com/fm1-workbench> (Chrome eller Edge, USB-kabel) |
@@ -74,6 +75,9 @@ banken i ett svep. Notera i så fall tid och vad sidan visade för varje steg.
 | C15 | Tryck REC. Jämför med `dist\sf2player_32v_info.txt`. Tryck REC igen. Prova också HOME från infosidan. | Sidan `INFO`: firmwarens namn `SF2PLAYER_32V_INFO.FWSC`, byggtid och CRC32; bankens namn `GM_32K_BFP8.FM1B`, byggtid och CRC32; `SOUNDSET CHECKSUM:` med stor text. Alla tre CRC32 som i .txt-filen (firmwarens skiljer sig från 7-Zips värde för .fwsc-filen, det är väntat). REC tillbaka till samma sida; HOME byter sida. | |
 | C16 | Tryck SAVE, spela `MIDIs\R.ASTLEY.Never gonna give you up K.mid` från Windows, titta på raden `DROPPED HELD h TAIL t CPU c`. | `HELD` räknar toner som klippts medan de lät (de du hör falla bort), `TAIL` utklingningar som kortats, `CPU` vad CPU-spärren tog. Notera siffrorna efter låten. `CPU` över 0 betyder att spärren slog till. Emulatorn gav `HELD 379 TAIL 1021 CPU 0` för de första 80 s. | |
 | C17 | Med `sf2player_32v_steal.fwsc`: tryck SAVE, spela samma låt som i C16 och jämför `HELD` med C16. | `HELD` klart lägre än med `_drops` (på PC:n 57 % färre för hela låten), `TAIL` högre. Färre toner hörs falla bort. | |
+| C18 | Med `sf2player_midiplay.fwsc`: öppna `song.html`, släpp `MIDIs\R.ASTLEY.Never gonna give you up K.mid` på sidan och klicka **Send to FM-1**. Notera tiden sidan visar. | Sidan säger `Done in n s`. FM-1 visar `UPLOAD n R0` och raden `SONG R.ASTLEY.NEVER G 3:38  PLAY STARTS`. | |
+| C19 | Tryck PLAY på FM-1. Lyssna en minut och tryck PLAY igen. Tryck PLAY en gång till. | Låten spelar i rätt tempo, raden blir grön med tiden (`PLAY ... 0:12/3:38`) och PLAY lyser. Andra trycket: alla toner tystnar inom en sekund och lampan släcks. Tredje trycket: låten börjar om från början med rätt instrument. | |
+| C20 | Tryck REC medan låten spelar och notera `FREE RAM n KB FOR A SONG`. Prova HOME (kanalsidan), ARP och SEQ medan låten spelar. | Infosidan visar låten och hur mycket RAM som är ledigt. Den siffran avgör hur stora låtar som får plats. Kanalsidan visar låtens kanaler, och mute och solo fungerar som för MIDI från datorn. | |
 
 ## D. MIDI in (USB, DIN, BLE)
 
