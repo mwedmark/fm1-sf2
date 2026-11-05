@@ -192,6 +192,7 @@ cd D:\git\fm1-sf2
 .\start_emu.ps1            # multitimbral check: serves emu\ on 127.0.0.1:8781 and opens it
 .\start_emu.ps1 -Script '' # no script, play it yourself with the keys or a MIDI keyboard
 .\start_emu.ps1 -Tap       # the page that records the emulator's audio into window.__cap (see step 6)
+.\start_emu.ps1 -Update    # first fetch the emulator's newest files from its site (the old ones go to emu\previous\)
 ```
 
 `start_emu.ps1` keeps the emulator's site files in `emu\` (git ignores it), copies the newest `FM1_OFFICIAL_OPEN.fwsc` and `test_emu\*` into it,
@@ -199,6 +200,13 @@ makes `gm.flash` from `dist\gm_32k.fm1b` when needed, points the `sf2` entry of 
 hidden if nothing listens on the port, and opens the URL. The first run copies the emulator's files from the old scratchpad folder below;
 if that is gone it stops and lists the files to download from the site. Stop the server by its port, so that other Python servers survive:
 `Get-NetTCPConnection -State Listen -LocalPort 8781 | ForEach-Object { Stop-Process -Id $_.OwningProcess }`.
+It also makes three local changes to `emu\main.js` (once, and again after `-Update`): a browser that has run `sf2` before kept
+that package in its storage and booted it again after every new build until "Check for firmware updates" was pressed (seen
+2026-11-05 in Chrome: REC did nothing, the page ran a build from before the CPU display); now a kept copy is used only while its
+`?v=` address is the current one. `window.__lcd` holds the latest screen, so a test can read it while the page is hidden, and
+`window.__perf` the load figures. When the site's `firmwares.json` has no `sf2` entry (after `-Update`) the script adds one.
+`-Update` was first run on 2026-11-05: a new `fm1_web.wasm` (3 358 200 bytes, was 2 817 402 from 2026-10-31), `worklet.js`,
+`fwsc.js`, `main.js` and catalog; the info page, the multitimbral check (`mt.script`) and the CRC32s worked unchanged in it.
 The rest of this section is how it works, and what the script does by hand.
 
 fm1-emu (<https://joakimeriksson.github.io/fm1-emu/>, MIT) runs `.fwsc` packages unchanged. The firmware package has no bank, so it

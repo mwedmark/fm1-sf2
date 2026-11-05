@@ -4,7 +4,8 @@
 #   .\start_emu.ps1 -Script ''           no script: play it yourself
 #   .\start_emu.ps1 -Tap                 the page that records the emulator's audio into window.__cap (test_emu/tap.js)
 #   .\start_emu.ps1 -Bank dist\gm_32k_bfp8.fm1b   another bank (make_bank.js builds them): the same firmware plays every format
-param([int]$Port = 8781, [string]$Script = 'mt.script', [switch]$Tap, [switch]$NoBrowser, [string]$Bank = 'dist\gm_32k.fm1b')
+#   .\start_emu.ps1 -Update              first fetch the emulator's newest files from its site (the old ones go to emu\previous\)
+param([int]$Port = 8781, [string]$Script = 'mt.script', [switch]$Tap, [switch]$NoBrowser, [string]$Bank = 'dist\gm_32k.fm1b', [switch]$Update)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $emu = Join-Path $root 'emu'
@@ -18,6 +19,31 @@ if (!(Test-Path (Join-Path $emu 'main.js'))) {
     foreach ($f in $site) { Copy-Item (Join-Path $old.DirectoryName $f) $emu -Force }
     Write-Host "Copied the emulator's files from $($old.DirectoryName)"
 }
+if ($Update) {
+    $previous = Join-Path $emu 'previous'
+    New-Item -ItemType Directory -Force $previous | Out-Null
+    foreach ($f in $site) {
+        $here = Join-Path $emu $f
+        if (Test-Path $here) { Copy-Item $here $previous -Force }
+        Invoke-WebRequest "https://joakimeriksson.github.io/fm1-emu/$f" -OutFile $here -UseBasicParsing
+    }
+    Write-Host "Fetched the emulator's files from https://joakimeriksson.github.io/fm1-emu/ (the old ones are in $previous)"
+}
+
+# 1b. three local changes to the emulator's main.js, made once (again after -Update):
+#  - a browser keeps the package it ran first under the id sf2 (IndexedDB) and boots those bytes until "Check for firmware
+#    updates" is pressed; every build has its own address (?v= below), so take a kept copy only while the address is the same
+#  - window.__lcd holds the latest screen, so a test can read it while the page is hidden (RUNNING.md section 4)
+#  - window.__perf, the load and idle share a test reads (test_emu\measure_load.ps1)
+$mainJs = Join-Path $emu 'main.js'
+$code = Get-Content $mainJs -Raw
+$patched = $code -replace '(  const kept = await keptEntry\(f\.id\);\r?\n)  if \(kept\) \{', '$1  if (kept && (f.id !== "sf2" || kept.url === f.package)) {   // local: a new build of sf2 is fetched'
+if ($patched -notmatch '__lcd') {
+    $patched = $patched -replace '(  if \(!m\.lcd && frame\?\.lcd\) m\.lcd = frame\.lcd;)(\r?\n)', '$1$2  if (m.lcd) window.__lcd = m.lcd;   // local addition: lets a test read the screen while the page is hidden$2'
+}
+if ($patched -notmatch 'window\.__perf') { $patched = $patched.TrimEnd() + "`n`nwindow.__perf = perf;   // local addition: lets a test read load and idleShare`n" }
+if ($patched -ne $code) { Set-Content $mainJs $patched -NoNewline }
+if ($patched -notmatch 'a new build of sf2 is fetched') { Write-Warning "main.js changed upstream: a browser may boot an older sf2 build (press Check for firmware updates)" }
 
 # 2. the firmware (the newest build), the bank as a flash overlay, and our scripts and tap
 $build = Join-Path $root 'fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc'
@@ -40,8 +66,13 @@ $page = Join-Path $emu 'index_tap.html'
 # 3. the firmware catalog entry "sf2" points at this server's port
 $catalog = Join-Path $emu 'firmwares.json'
 $json = Get-Content $catalog -Raw
-if ($json -notmatch '"id":\s*"sf2"') { throw "firmwares.json has no sf2 entry: add one with id sf2 and package http://127.0.0.1:$Port/sf2player.fwsc" }
-# ?v= the package's time: each build gets its own address, so no browser can play a copy it kept of an older one
+if ($json -notmatch '"id":\s*"sf2"') {                     # the site's catalog (a new one after -Update) has no entry of ours
+    $entry = '{"id": "sf2", "name": "sf2player", "version": "test", "author": "local", "license": "GPL-3.0", "about": "local test", ' +
+             '"repo": "http://127.0.0.1", "package": "http://127.0.0.1:' + $Port + '/sf2player.fwsc"}'
+    $json = $json -replace '("firmwares":\s*\[)', "`$1`n    $entry,"
+    if ($json -notmatch '"id":\s*"sf2"') { throw "firmwares.json: no firmwares list to add the sf2 entry to" }
+}
+# ?v= the package's time: each build gets its own address, and main.js (1b) boots a kept copy only of the same address
 $version = (Get-Item $package).LastWriteTimeUtc.Ticks
 $json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc(\?v=\d+)?', "http://127.0.0.1:$Port/sf2player.fwsc?v=$version"
 Set-Content $catalog $json -NoNewline
