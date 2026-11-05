@@ -592,15 +592,22 @@ const MOD_DEFAULTS = [0, 0, 0, -12000, 0, -12000, 0, 0, 0, 13500, 0, 0, 0, -1200
 //   sample data (each sample padded to 4 bytes)
 const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
 const FM1B_HEADER = 76, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 40;
+const FM1B_INFO_HEADER = 80, FM1B_INFO = 52;                 // with an info block: an 80-byte header, then name[32] and date[20]
+// The info block a bank carries for the panel's info page: the file's name and when it was made ("2026-11-05 14:32", local time).
+function bankInfo(name, when = new Date()) {
+  const two = n => String(n).padStart(2, '0');
+  return { name, date: `${when.getFullYear()}-${two(when.getMonth() + 1)}-${two(when.getDate())} ${two(when.getHours())}:${two(when.getMinutes())}` };
+}
 
-function writeFm1(bank) {
+// info: { name, date } (bankInfo) puts an info block after the header; without it the bank is laid out as before it existed.
+function writeFm1(bank, info) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
   const slot = p => p.bank === 0 ? p.preset : p.bank === 128 ? 128 + p.preset : -1;
   const presets = bank.presets.filter(p => slot(p) >= 0 && slot(p) < 256 && p.count <= 254);
   bank.dropped = bank.presets.length - presets.length;
   const np = presets.length, nz = bank.zones.length;
 
-  const offPitch = FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
+  const offInfo = info ? FM1B_INFO_HEADER : 0, offPitch = info ? FM1B_INFO_HEADER + FM1B_INFO : FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
   const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offExtra = offZone + FM1B_ZONE * nz, offEnv = offExtra + FM1B_ZONE_EXTRA * nz;
   const envs = [], envIndex = new Map();                    // envelopes are shared between zones
   for (const z of bank.zones) {
@@ -653,6 +660,12 @@ function writeFm1(bank) {
   dv.setUint32(64, FM1B_MOD, true);                        // their size
   dv.setUint32(68, nLayers ? offLayer : 0, true);           // stacked layers: a (first, count) a preset, then the entries
   dv.setUint32(72, nLayers, true);
+  if (info) {                                              // offset 76: the info block, ASCII, zero padded
+    dv.setUint32(76, offInfo, true);
+    const put = (o, text, size) => { for (let i = 0; i < Math.min(size - 1, text.length); i++) out[o + i] = text.charCodeAt(i) & 0x7f; };
+    put(offInfo, info.name || '', 32);
+    put(offInfo + 32, info.date || '', 20);
+  }
   [offPitch, offBank, offPre, offKey, offZone, offSmp, end].forEach((v, i) => dv.setUint32(16 + i * 4, v, true));
 
   for (let i = 0; i < 128; i++) dv.setUint32(offPitch + i * 4, Math.round(Math.pow(2, (i - 64) / 12) * 65536), true);
@@ -904,7 +917,8 @@ function writeSf2(bank, name) {
       bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
     } catch (e) { showErr('The conversion failed: ' + e.message); return; }
     if (!bank.zones.length) { $('result').hidden = true; showErr('The preset has no playable sounds.'); return; }
-    const bin = writeFm1(bank);
+    bank.info = bankInfo(baseName + '_fm1.bin');             // one name and time a conversion: the file sent and the one saved are the same
+    const bin = writeFm1(bank, bank.info);
     $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zones, ' + bank.samples.length + ' unique sounds, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
       '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
       (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(more than the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (fits in the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
@@ -1030,7 +1044,7 @@ function writeSf2(bank, name) {
   const syncCodec = () => { $('bits').disabled = $('codec').value !== 'pcm'; };   // SEA is always coded from 16 bit
   $('codec').addEventListener('change', syncCodec);
   syncCodec();
-  $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank), baseName + '_fm1.bin', 'application/octet-stream'));
+  $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank, bank.info), baseName + '_fm1.bin', 'application/octet-stream'));
   // ---- Send the bank to the FM-1 (the SF2 player firmware receives it as SysEx and writes it to flash) ----
   const send = { access: null, busy: false };
   function sendMsg(text, bad) { const el = $('sendStatus'); el.hidden = !text; el.textContent = text || ''; el.className = bad ? 'meta warn' : 'meta'; }
@@ -1060,7 +1074,7 @@ function writeSf2(bank, name) {
   const SEND_ERRORS = { 1: 'malformed frame', 2: 'outside the flash', 3: 'flash error', 4: 'checksum mismatch', 5: 'no transfer in progress' };
   async function sendBank() {
     if (send.busy || !bank) return;
-    const bin = writeFm1(bank);
+    const bin = writeFm1(bank, bank.info);
     if (bin.length > FM1_SAMPLE_BANK) { sendMsg('The bank (' + fmtBytes(bin.length) + ') is larger than the flash (' + fmtBytes(FM1_SAMPLE_BANK) + ').', true); return; }
     if (!navigator.requestMIDIAccess) { sendMsg('This browser has no Web MIDI. Use Chrome or Edge.', true); return; }
     try {

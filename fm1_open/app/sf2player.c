@@ -13,6 +13,9 @@
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
+#if __has_include("build_info.h")
+#include "build_info.h"                                  /* written by build_fw.ps1: FM1_BUILD_NAME, FM1_BUILD_DATE */
+#endif
 
 /* sdk/Build.ps1 insists that the library's Bluetooth control calls and the tuning/edit hooks are linked, and the linker
  * drops what nothing references. The stock panel referenced them; this table does, and is itself never read. */
@@ -102,7 +105,7 @@ static const uint8_t font[36][5] = {
 static const uint8_t punctuation[][6] = {
     {'-', 8, 8, 8, 8, 8}, {'/', 0x60, 0x18, 6, 1, 0}, {'+', 8, 8, 0x3e, 8, 8}, {'%', 0x63, 0x13, 8, 0x64, 0x63},
     {'.', 0, 0x60, 0x60, 0, 0}, {':', 0, 0x36, 0x36, 0, 0}, {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'(', 0, 0x1c, 0x22, 0x41, 0},
-    {')', 0, 0x41, 0x22, 0x1c, 0}};
+    {')', 0, 0x41, 0x22, 0x1c, 0}, {'_', 0x40, 0x40, 0x40, 0x40, 0x40}};
 enum { WHITE = 0xffff, GREY = 0x8410, DIM = 0x4208, DARK_GREEN = 0x0300, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
        LINE_CHARS = 41, LINES = 20, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
@@ -181,7 +184,9 @@ static void upload_line(void)
 }
 
 /* ---- the channel page (HOME): what each MIDI channel plays and its controllers ----------------------------------- */
-static unsigned page;                                     /* 0: the program and its zone, 1: the 16 channels */
+enum { PAGE_PROGRAM, PAGE_CHANNELS, PAGE_INFO };
+static unsigned page;                                     /* PAGE_PROGRAM: the program and its zone, PAGE_CHANNELS: the 16 channels */
+static unsigned info_return;                              /* the page REC goes back to from the info page */
 static unsigned cursor;                                   /* the channel page's selected channel, 0..15: KNOB1 moves it */
 enum { CURSOR_BACK = 0x3a6b };                            /* the selected row's background: slate blue */
 static unsigned bar_drawn = 1000;                         /* the level bar's width on the screen (1000: not drawn) */
@@ -211,6 +216,111 @@ static char *put_cpu(char *d)
     d = put_number(d, (int32_t)cpu_peak, 0);
     *d++ = '%';
     return d;
+}
+/* ---- the info page (REC): which firmware and which bank, each with its CRC32, and the two together ------------------ */
+/* The firmware's name and build time: from build_fw.ps1 (build_info.h), else the package's name and the compiler's clock. */
+#ifndef FM1_BUILD_NAME
+#define FM1_BUILD_NAME "FM1_OFFICIAL_OPEN.fwsc"
+#endif
+#ifndef FM1_BUILD_DATE
+#define FM1_BUILD_DATE ""
+#endif
+/* The application image as the packager got it (sdk/Build.ps1: .text, .data, .ram0_data, .cache_ram_data back to back) lies
+ * in flash from text_begin on; the data sections' first copies follow the code (linker.ld.in, the *_lma symbols). */
+extern char text_begin[], text_size[], data_size[], _ram0_data_size[], cache_ram_data_size[];
+static uint32_t crc_table[256];
+static uint32_t crc32_add(uint32_t crc, const uint8_t *p, uint32_t bytes)
+{
+    if (!crc_table[1])
+        for (uint32_t n = 0; n < 256; ++n) {
+            uint32_t c = n;
+            for (unsigned k = 0; k < 8; ++k) c = c & 1U ? 0xedb88320U ^ (c >> 1) : c >> 1;
+            crc_table[n] = c;
+        }
+    while (bytes--) crc = crc_table[(crc ^ *p++) & 0xffU] ^ (crc >> 8);
+    return crc;
+}
+/* The CRC32s (as zip and 7-Zip show them, fm1_info.js prints the same): the firmware image, the bank file, and the sound set,
+ * one CRC32 over the firmware image followed by the bank file. Worked out when REC opens the page: the firmware's once, the
+ * bank's every time (an upload may have changed it). */
+static uint32_t firmware_crc_state, firmware_crc, bank_crc, soundset_crc;
+static uint32_t firmware_bytes;
+static unsigned firmware_crc_done;
+static struct fm1b_info info_bank;
+static void info_compute(void)
+{
+    if (!firmware_crc_done) {
+        firmware_bytes = (uint32_t)(uintptr_t)text_size + (uint32_t)(uintptr_t)data_size + (uint32_t)(uintptr_t)_ram0_data_size +
+                         (uint32_t)(uintptr_t)cache_ram_data_size;
+        firmware_crc_state = crc32_add(~0U, (const uint8_t *)text_begin, firmware_bytes);
+        firmware_crc = ~firmware_crc_state;
+        firmware_crc_done = 1;
+    }
+    fm1b_info(&info_bank);
+    if (info_bank.image) {
+        bank_crc = ~crc32_add(~0U, info_bank.image, info_bank.bytes);
+        soundset_crc = ~crc32_add(firmware_crc_state, info_bank.image, info_bank.bytes);
+    }
+}
+static char *put_hex(char *d, uint32_t v)
+{
+    for (int shift = 28; shift >= 0; shift -= 4) *d++ = "0123456789ABCDEF"[(v >> shift) & 15U];
+    return d;
+}
+/* "Nov  5 2026" "14:32:10" as 2026-11-05 14:32 */
+static char *put_compile_date(char *d)
+{
+    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *date = __DATE__, *time = __TIME__;
+    unsigned month = 1;
+    for (unsigned m = 0; m < 12; ++m)
+        if (!strncmp(months + 3 * m, date, 3)) month = m + 1;
+    d = put_text(d, (char[]){date[7], date[8], date[9], date[10], '-', (char)('0' + month / 10), (char)('0' + month % 10), '-',
+                             date[4] == ' ' ? '0' : date[4], date[5], ' ', time[0], time[1], ':', time[3], time[4], 0});
+    return d;
+}
+static void info_update(void)
+{
+    char line[LINE_CHARS + 1], *d;
+    line_show(0, 8, "INFO", 2, WHITE);
+    line_show(1, 34, "FIRMWARE", 1, YELLOW);
+    line_show(2, 46, FM1_BUILD_NAME, 1, WHITE);
+    d = put_text(line, "BUILT ");
+    d = FM1_BUILD_DATE[0] ? put_text(d, FM1_BUILD_DATE) : put_compile_date(d);
+    *d = 0;
+    line_show(3, 58, line, 1, CYAN);
+    d = put_hex(put_text(line, "CRC32 "), firmware_crc);
+    d = put_text(d, "  ");
+    d = put_number(d, (int32_t)firmware_bytes, 0);
+    d = put_text(d, " BYTES");
+    *d = 0;
+    line_show(4, 70, line, 1, CYAN);
+
+    line_show(5, 92, "BANK", 1, YELLOW);
+    if (!info_bank.image) {
+        line_show(6, 104, "NO BANK", 1, ORANGE);
+        line_show(7, 116, "", 1, CYAN);
+        line_show(12, 128, "", 1, CYAN);
+        line_show(9, 156, "", 1, YELLOW);
+        line_show(10, 170, "", 2, YELLOW);
+    } else {
+        line_show(6, 104, info_bank.name[0] ? info_bank.name : "NO NAME (AN OLDER BANK)", 1, info_bank.name[0] ? WHITE : GREY);
+        d = put_text(line, "BUILT ");
+        d = put_text(d, info_bank.date[0] ? info_bank.date : "-");
+        *d = 0;
+        line_show(7, 116, line, 1, CYAN);
+        d = put_hex(put_text(line, "CRC32 "), bank_crc);
+        d = put_text(d, "  ");
+        d = put_number(d, (int32_t)info_bank.bytes, 0);
+        d = put_text(d, " BYTES");
+        *d = 0;
+        line_show(12, 128, line, 1, CYAN);
+        line_show(9, 156, "SOUNDSET CHECKSUM:", 1, YELLOW);
+        *put_hex(line, soundset_crc) = 0;
+        line_show(10, 170, line, 2, YELLOW);
+    }
+    upload_line();
+    line_show(11, 228, "REC BACK", 1, GREY);
 }
 static void page_clear(void)
 {
@@ -350,13 +460,17 @@ static void screen_update(void)
     char line[LINE_CHARS + 1], *d;
     fm1b_status(&st);
     cpu_read();
+    if (page == PAGE_INFO) {
+        info_update();
+        return;
+    }
     if (!st.ready) {
-        if (page) { page = 0; page_clear(); }
+        if (page) { page = PAGE_PROGRAM; page_clear(); }
         line_show(0, 8, "NO BANK", 2, ORANGE);
         upload_line();
         return;
     }
-    if (page) {
+    if (page == PAGE_CHANNELS) {
         channels_update(&st);
         return;
     }
@@ -520,7 +634,8 @@ void groove_screen_init(void)
     drum_mode = 0;
     sounding_drum = 0;
     program = 0;
-    page = 0;
+    page = PAGE_PROGRAM;
+    info_return = PAGE_PROGRAM;
     cursor = 0;
     leds_shown = 0xffU;
     memset(shown, 0, sizeof shown);
@@ -529,12 +644,12 @@ void groove_screen_init(void)
     bar_drawn = 1000;
 }
 /* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only). */
-enum { BUTTON_ARP = 10, BUTTON_SEQ = 11 };
+enum { BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_REC = 13 };
 static void leds_update(void)
 {
     struct fm1b_channel info;
     unsigned leds = 0;
-    if (page) {
+    if (page == PAGE_CHANNELS) {
         fm1b_channel_info(cursor, &info);
         leds = info.muted | info.solo << 1;
     }
@@ -550,17 +665,19 @@ void groove_screen_control(void)
     struct fm1_controls controls;
     fm1_controls_read(&controls);
     (void)groove_master_update(controls.knob);               /* MASTER: the output level on every page; without it the output stays muted */
+    /* The info page shows over the page REC was pressed on: the knobs, keys, ARP and SEQ go on working as they do there. */
+    unsigned channels = (page == PAGE_INFO ? info_return : page) == PAGE_CHANNELS;
     /* The knobs: SELECT (encoder 0) programs, ALGORITHM (1) the selected channel's volume, KNOB1 (2) the channel page's
      * cursor, KNOB2 (3) pan, KNOB3 (4) reverb and KNOB4 (5) chorus. On the program page SELECT picks the panel's program,
      * KNOB2 pans the whole mix and KNOB3/KNOB4 set the effects' master levels; on the channel page SELECT picks the selected
      * channel's program, ALGORITHM sets its volume (CC 7), KNOB2 its pan (CC 10) and KNOB3/KNOB4 its sends. */
-    if (controls.encoders[0] && !page) {
+    if (controls.encoders[0] && !channels) {
         int step = controls.encoders[0] > 0 ? 1 : -1;
         for (int clicks = controls.encoders[0] * step; clicks > 0; --clicks)
             for (int next = (int)program + step; next >= 0 && next < 128; next += step)
                 if (fm1b_program(0, (unsigned)next) == 0) { program = (unsigned)next; break; }
     }
-    if (page) {
+    if (channels) {
         int moved = (int)cursor + controls.encoders[2];
         cursor = (unsigned)(moved < 0 ? 0 : moved > (int)FM1B_CHANNELS - 1 ? (int)FM1B_CHANNELS - 1 : moved);
         if (controls.encoders[0])
@@ -576,12 +693,12 @@ void groove_screen_control(void)
         if (!controls.encoders[which])
             continue;
         struct fm1b_channel info;
-        if (page)
+        if (channels)
             fm1b_channel_info(cursor, &info);
-        int level = page ? (int)(which == 4 ? info.reverb : info.chorus) : (int)(which == 4 ? sf2fx_reverb() : sf2fx_chorus());
+        int level = channels ? (int)(which == 4 ? info.reverb : info.chorus) : (int)(which == 4 ? sf2fx_reverb() : sf2fx_chorus());
         level += controls.encoders[which] * 4;
         level = level < 0 ? 0 : level > 127 ? 127 : level;
-        if (page)
+        if (channels)
             sf2player_channel_control(cursor, which == 4 ? 91U : 93U, (unsigned)level);
         else if (which == 4)
             sf2fx_set((unsigned)level, sf2fx_chorus());
@@ -590,11 +707,11 @@ void groove_screen_control(void)
     }
     if (controls.encoders[3]) {                               /* KNOB2: pan, for everything or for the selected channel */
         struct fm1b_channel info;
-        if (page)
+        if (channels)
             fm1b_channel_info(cursor, &info);
-        int pan = (page ? (int)info.pan : (int)sf2fx_pan()) + controls.encoders[3] * 4;
+        int pan = (channels ? (int)info.pan : (int)sf2fx_pan()) + controls.encoders[3] * 4;
         pan = pan < 0 ? 0 : pan > 127 ? 127 : pan;
-        if (page)
+        if (channels)
             sf2player_channel_control(cursor, 10U, (unsigned)pan);
         else
             sf2fx_set_pan((unsigned)pan);
@@ -604,15 +721,26 @@ void groove_screen_control(void)
     if ((pressed & 8U) && fm1b_has_drums())                  /* SCL: button 3 switches between the program and the drum kit */
         drum_mode ^= 1U;
     if (pressed & (1U << 8)) {                                /* HOME: the program page or the channel page */
-        page ^= 1U;
+        page = (page == PAGE_INFO ? info_return : page) == PAGE_CHANNELS ? PAGE_PROGRAM : PAGE_CHANNELS;
+        channels = page == PAGE_CHANNELS;
         page_clear();
     }
-    if (page && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
+    if (pressed & (1U << BUTTON_REC)) {                       /* REC: the info page, and back */
+        if (page == PAGE_INFO)
+            page = info_return;
+        else {
+            info_return = page;
+            page = PAGE_INFO;
+            info_compute();
+        }
+        page_clear();
+    }
+    if (channels && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
         struct fm1b_channel info;
         fm1b_channel_info(cursor, &info);
         sf2player_channel_mute(cursor, !info.muted);
     }
-    if (page && (pressed & (1U << BUTTON_SEQ))) {             /* SEQ: solo the selected channel; again on it: no solo */
+    if (channels && (pressed & (1U << BUTTON_SEQ))) {             /* SEQ: solo the selected channel; again on it: no solo */
         struct fm1b_channel info;
         fm1b_channel_info(cursor, &info);
         sf2player_channel_solo(info.solo ? -1 : (int)cursor);
@@ -631,7 +759,7 @@ void groove_screen_control(void)
             int note = FIRST_NOTE + (int)key + 12 * octave;
             sounding[key] = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
             sounding_drum = (sounding_drum & ~(1U << key)) | (drum_mode << key);
-            sounding_channel[key] = (uint8_t)(page ? cursor : 255U);   /* the channel page: the keys play the selected channel */
+            sounding_channel[key] = (uint8_t)(channels ? cursor : 255U);   /* the channel page: the keys play the selected channel */
         }
         if (sounding_channel[key] != 255U) {
             if (sounding_channel[key] == 9U)

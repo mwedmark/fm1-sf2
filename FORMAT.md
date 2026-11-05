@@ -5,7 +5,7 @@ a note lookup is four indexed loads. Little endian throughout, every table and e
 Offsets are in bytes from the start of the file.
 
 ```
-header (76) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | layers | sample data
+header (76 or 80) | info (52, optional) | pitch table | bank map | presets | key maps | zones | zone levels | envelopes | modulation | layers | sample data
 ```
 
 ## Header (76 bytes)
@@ -33,6 +33,19 @@ header (76) | pitch table | bank map | presets | key maps | zones | zone levels 
 | 64 | u32 | bytes per modulation record, 40 (a multiple of 4, at least 20). Only there when the pitch table starts at 68 or later: a 64-byte header (banks of the `sf2-lfo` branch) has records of 20 bytes, without the filter |
 | 68 | u32 | offset of the layers, 0 = none (every key plays only its key map's zone). Only there when the pitch table starts at 76 or later: a 68-byte header (banks before the layers) has none |
 | 72 | u32 | number of layer entries |
+| 76 | u32 | offset of the info block, 0 = none. Only there when the pitch table starts at 80 or later: a bank without an info block keeps the 76-byte header |
+
+### Info (52 bytes, optional)
+
+What the panel's info page (REC) shows about the bank. The writer (`writeFm1(bank, info)` in `index.html`) puts it right after an
+80-byte header, so the pitch table starts at 132; without `info` the bank is laid out as before (76-byte header, no block).
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | char[32] | the bank file's name, ASCII, zero padded (`make_bank.js`: the output file's name; the converter page: `<sf2 name>_fm1.bin`) |
+| 32 | char[20] | when it was made, `2026-11-05 14:32` (local time), zero padded |
+
+The player reads neither for playing. The info page also shows the CRC32 of the whole bank file, which it works out itself.
 
 Samples are mono. Without bit 1 they are signed PCM: 8-bit is `int8`, 16-bit is `int16`, 12-bit packs two samples in three bytes:
 for the pair at byte `3k`, sample `2k` is `b0 | (b1 & 0x0f) << 8` and sample `2k+1` is `b1 >> 4 | b2 << 4`, both signed 12-bit

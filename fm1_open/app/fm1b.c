@@ -289,6 +289,19 @@ int fm1b_program(unsigned program_bank, unsigned program)
     bank.last_zone_record = NULL;
     return 0;
 }
+void fm1b_info(struct fm1b_info *info)
+{
+    memset(info, 0, sizeof *info);
+    if (!bank.image)
+        return;
+    info->image = bank.image;
+    info->bytes = bank.bytes;
+    uint32_t at = bank.pitch >= 80U ? rd32(bank.image + 76) : 0U;   /* an 80-byte header has the info block's offset */
+    if (!at || !region_ok(at, 52))
+        return;
+    for (unsigned i = 0; i < 32 && bank.image[at + i] >= ' ' && bank.image[at + i] < 127; ++i) info->name[i] = (char)bank.image[at + i];
+    for (unsigned i = 0; i < 20 && bank.image[at + 32 + i] >= ' ' && bank.image[at + 32 + i] < 127; ++i) info->date[i] = (char)bank.image[at + 32 + i];
+}
 void fm1b_status(struct fm1b_status *status)
 {
     memset(status, 0, sizeof *status);

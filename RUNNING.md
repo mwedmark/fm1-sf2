@@ -16,6 +16,20 @@ Everything needed to get the SF2 player going again. Facts marked **(verified)**
 
 ## 1. Build the firmware (verified)
 
+**With a name** (2026-11-05), for the panel's info page (REC, section 5):
+
+```powershell
+cd D:\git\fm1-sf2
+.\build_fw.ps1 -Name sf2player_32v_info                       # dist\sf2player_32v_info.fwsc and dist\sf2player_32v_info.txt
+.\build_fw.ps1 -Name sf2player_32v_info -Bank dist\gm_32k.fm1b  # the .txt then has that bank's and the sound set's CRC32
+```
+
+It writes the name and time to `fm1_open\app\build_info.h` (git ignores it), runs the plain build below, removes the header again,
+copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prints next to it. A plain build shows
+`FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
+
+**Plain:**
+
 ```powershell
 cd D:\git\fm1-sf2\fm1_open
 $env:FM1_PI32_TOOLCHAIN = 'D:\JL\pi32'
@@ -269,6 +283,14 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 - Send a bank over USB MIDI from the converter page ("Skicka till FM-1"). The panel shows `UPLOAD n Rx` and then the program.
 - Panel: SELECT program, OCT-/OCT+ octave, SCL drums, HOME channel page, MASTER main volume, KNOB2 pan, KNOB3 reverb, KNOB4 chorus;
   on the channel page ALGORITHM channel volume, ARP mute, SEQ solo (see section 7).
+- REC shows the info page, REC again goes back (HOME goes to the program or channel page). Firmware: its file name, build time,
+  CRC32 and size; bank: its file name and build time (from its info block, FORMAT.md; an older bank has none), CRC32 and size;
+  and the `SOUNDSET CHECKSUM`, one CRC32 over the firmware image followed by the bank file. The keys and knobs keep working as on
+  the page below. `node fm1_info.js [sdk.elf] [bank.fm1b]` prints the same three numbers on the PC.
+  The firmware CRC32 is over the application image the packager gets (`.text .data .ram0_data .cache_ram_data`, 437 692 bytes
+  on 2026-11-05), read from flash where the code runs: the `.fwsc` file is ciphered, so 7-Zip's CRC32 of it is a different number.
+  The bank CRC32 is the file's own (as 7-Zip shows it). The page works them out when REC opens it (about 0.9 MB of reading).
+  Checked in fm1-emu on 2026-11-05: all three as `fm1_info.js` gives them, for a bank with an info block and an older one.
   Pan (then on KNOB3, and CC10) was reported working after it was added.
 
 ## 6. Playing it from Windows

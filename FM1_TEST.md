@@ -11,6 +11,7 @@ med dagens konverterare, annars saknar den zonnivåer, zonernas reverb/chorus, L
 | --- | --- |
 | SF2-firmwaren | `dist\sf2player_32v_32k.fwsc` (32 röster) |
 | SF2-firmwaren med mute/solo (C8-C13) | `dist\sf2player_32v_mute.fwsc` (2026-11-04: ARP mute, SEQ solo, ALGORITHM kanalvolym, MASTER alltid huvudvolym; samma bank) |
+| SF2-firmwaren med infosidan (C15) | `dist\sf2player_32v_info.fwsc` (2026-11-05: REC visar firmware, bank och CRC32), med `dist\gm_32k_bfp8.fm1b` (ny, har namn och datum). Förväntade värden i `dist\sf2player_32v_info.txt` |
 | Reserv om det knastrar | `dist\sf2player_24v_32k.fwsc` (24 röster, samma bank) |
 | Originalfirmwaren (V15) | `fm1_open\sdk\firmware\FM-1_015.fwsc` |
 | Workbench för att flasha | <https://open.m-vave.com/fm1-workbench> (Chrome eller Edge, USB-kabel) |
@@ -68,6 +69,7 @@ banken i ett svep. Notera i så fall tid och vad sidan visade för varje steg.
 | C12 | Markera en kanal, tryck SEQ. Flytta markören till en annan kanal och tryck SEQ. Tryck SEQ igen. | Bara den kanalen hörs (`S` sist, övriga rader mörkgrå, rubriken säger `SOLO`, SEQ lyser på den raden). Solot flyttar till den nya kanalen. Igen: alla hörs, `SOLO` försvinner. | |
 | C13 | Mute på en kanal som spelar många toner, titta på `CHANNELS n/32`. | Röstantalet sjunker när kanalen tystnat (tystade kanaler kostar ingen CPU). | |
 | C14 | Spela en tät MIDI-fil, titta på `CPU a% MAX p%` (huvudsidan: raden VOICES; kanalsidan: näst sista raden). | Värdena följer musiken; MAX står kvar ungefär en sekund. Raden blir orange när spärren sänkt röstgränsen. Notera CPU och MAX när gränsen sjunker. | |
+| C15 | Tryck REC. Jämför med `dist\sf2player_32v_info.txt`. Tryck REC igen. Prova också HOME från infosidan. | Sidan `INFO`: firmwarens namn `SF2PLAYER_32V_INFO.FWSC`, byggtid och CRC32; bankens namn `GM_32K_BFP8.FM1B`, byggtid och CRC32; `SOUNDSET CHECKSUM:` med stor text. Alla tre CRC32 som i .txt-filen (firmwarens skiljer sig från 7-Zips värde för .fwsc-filen, det är väntat). REC tillbaka till samma sida; HOME byter sida. | |
 
 ## D. MIDI in (USB, DIN, BLE)
 

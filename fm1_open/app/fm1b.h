@@ -106,6 +106,14 @@ struct fm1b_status {
     uint32_t length, loop_start, loop_end, rate;
 };
 void fm1b_status(struct fm1b_status *status);
+/* The bound bank as a whole, for the panel's info page: its bytes (NULL: no bank), and the name and date of its info block
+ * (FORMAT.md, "Info"), each "" when the bank has none. name has 32 characters at most, date 20. */
+struct fm1b_info {
+    const uint8_t *image;
+    uint32_t bytes;
+    char name[33], date[21];
+};
+void fm1b_info(struct fm1b_info *info);
 /* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
 void fm1b_device_init(void);
 /* Firmware only: bind the FM1B bank in the user flash (1), or leave things as they are (0). */
