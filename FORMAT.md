@@ -221,6 +221,65 @@ The firmware is flashed in step 5 and after, and `FIRMWARE.md` has not been run 
 Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
 then codecs 3 and 2 per sample for the ones that pass a listening test.
 
+## Proposal: more of the SoundFont (not implemented)
+
+With the room that packed sample data gives (see the proposal above), the parts of a SoundFont that the converter leaves out
+("What is left out", below) are worth taking in. None of it is built. `1mgm.sf2` uses none of it (measured with the converter: 0 of
+its 129 presets have velocity ranges, all 153 samples are mono, it has one percussion kit and no preset is dropped), so it cannot be
+tested on that file; the fonts that need it have to be counted first (below).
+
+Space is one of three limits. The others are the **CPU** (`RUNNING.md`: 32 voices from a BFP8 bank run at 50 to 55 %, 69 % as the
+notes start, in fm1-emu at 240 MHz; SEA6 is 84 to 98 %, 111 % as they start) and the **seconds of audio**: the flash holds about 52 to 57 s as MP3 at
+64 kbit/s, and every velocity layer or stereo channel takes its share of them.
+
+| | What is missing | CPU | Samples |
+| --- | --- | --- | --- |
+| Several percussion kits | the player only | none | more (drums are short) |
+| Velocity layers | 2 bytes a zone and a velocity test at note start | none (one layer sounds at a time) | 2 to 4 times for an instrument that has them |
+| Stereo | the converter only, as two zones | 2 voices a note | 2 times |
+| Modulators | a modulator table and its evaluation | small, at block rate | none |
+
+**1. Several percussion kits.** The format already has them: a kit is a preset of bank 128, the bank map index is `128 + program`, and
+`fm1b.h` lets a kit play on any channel by program change. The converter writes every preset of bank 128. What is missing is the player:
+`fm1b.c` takes the first percussion preset the bank has (`drum_preset`) and channel 10 and the SCL drum mode always play that one. Make
+a program change on channel 10 choose the kit, and give the panel a way to choose one (the drum mode's page). A bank with kits that
+share samples costs only the zones.
+
+**2. Velocity layers.** A zone gets a velocity range. The zone levels record (8 bytes, its size is in the header, offset 52) grows to 12:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 8 | u8 | lowest velocity, 0 to 127 |
+| 9 | u8 | highest velocity, 0 to 127 |
+| 10 | u16 | reserved, 0 |
+
+A bank with the 8-byte record plays every zone at every velocity, as now. A note then starts only the zones whose range holds its
+velocity: the key map's zone and every layer entry of the preset that covers the note, each tested (the loop in `zone_start` in
+`fm1b.c`), so one layer sounds at a time as in a SoundFont, with no crossfade between layers. The layer entries already list every zone that
+overlaps a lower one on a key, so the velocity layers are found without a new table. The engine's limit of four zones a note counts the zones that
+start, not the entries, so the entry table can list more than four zones on a key when velocity layers split them. The converter
+drops its filter that keeps only "the layers that answer to velocity 100" and writes the ranges. Tests: `test_layers.js` and
+`test_zone.js` get banks with ranges (a note at velocity 40 and one at 100 start different zones; a range that holds neither starts none).
+
+**3. Stereo.** A stereo pair is two samples in the file (sample type 4 left, 2 right, linked by the sample link field); the converter
+takes the left one now. First step, with no change to the engine: write the pair as two zones that cover the same keys and velocities,
+with the zone pan at -500 (left) and +500 (right), which the pan code already plays, stacked by layer entries. A note then takes two
+voices and twice the CPU, so the 32 voices are 16 notes; measure that against the CPU figures above before choosing it for a font.
+Both channels are stored, so twice the samples (as separate mono MP3 streams there is no gain from the channels being alike). Only if
+that CPU is too much is a stereo voice worth building: one voice that reads two samples with one envelope, filter and LFO.
+
+**4. Modulators.** The converter reads none of the SoundFont's modulators (the instrument and preset `imod` and `pmod` lists). The
+player has a fixed set: velocity to level (squared), CC 7, 10 and 11, the sends CC 91 and 93, the wheel's vibrato, pitch bend. Do not
+design the rest before counting which modulators the fonts really use; a table of (source, destination, amount) per zone, run once a
+block of 128 frames, covering the destinations the engine already has (pitch, level, filter cutoff, pan, LFO depth), is the likely shape.
+
+**Counting first.** A script that reads a SoundFont and says, in the converter's terms: the seconds of audio at the bank's rate
+(samples at 44.1 kHz, 22 kHz or 8-bit are not the same size on disk as in flash), presets by MIDI bank and how many the bank map drops (a
+GS font has variation banks; the bank map has only 0 and 128), percussion kits, presets and zones with velocity ranges and the layers
+they make, stereo pairs, and the count of instrument and preset modulators. It is not written (`measure_zone_codecs.py` reads the same
+headers and can be taken as the start). The numbers decide the order of 1 to 4 for a given font; without them it is
+1, 2, 3, 4: kits and velocity layers cost no CPU, stereo costs voices, modulators cost the most work for the least known gain.
+
 ## Pitch table: 128 x u32
 
 `pitch[i] = round(2^((i-64)/12) * 65536)`, a 16.16 step. Playing a zone at its original pitch is a step of `0x10000`
@@ -370,7 +429,7 @@ const fm1_zone *fm1_find(const uint8_t *f, int bank128, int program, int note, u
 
 The key number's scaling of the modulation envelope, velocity layers (the layer that answers to
 velocity 100 is used), stereo (the left channel is used), modulators (the wheel's vibrato is the player's own), and sample start
-offsets.
+offsets. The first three and the percussion kits are proposed in "Proposal: more of the SoundFont" above.
 
 ## Envelopes: 12 bytes each
 
