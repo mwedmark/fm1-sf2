@@ -169,8 +169,8 @@ sample data of `1mgm.sf2` is 11.7 s at 32 kHz; the bytes per second of audio, an
   gain nothing from it (42 228 bytes at 64 kbit/s against 42 278 for BFP8 + xz), so what is gained comes from the longer ones, and a bank with
   other material gains what that material packs to. With the choice of samples above (25 dB) the bank is 308 204 bytes, about 25 600 bytes a
   second of audio, so about 18 s fit: 1.5 times today's bank.
-- Without an SDRAM none of this works for the whole bank: the unpacked BFP8 of `1mgm.sf2` (0.39 MB) and any bank beyond it do not
-  leave room in the 511 KB of SRAM next to the engine, and the 0.53 MB of the 16 s do not fit in it at all.
+- Without an SDRAM none of this works for the whole bank: the unpacked BFP8 of `1mgm.sf2` (0.39 MB) would take about three quarters of the 511 KB of SRAM
+  that the engine, Bluetooth and USB share (the build needs at least 48 KB of heap), and the 0.53 MB of the 16 s do not fit in it at all.
 
 Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
 then codecs 3 and 2 per sample for the ones that pass a listening test.
