@@ -100,17 +100,18 @@ data as it will be after unpacking). The sample data in the file is the packed s
 | 12 | u32 | packed bytes |
 | 16 | u8 | codec: 0 stored (a copy), 1 LZMA2, 2 MP3, 3 BFP8 in LZMA2 |
 | 17 | u8 | reserved, 0 |
-| 18 | u16 | codec 2: samples to drop at the start of the decoded stream (the encoder delay), else 0 |
-| 20 | u16 | codec 2: loop crossfade in samples, 0 = none; else 0 |
+| 18 | u16 | codec 2: samples to drop at the start of the decoded stream (the encoder delay, once per stream), else 0 |
+| 20 | u16 | codec 2: loop crossfade in samples, 0 = none; else 0. It applies to every zone with the loop flag whose sample lies in the entry |
 | 22 | u16 | reserved, 0 |
 
 - **0** copies `packed bytes` (equal to `unpacked bytes`) to the unpacked offset.
 - **1** is one raw LZMA2 stream (no container, no header) that unpacks to `unpacked bytes` of the bank's format, which can be BFP8 or SEA.
   An entry should cover many samples: one stream over the whole sample area packs about 2 % better than a stream per sample.
-- **2** is one MP3 stream (MPEG-1 layer III, mono, at the bank's rate, no Xing frame) of exactly one sample. The bank's format must then
-  be 16-bit (bit 0) or BFP8 (bit 3). The stream is decoded to 16-bit PCM after dropping `delay` samples and cut at the sample count
-  (`unpacked bytes / 2` for 16-bit, `unpacked bytes * 32 / 33` for BFP8); in a BFP8 bank the PCM is then put into groups of 32 with the
-  converter's rule (the smallest shift that keeps the rounded mantissas in -128..127). BFP8's own noise is about 44 dB below the
+- **2** is one MP3 stream (MPEG-1 layer III, mono, at the bank's rate, no Xing frame) of one sample **or of many in a row**: the entry
+  covers a contiguous range of the unpacked data and the stream is the whole range laid end to end, as the converter lays the samples out
+  (a gap of silence between them is part of the range, see below). The bank's format must then be 16-bit (bit 0) or BFP8 (bit 3).
+  The stream is decoded to 16-bit PCM after dropping `delay` samples and cut at the range's sample count (`unpacked bytes / 2` for
+  16-bit, `unpacked bytes * 32 / 33` for BFP8); in a BFP8 bank the PCM is then put into groups of 32 with the converter's rule (the smallest shift that keeps the rounded mantissas in -128..127). BFP8's own noise is about 44 dB below the
   signal, far below MP3's (17 to 22 dB), so the extra step costs next to nothing.
 - **3** is a raw LZMA2 stream of BFP8 groups that is expanded to 16-bit PCM, so it is for a 16-bit bank, where codecs 2 and 3 can sit
   together: the lossless samples keep their BFP8 quality, the long tonal ones go through MP3. In a BFP8 bank a lossless sample is codec 1.
@@ -157,20 +158,65 @@ sample data of `1mgm.sf2` is 11.7 s at 32 kHz; the bytes per second of audio, an
 | --- | --- | --- | --- | --- | --- |
 | BFP8, as it is (the bank is in flash, no SDRAM) | 33 000 | 11.7 (today's bank, 99.5 % full) | 1 | | |
 | BFP8 + xz (codec 1) | 28 200 | about 16 | 1.4 | 0.53 MB | 1.04 MB |
-| MP3 64 kbit/s for every sample (codec 2) | 14 200 | about 32 | 2.7 | 1.07 MB | 2.07 MB |
+| MP3 64 kbit/s, one stream per sample (codec 2) | 14 200 | about 32 | 2.7 | 1.07 MB | 2.07 MB |
+| MP3 64 kbit/s, one stream over all samples, no gap (codec 2) | 8 030 | about 57 | 4.9 | 1.88 MB | 3.65 MB |
+| the same with a 256-frame gap after each sample | 8 870 | about 52 | 4.4 | 1.71 MB | 3.31 MB |
 
-(1 MB here is 1 000 000 bytes; the SDRAM of the 2 MB variant is 2 097 152.) So, if a working SDRAM is found:
+(1 MB here is 1 000 000 bytes; the SDRAM of the 2 MB variant is 2 097 152. The MP3 rows are measured on the 11.7 s of `1mgm.sf2` at 32 kHz
+with ffmpeg/libmp3lame: 93 933 bytes as one stream, 103 725 with the gaps, 166 104 as 152 streams. The nominal 64 kbit/s is 8 000 bytes a
+second; a stream per sample costs more because every one starts and ends on whole frames of 1 152 frames (36 ms) and most samples are
+shorter than that. The gap is a guard against one sample's start ringing into the one before it; whether it is needed is for the
+listening test below. It is silence in the unpacked data that the zone table never points at, so it costs `gap * bytes per frame` of SDRAM
+a sample, 40 to 80 KB for 152 samples.) A SoundFont that fills 52 to 57 s at 32 kHz is about 4.6 to 5.0 MB of 16-bit samples at 44.1 kHz.
+So, if a working SDRAM is found:
 
-- On the **8 MB variant** it is the flash that limits, about 32 s with MP3 64 kbit/s on everything, 2.7 times today's bank, and
-  16-bit PCM fits with plenty to spare.
-- On the **2 MB variant** 16-bit PCM of 32 s (2.07 MB) does not fit, and the effects and anything else the engine puts there would not
-  either, so the bank has to stay BFP8 after unpacking (1.07 MB). That is why codec 2 can write BFP8.
-- The 2.7 is for MP3 on **every** sample at 16.7 dB SNR, which has not been listened to; 68 of the 152 samples are shorter than an MP3 frame and
-  gain nothing from it (42 228 bytes at 64 kbit/s against 42 278 for BFP8 + xz), so what is gained comes from the longer ones, and a bank with
-  other material gains what that material packs to. With the choice of samples above (25 dB) the bank is 308 204 bytes, about 25 600 bytes a
+- On the **8 MB variant** it is the flash that limits: about 52 to 57 s with one MP3 stream at 64 kbit/s, 4.4 to 4.9 times today's bank
+  (2.7 with a stream per sample). BFP8 after unpacking is 1.7 to 1.9 MB, 16-bit 3.3 to 3.7 MB; both fit.
+- On the **2 MB variant** 16-bit PCM does not fit and neither does 1.7 to 1.9 MB of BFP8 with room for the effects and anything else the
+  engine puts there; about 30 s of BFP8 (1.0 MB) does. The bank has to stay BFP8 after unpacking, which is why codec 2 can write BFP8.
+- The figures are for MP3 on **every** sample at 16.7 dB SNR, which has not been listened to. Per sample, 68 of the 152 samples are shorter
+  than an MP3 frame and gain nothing from MP3 as streams of their own (42 228 bytes at 64 kbit/s against 42 278 for BFP8 + xz); the one
+  stream is what takes the padding away. A bank with other material gains what that material packs to. With the choice of samples above (25 dB) the bank is 308 204 bytes, about 25 600 bytes a
   second of audio, so about 18 s fit: 1.5 times today's bank.
 - Without an SDRAM none of this works for the whole bank: the unpacked BFP8 of `1mgm.sf2` (0.39 MB) would take about three quarters of the 511 KB of SRAM
   that the engine, Bluetooth and USB share (the build needs at least 48 KB of heap), and the 0.53 MB of the 16 s do not fit in it at all.
+
+**How it would be tested.** Nothing below has been run; it has to pass on the PC and in the emulator before anything goes to the FM-1.
+
+On the PC and in fm1-emu:
+
+1. *Round trip* (a new `test_pack.js`, as `test_upload.js` does it: the real unpacker C code on WebAssembly, the converter's writer in node). Pack
+   `1mgm.sf2` with each codec, unpack, and compare with the bank `make_bank.js` writes now. Codecs 0, 1 and 3 must be byte for byte the
+   same (codec 3 after the BFP8 expansion, against the 16-bit bank); with only codecs 0 and 1 the unpacked bank is today's bank but for the
+   header. Codec 2 has no exact answer, so it is checked as numbers: SNR per sample against the source (not below what
+   `measure_zone_codecs.py` gives for that sample), the length and the delay (no shift of the start), and at every loop the step
+   from the loop end to the loop start no larger than the largest step inside the loop.
+2. *The engine does not change*: `test_formats.js`, `test_sim.js` (pitch, loop, release), `test_multitimbral.js`, `test_zone.js` and
+   `test_layers.js` on the unpacked bank must pass as they do on today's. The unpacker adds no state the engine reads.
+3. *Listening*: for the samples that pass 1, render the same notes from the BFP8 bank and the packed one (as the A/B files made for the
+   MP3 decision: original, BFP8, MP3 128, MP3 64, with the loop repeated), long notes at several pitches and the drums. Decide per sample
+   which go through MP3, and whether the gap is needed. This is the step that cannot be a number.
+4. *fm1-emu*: the packed bank in the user flash (`make_flash_overlay.js`), boot, and count the unpack time in emulated cycles at 240 and
+   320 MHz; the CPU load with 16, 24 and 32 voices from the unpacked bank against the BFP8 bank in flash (`load24_all.script` and the
+   others in `test_emu/`). fm1-emu has to give the unpacker somewhere to write at the SDRAM's address; if it does not model that, it
+   needs a RAM region there, and then it says nothing about the SDRAM's speed.
+
+On the FM-1, in this order, and stop at the first step that fails:
+
+5. *The SDRAM alone*, before any bank: which chip is it (the marking BA or BB, `AC7911B`), is the controller initialised by the
+   build, does a pattern written over the whole 2 or 8 MB read back, and how long does a block copy take. Without this nothing further
+   is worth doing.
+6. *A lossless bank* (codecs 0 and 1) unpacked into the SDRAM, the CRC32 of the unpacked image against the one the PC works out, and
+   then the `FM1_TEST.md` checklist as it is for a bank in flash.
+7. *Measure on the panel*: the time from power on until the keys play, and the audio interrupt's CPU load (the program page's
+   `CPU a% MAX p%`) with 16 and 32 voices, against the same bank in flash. The cache is 24 KB for data, so many voices reading the SDRAM is
+   the thing to watch.
+8. *Codec 2 samples*, the ones that passed the listening test, then loops and the pan and effects as in the checklist. The effects
+   moving into the SDRAM (longer delays) is a separate step after this one.
+
+The firmware is flashed in step 5 and after, and `FIRMWARE.md` has not been run on the device even once, so the stock firmware
+(`sdk/firmware/FM-1_015.fwsc`, as `FIRMWARE.md` says) and M-VAVE's recovery have to be at hand first. The bank itself goes in over SysEx
+(`sf2_upload.c`) and does not touch the firmware.
 
 Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
 then codecs 3 and 2 per sample for the ones that pass a listening test.
