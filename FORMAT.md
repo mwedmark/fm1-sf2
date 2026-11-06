@@ -276,9 +276,35 @@ block of 128 frames, covering the destinations the engine already has (pitch, le
 **Counting first.** A script that reads a SoundFont and says, in the converter's terms: the seconds of audio at the bank's rate
 (samples at 44.1 kHz, 22 kHz or 8-bit are not the same size on disk as in flash), presets by MIDI bank and how many the bank map drops (a
 GS font has variation banks; the bank map has only 0 and 128), percussion kits, presets and zones with velocity ranges and the layers
-they make, stereo pairs, and the count of instrument and preset modulators. It is not written (`measure_zone_codecs.py` reads the same
-headers and can be taken as the start). The numbers decide the order of 1 to 4 for a given font; without them it is
+they make, stereo pairs, and the count of instrument and preset modulators. It is `measure_font_features.py`
+(`python3 -I measure_font_features.py font.sf2`). The numbers decide the order of 1 to 4 for a given font; without them it is
 1, 2, 3, 4: kits and velocity layers cost no CPU, stereo costs voices, modulators cost the most work for the least known gain.
+
+Measured so far (the converter's rules, 32 kHz):
+
+| | `1mgm.sf2` | `4gmgsmt.sf2` ("Four MB General MIDI bank with GS and MT32 variation tones", EMU8000, per its header) |
+| --- | --- | --- |
+| File | 1 090 280 bytes | 4 174 814 bytes |
+| Samples | 153, all mono, 44.1 kHz, 11.7 s | 488, all mono, 44.1 kHz, 44.9 s |
+| Presets | 129 (bank 0: 128, kit: 1), none dropped | 329: bank 0 128, banks 1 to 9 and 16 63, bank 127 128, kits 10 (programs 0, 8, 16, 24, 25, 32, 40, 48, 56, 127); 191 dropped by the bank map |
+| Velocity layers, stereo pairs, modulators | none, none, none | none, none, none (the `imod` and `pmod` lists hold only their terminal record) |
+| Samples used only by the dropped presets | 0 | 5 (under 0.1 s): the variation banks reuse the sample pool, so they cost zones, not samples |
+| Bank today, BFP8 at 32 kHz | 464 636 bytes | 1 748 904 bytes: 246 292 of tables, 1 502 612 of sample data (3.7 times the flash) |
+| BFP8 + xz, samples as one stream | 330 356 | 1 223 662 |
+| MP3 64 kbit/s, one stream, no gap / 256-frame gap | 93 933 / 103 725 (8 030 and 8 870 B/s) | 359 181 / 390 285 (8 010 and 8 700 B/s), SNR 17.5 / 17.9 dB |
+| MP3 96 and 128 kbit/s, no gap | | 538 749 and 718 317 |
+| Zone tables xz packed | 8 194 | 38 604 |
+| Packed bank, MP3 64 kbit/s (tables + samples) | about 102 000 to 112 000 | about 398 000 (no gap) to 429 000 (gap): 85 to 92 % of the 466 944 bytes |
+
+So `4gmgsmt.sf2` fits the flash at 64 kbit/s, and only at 64 kbit/s: 96 kbit/s is 539 KB for the samples alone. It matches what
+the capacity table above predicted for a font of 45 s (360 to 397 KB). BFP8 packed with xz does not come near (1.2 MB). It has
+none of the velocity layers, stereo or modulators of 2 to 4 (so nothing in those would change this font), but its 10 kits and its
+variation banks are what 1 and the bank map are for: the kits are already written to the bank and only the player picks the first one,
+and the 191 presets the bank map drops would cost zones, not samples.
+
+**A waste in today's converter** that this font shows: the zone table holds the zones of every preset of the file, also of the dropped
+ones. `4gmgsmt.sf2` has 3 560 zones in the bank and the 138 written presets use 1 882 of them; the other 1 678 (47 %, about 115 KB of the 246 KB
+of tables, an estimate from the bytes a zone takes) are never reached. `1mgm.sf2` has no dropped presets, so it does not show it.
 
 ## Pitch table: 128 x u32
 
