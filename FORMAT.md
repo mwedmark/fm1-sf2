@@ -108,17 +108,22 @@ data as it will be after unpacking). The sample data in the file is the packed s
 - **1** is one raw LZMA2 stream (no container, no header) that unpacks to `unpacked bytes` of the bank's format, which can be BFP8 or SEA.
   An entry should cover many samples: one stream over the whole sample area packs about 2 % better than a stream per sample.
 - **2** is one MP3 stream (MPEG-1 layer III, mono, at the bank's rate, no Xing frame) of exactly one sample. The bank's format must then
-  be 16-bit (bit 0): the stream is decoded to 16-bit PCM after dropping `delay` samples and cut at `unpacked bytes / 2` samples.
-- **3** is a raw LZMA2 stream of BFP8 groups that is expanded to 16-bit PCM, so the bank's format is 16-bit and codecs 2 and 3 can sit in
-  the same bank: the lossless samples keep their BFP8 quality, the long tonal ones go through MP3.
+  be 16-bit (bit 0) or BFP8 (bit 3). The stream is decoded to 16-bit PCM after dropping `delay` samples and cut at the sample count
+  (`unpacked bytes / 2` for 16-bit, `unpacked bytes * 32 / 33` for BFP8); in a BFP8 bank the PCM is then put into groups of 32 with the
+  converter's rule (the smallest shift that keeps the rounded mantissas in -128..127). BFP8's own noise is about 44 dB below the
+  signal, far below MP3's (17 to 22 dB), so the extra step costs next to nothing.
+- **3** is a raw LZMA2 stream of BFP8 groups that is expanded to 16-bit PCM, so it is for a 16-bit bank, where codecs 2 and 3 can sit
+  together: the lossless samples keep their BFP8 quality, the long tonal ones go through MP3. In a BFP8 bank a lossless sample is codec 1.
 
-A bank with codec 1 or 0 only can keep BFP8 (or SEA) after unpacking, which takes half the SDRAM of 16-bit.
+A bank with codec 1 or 0 only can keep BFP8 (or SEA) after unpacking, which takes half the SDRAM of 16-bit. A bank with MP3 samples can
+too, if it is a BFP8 bank (codec 2 as above); 16-bit is only worth it for samples that BFP8 would spoil, and BFP8 is 43.8 dB
+against the source on `1mgm.sf2`.
 
 **Loops.** An MP3 sample's loop is not exact: the decoder's output near the loop end does not continue into the loop start. The unpacker
 crossfades it: for every zone with the loop flag whose sample starts at the entry's unpacked offset, the last `xfade` samples before the
 loop end are blended into the `xfade` samples before the loop start (linear, the loop end side fading out), so the jump from the loop end
 to the loop start is continuous. It needs `loop start >= xfade`. Every zone that uses an MP3 sample must have the same loop; a sample whose
-zones have different loops gets no MP3 entry. A sample with a loop of a few samples (a 34-sample brass loop) is better left to codec 3.
+zones have different loops gets no MP3 entry. A sample with a loop of a few samples (a 34-sample brass loop) is better left to codec 3 (codec 1 in a BFP8 bank).
 
 **Unpacking.** At start: copy everything before the sample data (header and tables) to the SDRAM, clear bit 4 and the pack fields, set
 the file size to the unpacked one, unpack every entry to its unpacked offset, apply the crossfades, and call `fm1b_bind()` on that
@@ -144,6 +149,28 @@ right at 20 dB has to be chosen by listening, not by this number. MP3 at 128 kbi
 that reach 25 dB are mostly of 1 152 to 16 383 frames (piano, acoustic bass and guitars, voice, organ waves, timpani, steel drum). The
 68 samples under one MP3 frame (1 152 frames) gain nothing at 128 kbit/s (81 396 bytes against 42 278 for BFP8 + xz) and about the same
 at 64 kbit/s (42 228).
+
+**What it holds.** The flash limit is `FM1B_FLASH_BYTES`, 466 944 bytes. Of those 8 194 go to the packed tables, the rest to samples. The
+sample data of `1mgm.sf2` is 11.7 s at 32 kHz; the bytes per second of audio, and the SDRAM the same audio takes once unpacked, are:
+
+| In flash | Sample bytes per second | Seconds that fit | Against today | SDRAM unpacked, BFP8 | SDRAM unpacked, 16-bit |
+| --- | --- | --- | --- | --- | --- |
+| BFP8, as it is (the bank is in flash, no SDRAM) | 33 000 | 11.7 (today's bank, 99.5 % full) | 1 | | |
+| BFP8 + xz (codec 1) | 28 200 | about 16 | 1.4 | 0.53 MB | 1.04 MB |
+| MP3 64 kbit/s for every sample (codec 2) | 14 200 | about 32 | 2.7 | 1.07 MB | 2.07 MB |
+
+(1 MB here is 1 000 000 bytes; the SDRAM of the 2 MB variant is 2 097 152.) So, if a working SDRAM is found:
+
+- On the **8 MB variant** it is the flash that limits, about 32 s with MP3 64 kbit/s on everything, 2.7 times today's bank, and
+  16-bit PCM fits with plenty to spare.
+- On the **2 MB variant** 16-bit PCM of 32 s (2.07 MB) does not fit, and the effects and anything else the engine puts there would not
+  either, so the bank has to stay BFP8 after unpacking (1.07 MB). That is why codec 2 can write BFP8.
+- The 2.7 is for MP3 on **every** sample at 16.7 dB SNR, which has not been listened to; 68 of the 152 samples are shorter than an MP3 frame and
+  gain nothing from it (42 228 bytes at 64 kbit/s against 42 278 for BFP8 + xz), so what is gained comes from the longer ones, and a bank with
+  other material gains what that material packs to. With the choice of samples above (25 dB) the bank is 308 204 bytes, about 25 600 bytes a
+  second of audio, so about 18 s fit: 1.5 times today's bank.
+- Without an SDRAM none of this works for the whole bank: the unpacked BFP8 of `1mgm.sf2` (0.39 MB) and any bank beyond it do not
+  leave room in the 511 KB of SRAM next to the engine, and the 0.53 MB of the 16 s do not fit in it at all.
 
 Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
 then codecs 3 and 2 per sample for the ones that pass a listening test.
