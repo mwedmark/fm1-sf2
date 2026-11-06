@@ -67,6 +67,87 @@ number of samples). Every chunk carries its own LMS seed, so a decoder can start
 jump decodes just the chunk it lands in, so loop points need no alignment. The bank rate is free; 32 000 Hz is the codec's native one.
 The decoder is `fm1_sea_decode`; `index.html` has the encoder (`seaEncode`, bit-exact with `sea_encode.h`, checked in `test_core.js`).
 
+## Proposal: packed sample data (not implemented)
+
+Nothing in the converter, the player or `fm1b_bind()` reads this yet; it is the format a bank would have if the FM-1's SDRAM (the AC7911BA
+has 2 MB, the BB 8 MB, in the package; the AC7911B datasheet, "Package Type Specification") were used to hold the sound set unpacked. The flash
+holds the bank packed, the player unpacks it once at start into SDRAM and then binds the result as it binds any bank, so the engine, the
+zone table and every feature stay as they are. Whether the SDRAM can be used at all (the controller's initialisation, which variant the
+board has) is not settled; the bank does not depend on it, the unpacker only needs somewhere to write.
+
+**Header.** Flags bit 4 (`0x10`) = the sample data is packed. Bits 0-3 keep saying what the sample data is **after unpacking** (so the
+engine sees the same bank as before). Version is 2 when bit 4 is set; `fm1b_bind()` takes version 1 only and no unknown flag bits, so a
+player without this refuses the bank. Three fields
+follow the info offset; they are only there when the pitch table starts at 92 or later (the header is then 92 bytes, 144 bytes to the
+pitch table with the info block):
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 80 | u32 | offset of the pack table, 0 = none |
+| 84 | u32 | number of pack entries |
+| 88 | u32 | bytes per pack entry, 24 (a multiple of 4, at least 24) |
+
+The zone table is unchanged and addresses the **unpacked** sample data (`offset of the first sample` counts from the start of the sample
+data as it will be after unpacking). The sample data in the file is the packed streams; the `file size` is the packed file's.
+
+**Pack entry, 24 bytes.** Entries are in the order of the unpacked data and together cover it without gaps.
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | u32 | unpacked offset, from the start of the unpacked sample data (4-byte aligned) |
+| 4 | u32 | unpacked bytes, in the bank's sample format (bits 0-3 of the flags) |
+| 8 | u32 | packed offset, from the start of the sample data in the file |
+| 12 | u32 | packed bytes |
+| 16 | u8 | codec: 0 stored (a copy), 1 LZMA2, 2 MP3, 3 BFP8 in LZMA2 |
+| 17 | u8 | reserved, 0 |
+| 18 | u16 | codec 2: samples to drop at the start of the decoded stream (the encoder delay), else 0 |
+| 20 | u16 | codec 2: loop crossfade in samples, 0 = none; else 0 |
+| 22 | u16 | reserved, 0 |
+
+- **0** copies `packed bytes` (equal to `unpacked bytes`) to the unpacked offset.
+- **1** is one raw LZMA2 stream (no container, no header) that unpacks to `unpacked bytes` of the bank's format, which can be BFP8 or SEA.
+  An entry should cover many samples: one stream over the whole sample area packs about 2 % better than a stream per sample.
+- **2** is one MP3 stream (MPEG-1 layer III, mono, at the bank's rate, no Xing frame) of exactly one sample. The bank's format must then
+  be 16-bit (bit 0): the stream is decoded to 16-bit PCM after dropping `delay` samples and cut at `unpacked bytes / 2` samples.
+- **3** is a raw LZMA2 stream of BFP8 groups that is expanded to 16-bit PCM, so the bank's format is 16-bit and codecs 2 and 3 can sit in
+  the same bank: the lossless samples keep their BFP8 quality, the long tonal ones go through MP3.
+
+A bank with codec 1 or 0 only can keep BFP8 (or SEA) after unpacking, which takes half the SDRAM of 16-bit.
+
+**Loops.** An MP3 sample's loop is not exact: the decoder's output near the loop end does not continue into the loop start. The unpacker
+crossfades it: for every zone with the loop flag whose sample starts at the entry's unpacked offset, the last `xfade` samples before the
+loop end are blended into the `xfade` samples before the loop start (linear, the loop end side fading out), so the jump from the loop end
+to the loop start is continuous. It needs `loop start >= xfade`. Every zone that uses an MP3 sample must have the same loop; a sample whose
+zones have different loops gets no MP3 entry. A sample with a loop of a few samples (a 34-sample brass loop) is better left to codec 3.
+
+**Unpacking.** At start: copy everything before the sample data (header and tables) to the SDRAM, clear bit 4 and the pack fields, set
+the file size to the unpacked one, unpack every entry to its unpacked offset, apply the crossfades, and call `fm1b_bind()` on that
+image. The info page's CRC32 is of the packed file in flash, as it is of the file today. The converter's loop repeats (a loop stored
+`k` times so that `k` loops are whole frames, for SEA) need not be stored in a packed bank: the unpacker can make them.
+
+**What it saves** (`measure_zone_codecs.py`, run on `1mgm.sf2` at 32 kHz, 152 samples, 374 397 frames = 11.7 s). Today's BFP8 bank is
+464 636 bytes: 47 052 of tables and 417 584 of sample data (of which 29 KB are loop repeats and 388 476 the samples).
+
+| Bank in flash | Bytes | Against BFP8 today | Sample SNR against the source |
+| --- | --- | --- | --- |
+| BFP8, as it is | 464 636 | | 43.8 dB |
+| BFP8 + xz, nothing lossy (codec 1) | 338 550 | -27 % | 43.8 dB |
+| the smallest of BFP8 + xz and MP3 that reaches 25 dB (25 samples MP3) | 308 204 | -34 % | 25 dB and up for those 25 |
+| the same at 20 dB (59 samples MP3) | 238 833 | -49 % | 20 dB and up for those 59 |
+| MP3 only, 128 kbit/s | about 333 000 | -28 % | 21.7 dB |
+| MP3 only, 64 kbit/s | about 174 000 | -63 % | 16.7 dB |
+
+(The zone tables are 8 194 bytes xz packed and are in every packed row, 47 052 in the first. The MP3-only rows are the samples plus
+the packed tables.) No sample reaches 30 dB at 64 or 128 kbit/s, so MP3 never comes near BFP8 in waveform terms; a sample that sounds
+right at 20 dB has to be chosen by listening, not by this number. MP3 at 128 kbit/s for everything is only 1.5 % smaller than BFP8 + xz
+(333 562 against 338 550) and 22 dB worse, so a lossy codec earns its place only at 64 kbit/s or on a choice of samples. The 25 samples
+that reach 25 dB are mostly of 1 152 to 16 383 frames (piano, acoustic bass and guitars, voice, organ waves, timpani, steel drum). The
+68 samples under one MP3 frame (1 152 frames) gain nothing at 128 kbit/s (81 396 bytes against 42 278 for BFP8 + xz) and about the same
+at 64 kbit/s (42 228).
+
+Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
+then codecs 3 and 2 per sample for the ones that pass a listening test.
+
 ## Pitch table: 128 x u32
 
 `pitch[i] = round(2^((i-64)/12) * 65536)`, a 16.16 step. Playing a zone at its original pitch is a step of `0x10000`
