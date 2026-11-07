@@ -1433,11 +1433,19 @@ static inline __attribute__((always_inline)) int voice_chorus(const struct voice
     return c > 127 ? 127 : c;
 }
 static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};                  /* the sends of the latest block that had voices: the tails keep them */
+static uint32_t events_ticks;                                                          /* the latest block's queue_drain and gates_update, TIMER4 ticks */
+uint32_t fm1b_events_ticks(void) { return events_ticks; }
 FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
                                         uint8_t sends[2])
 {
+#ifndef FM1_HOST_TEST
+    uint32_t ev0 = *(volatile uint32_t *)0x10804U;
+#endif
     queue_drain();
     gates_update(frames);
+#ifndef FM1_HOST_TEST
+    events_ticks = *(volatile uint32_t *)0x10804U - ev0;
+#endif
     sends[0] = last_sends[0];
     sends[1] = last_sends[1];
     if (!bank.image)

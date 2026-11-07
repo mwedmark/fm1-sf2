@@ -93,6 +93,8 @@ void fm1b_render(const void *owner, int32_t *out, unsigned frames);
  * bit 3: sides[1] for the right (each cleared first). A clear bit means that channel is out itself. */
 unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
                            uint8_t sends[2]);
+/* TIMER4 ticks (24 per us) the latest block spent on the event queue and the channel gates (sf2out_profile) */
+uint32_t fm1b_events_ticks(void);
 #define FM1B_REVERB_SEND 30U
 #define FM1B_CHORUS_SEND 20U
 /* What the panel shows: the selected preset, the zone the latest note hit (its sample and envelope) and the state of

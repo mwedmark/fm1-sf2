@@ -24,7 +24,7 @@ fs.writeFileSync(out, `/* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-lin
  * multiplies sample n - ${TAPS / 2 - 1} + k. */
 #define RESAMPLE_TAPS ${TAPS}
 #define RESAMPLE_PHASES ${PHASES}
-static int16_t resample_table[RESAMPLE_PHASES][RESAMPLE_TAPS] = {
+static FM1_AUDIO_DATA int16_t resample_table[RESAMPLE_PHASES][RESAMPLE_TAPS] = {   /* in RAM: the resampler reads it 3 072 times a block, and from the flash it cost 4 times the time */
 ${rows.join('\n')}
 };
 `);

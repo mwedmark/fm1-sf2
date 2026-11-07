@@ -3,7 +3,23 @@
 #include "fm1b.h"
 #include "sf2fx.h"
 #include "engine.h"
+#include "fm1.h"                                         /* FM1_AUDIO_DATA: the resampler table in RAM */
 #include <stddef.h>
+
+/* Where a block's time goes (for the second-core planning, PLAN_DUALCORE_CLOCK.md): TIMER4 ticks (24 per us) of each stage of
+ * sf2out_render, averaged over about 32 blocks, 5 stages: events (the queue and the channel gates), the voices, the limiter, the
+ * effects, the resampler. Shown on the info page (sf2out_profile). */
+#ifdef FM1_HOST_TEST
+#define PROF_NOW() 0U
+#else
+#define PROF_NOW() (*(volatile uint32_t *)0x10804U)
+#endif
+static uint32_t prof_average[5];                      /* Q4 ticks */
+static inline __attribute__((unused)) void prof_add(unsigned stage, uint32_t ticks) { prof_average[stage] += ((int32_t)(ticks << 4) - (int32_t)prof_average[stage]) >> 5; }
+void sf2out_profile(uint32_t us10[5])
+{
+    for (unsigned i = 0; i < 5; ++i) us10[i] = prof_average[i] * 10U / (24U << 4);   /* tenths of a us */
+}
 
 /* The limiter: the dry mix gets LIMIT_MAKEUP (the zone levels left the mix about 6 dB under where it was) and its peaks are held
  * at LIMIT_CEILING, under full scale so the effects and the pan have room. The gain drops at once on a peak and comes back
@@ -72,11 +88,15 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
     uint8_t sends[2];
     int32_t *sides[2] = {cut_left, cut_right};
     for (unsigned i = 0; i < n; ++i) { melodic[i] = 0; stereo[2 * i] = stereo[2 * i + 1] = 0; }
+    uint32_t t0 = PROF_NOW();
     unsigned buses = fm1b_render_sends(NULL, melodic, reverb_bus, chorus_bus, sides, n, sends);
+    uint32_t t1 = PROF_NOW();
     limit(melodic, reverb_bus, chorus_bus, cut_left, cut_right, buses, n);
+    uint32_t t2 = PROF_NOW();
     sf2fx_mix_sends(melodic, buses & 4U ? cut_left : NULL, buses & 8U ? cut_right : NULL,
                     buses & 1U ? reverb_bus : melodic, buses & 1U ? 127U : sends[0],
                     buses & 2U ? chorus_bus : melodic, buses & 2U ? 127U : sends[1], stereo, n);
+    uint32_t t3 = PROF_NOW();
     int16_t *l = left_in + RESAMPLE_HISTORY, *r = right_in + RESAMPLE_HISTORY;
     for (unsigned i = 0; i < n; ++i) {                   /* Q23 (saturated) to Q15 */
         l[i] = (int16_t)(stereo[2 * i] >> 8);
@@ -104,6 +124,12 @@ FM1_DSP_CODE void sf2out_render(int32_t *out)
         left_in[i] = left_in[n + i];
         right_in[i] = right_in[n + i];
     }
+    uint32_t t4 = PROF_NOW();
+    prof_add(1, t1 - t0 - fm1b_events_ticks());
+    prof_add(0, fm1b_events_ticks());
+    prof_add(2, t2 - t1);
+    prof_add(3, t3 - t2);
+    prof_add(4, t4 - t3);
 }
 #endif
 

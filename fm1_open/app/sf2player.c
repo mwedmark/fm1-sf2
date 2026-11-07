@@ -12,6 +12,7 @@
 #include "sf2out.h"
 #include "song.h"
 #include "tuning_hook.h"
+#include "cpu1_spike.h"
 #include "fm1_device.h"
 #include <string.h>
 #if __has_include("build_info.h")
@@ -281,8 +282,32 @@ static struct fm1b_info info_bank;
 #if FM1_MIDIPLAY
 static uint32_t info_free_ram;
 #endif
+/* The CPU clock, read two ways (felucca-bsp's chip/fm1_clock.h: the system clock's source in 0x10014 [7:0], 6 = PLL1 * 2/3, PLL1 =
+ * 24 MHz / (reference + 2) * (multiplier + 2); M-VAVE's bootloader: 540 MHz -> 360, m-bootloader 1.2: source 2, PLL1 off, 320) and by
+ * timing a counted loop against TIMER4 (24 MHz, free running, device.c). The loop's rate is only a cross check: it scales with the
+ * clock but its cycles per turn are not known here. Done once, with interrupts off for about a millisecond, when the page first opens. */
+#define CLK_REG(address) (*(volatile uint32_t *)(address))
+static uint32_t clock_done, clock_source, clock_mhz, clock_loops10;     /* clock_mhz 0: not worked out; loops10: loop turns per us x 10 */
+static void clock_measure(void)
+{
+    if (clock_done) return;
+    clock_done = 1;
+    clock_source = CLK_REG(0x10014U) & 0xffU;
+    uint32_t pll0 = CLK_REG(0x119A8U), pll1 = CLK_REG(0x119ACU);
+    if (clock_source == 6U && (pll0 & 3U) == 3U)
+        clock_mhz = 24U * ((pll1 & 0xfffU) + 2U) / (((pll0 >> 2) & 31U) + 2U) * 2U / 3U;
+    uint32_t ticks = 0, flags = fm1_device_irq_save();
+    for (unsigned pass = 0; pass < 2; ++pass) {                          /* (the second pass: the code is in the cache) */
+        uint32_t t0 = CLK_REG(0x10804U);
+        for (uint32_t i = 0; i < 20000U; ++i) __asm__ volatile("" ::: "memory");
+        ticks = CLK_REG(0x10804U) - t0;
+    }
+    fm1_device_irq_restore(flags);
+    if (ticks) clock_loops10 = (uint32_t)(20000ULL * 24U * 10U / ticks);
+}
 static void info_compute(void)
 {
+    clock_measure();
 #if FM1_MIDIPLAY
     info_free_ram = song_free_ram();
 #endif
@@ -316,6 +341,7 @@ static char *put_compile_date(char *d)
                              date[4] == ' ' ? '0' : date[4], date[5], ' ', time[0], time[1], ':', time[3], time[4], 0});
     return d;
 }
+static struct cpu1_result cpu1_test;                     /* the second core's first test (ARP on the info page) */
 static void info_update(void)
 {
     char line[LINE_CHARS + 1], *d;
@@ -355,6 +381,56 @@ static void info_update(void)
         line_show(9, 156, "SOUNDSET CHECKSUM:", 1, YELLOW);
         *put_hex(line, soundset_crc) = 0;
         line_show(10, 170, line, 2, YELLOW);
+    }
+    d = put_text(line, "CLK ");
+    if (clock_mhz) { d = put_number(d, (int32_t)clock_mhz, 0); d = put_text(d, " MHZ"); }
+    else d = put_text(d, "?");
+    d = put_text(d, " SRC ");
+    d = put_number(d, (int32_t)clock_source, 0);
+    d = put_text(d, "  LOOP ");
+    d = put_number(d, (int32_t)(clock_loops10 / 10U), 0);
+    *d++ = '.';
+    d = put_number(d, (int32_t)(clock_loops10 % 10U), 0);
+    d = put_text(d, "/US");
+    *d = 0;
+    line_show(15, 80, line, 1, CYAN);
+    {
+        static const char *const why[] = {"", "OK", "NO START", "LATE", "SUM DIFFERS", "MISREAD"};
+        if (cpu1_test.state == CPU1_NOT_RUN) d = put_text(line, "ARP: 2ND CORE TEST (NOTHING PLAYS ON IT)");
+        else {
+            d = put_text(put_text(line, "CPU1 "), why[cpu1_test.state]);
+            if (cpu1_test.state == CPU1_OK) {
+                d = put_text(d, " RAM ");
+                d = put_number(d, (int32_t)cpu1_test.solo_us, 0);
+                *d++ = '/';
+                d = put_number(d, (int32_t)cpu1_test.both_us, 0);
+                d = put_text(d, " FL ");
+                d = put_number(d, (int32_t)cpu1_test.flash_solo_us, 0);
+                *d++ = '/';
+                d = put_number(d, (int32_t)cpu1_test.flash_cpu1_us, 0);
+                *d++ = '/';
+                d = put_number(d, (int32_t)cpu1_test.flash_both_us, 0);
+            }
+        }
+        *d = 0;
+        line_show(16, 140, line, 1, cpu1_test.state == CPU1_NOT_RUN ? GREY : cpu1_test.state == CPU1_OK ? GREEN : ORANGE);
+    }
+    {   /* where a block's time goes, microseconds: events, voices, limiter, effects, resampler (a block lasts 2902 us) */
+        uint32_t us10[5];
+        sf2out_profile(us10);
+        d = put_text(line, "E ");
+        d = put_number(d, (int32_t)(us10[0] / 10U), 0);
+        d = put_text(d, " V ");
+        d = put_number(d, (int32_t)(us10[1] / 10U), 0);
+        d = put_text(d, " L ");
+        d = put_number(d, (int32_t)(us10[2] / 10U), 0);
+        d = put_text(d, " F ");
+        d = put_number(d, (int32_t)(us10[3] / 10U), 0);
+        d = put_text(d, " R ");
+        d = put_number(d, (int32_t)(us10[4] / 10U), 0);
+        d = put_text(d, " US/BLOCK");
+        *d = 0;
+        line_show(17, 190, line, 1, CYAN);
     }
     upload_line();
 #if FM1_MIDIPLAY
@@ -804,6 +880,10 @@ void groove_screen_control(void)
         }
         page_clear();
     }
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP))) {   /* ARP on the info page: the second core's test (a moment of silence) */
+        cpu1_spike_run(&cpu1_test);
+        page_clear();
+    }
 #if FM1_MIDIPLAY
     if (pressed & (1U << BUTTON_PLAY)) {                      /* PLAY: the song from the start, or stop it */
         struct song_state so;
@@ -864,6 +944,8 @@ void groove_midi_init(void)
 #if FM1B_IN_FIRMWARE
     fm1b_device_init();
 #endif
+    /* Starting the second core here (cpu1_spike_run) made the unit not boot at all (2026-11-05, package sf2player_boot):
+     * the SDK's start-up is evidently further on than felucca-bsp's "before audio and timers" at this point. Do not repeat. */
 }
 
 /* ---- what the library calls and the player does not need ---------------------------------------------------- */

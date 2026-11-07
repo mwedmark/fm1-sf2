@@ -4,7 +4,7 @@
  * multiplies sample n - 5 + k. */
 #define RESAMPLE_TAPS 12
 #define RESAMPLE_PHASES 256
-static int16_t resample_table[RESAMPLE_PHASES][RESAMPLE_TAPS] = {
+static FM1_AUDIO_DATA int16_t resample_table[RESAMPLE_PHASES][RESAMPLE_TAPS] = {   /* in RAM: the resampler reads it 3 072 times a block, and from the flash it cost 4 times the time */
 {98,-314,678,-1120,1490,14720,1490,-1120,678,-314,98,0},
 {98,-312,671,-1100,1434,14729,1549,-1141,686,-317,99,-12},
 {97,-309,663,-1079,1377,14728,1607,-1162,694,-319,99,-12},

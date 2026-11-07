@@ -15,4 +15,6 @@ void sf2out_load(uint32_t used, uint32_t block);
 /* What the panel shows of that load, in percent of a block: the average over about 0.1 s, and the highest block since the
  * last call (the call starts the next peak). */
 void sf2out_cpu(unsigned *average, unsigned *peak);
+/* Where a block's time goes, in tenths of a microsecond (average): events, voices, limiter, effects, resampler (32 kHz path only). */
+void sf2out_profile(uint32_t us10[5]);
 #endif
