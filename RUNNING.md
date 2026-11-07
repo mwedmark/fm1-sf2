@@ -74,6 +74,7 @@ node test_zone.js             # zone level, exclusive class (hi-hat choke), scal
 node test_lfo.js              # the zone's LFOs (vibrato, tremolo, delay) and key to hold/decay, at 44.1 and 32 kHz, on a sine bank
 node test_filter.js           # the low-pass filter and the modulation envelope against the same filter in floating point; 1mgm.sf2
 node test_layers.js           # stacked layers: every zone that covers a key sounds; 1mgm.sf2 at 32 kHz, BFP8
+node test_dropped_presets.js  # the zones and sounds of presets the bank map drops are not written (a bank made by hand, no font)
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
