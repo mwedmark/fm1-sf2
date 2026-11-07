@@ -7,6 +7,13 @@
 #include "fm1b_config.h"
 #include "fm1_device.h"
 #include "sf2_upload.h"
+#include "song.h"
+/* test_upload.js builds this file on a computer without song.c */
+#if FM1_MIDIPLAY && !defined(FM1_HOST_TEST)
+#define SONG_UPLOAD 1
+#else
+#define SONG_UPLOAD 0
+#endif
 #include <stddef.h>
 #include <string.h>
 
@@ -19,6 +26,11 @@
  *                low parts. Written where it says; the host sends them in order and waits for each reply.
  *   cmd 3 end:   CRC-32 of the whole bank (5 x 7 bits). When it matches, the bank is bound and plays.
  * status: 0 done, 1 malformed, 2 outside the bank's flash, 3 flash error, 4 CRC differs, 5 no begin first.
+ * With FM1_MIDIPLAY a song (song.c) goes the same way into RAM, and plays from there:
+ *   cmd 4 song begin: size (5 x 7 bits). A song playing stops, the old one is freed and RAM is taken for the new one.
+ *   cmd 5 song data:  as cmd 2.     cmd 6 song end: CRC-32, as cmd 3; the song is checked and is ready for PLAY.
+ *   cmd 7 play (from the start), cmd 8 stop: F0 7D S F 02 cmd 00 F7.
+ *   status 2 also: too big (FM1_MIDIPLAY_MAX_BYTES); 4 also: not a song; 6 no RAM for it.
  * The callback only copies the frame (no flash access from it); the control task does the work in sf2_upload_poll(). */
 enum { UPLOAD_FRAME = 640, UPLOAD_CHUNK = 448 };
 static struct { uint8_t bytes[UPLOAD_FRAME], source; volatile unsigned length; } upload_in;
@@ -83,9 +95,29 @@ static uint32_t crc32_flash(uint32_t bytes)
 }
 static void upload_stop_playing(void)
 {
+#if SONG_UPLOAD
+    song_stop();                                                 /* no song plays into a bank that is being written */
+#endif
     uint32_t flags = fm1_device_irq_save();
     (void)fm1b_bind(NULL, 0, NULL);
     fm1_device_irq_restore(flags);
+}
+
+/* A data frame's payload (after the offset), 7 to 8: a byte with the 7 high bits, then the 7 low parts. 0: too long. */
+static uint8_t data[UPLOAD_CHUNK];                               /* not on the control task's stack */
+static unsigned unpack(const uint8_t *m, unsigned n, unsigned *count)
+{
+    *count = 0;
+    for (const uint8_t *p = m + 11; p < m + n - 1;) {
+        unsigned high = *p++, group = (unsigned)(m + n - 1 - p);
+        group = group > 7 ? 7 : group;
+        if (*count + group > sizeof data)
+            return 0;
+        for (unsigned i = 0; i < group; ++i)
+            data[(*count)++] = (uint8_t)(p[i] | ((high >> i) & 1U) << 7);
+        p += group;
+    }
+    return 1;
 }
 
 void sf2_upload_poll(void)
@@ -109,19 +141,9 @@ void sf2_upload_poll(void)
     } else if (cmd == 2 && n >= 12 + 2) {                        /* F0 7D S F 02 02 offset*5 packed F7 */
         status = upload_active ? 0 : 5;
         uint32_t offset = read35(m + 6);
-        static uint8_t data[UPLOAD_CHUNK];                       /* not on the control task's stack */
         unsigned count = 0;
-        for (const uint8_t *p = m + 11; p < m + n - 1 && !status;) {
-            unsigned high = *p++, group = (unsigned)(m + n - 1 - p);
-            group = group > 7 ? 7 : group;
-            if (count + group > sizeof data) {
-                status = 1;
-                break;
-            }
-            for (unsigned i = 0; i < group; ++i)
-                data[count++] = (uint8_t)(p[i] | ((high >> i) & 1U) << 7);
-            p += group;
-        }
+        if (!status && !unpack(m, n, &count))
+            status = 1;
         if (!status && (!count || offset > upload_size || count > upload_size - offset))
             status = 2;
         upload_stage = 10;
@@ -137,6 +159,24 @@ void sf2_upload_poll(void)
                 status = 1;
         }
     }
+#if SONG_UPLOAD
+    else if (cmd == 4 && n == 12)
+        status = song_begin(read35(m + 6));
+    else if (cmd == 5 && n >= 12 + 2) {
+        unsigned count = 0;
+        status = unpack(m, n, &count) ? song_write(read35(m + 6), data, count) : 1;
+    } else if (cmd == 6 && n == 12)
+        status = song_end(read35(m + 6));
+    else if (cmd == 7 && n == 8) {
+        struct song_state st;
+        song_state(&st);
+        status = st.ready ? 0 : 5;
+        song_play();
+    } else if (cmd == 8 && n == 8) {
+        song_stop();
+        status = 0;
+    }
+#endif
     upload_last_cmd = (uint8_t)cmd;
     upload_last_status = (uint8_t)status;
     upload_stage = 20;

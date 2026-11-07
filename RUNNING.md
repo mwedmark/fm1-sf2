@@ -188,11 +188,39 @@ FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank a
 V15 refused, no FM-1 found. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
 not been run from this page yet.
 
-**From another computer on the same network (2026-11-05).** The server (`start_web.ps1`) answers on every address and prints them
-(this machine: `http://192.168.50.145:8765/install.html`; Windows Firewall already lets Python in). Chrome gives Web MIDI only to
-`localhost` or HTTPS, so on the other computer, once: `chrome://flags`, *Insecure origins treated as secure*, add
-`http://192.168.50.145:8765`, Relaunch. Without the flag the page says it has no Web MIDI. The packages can also be fetched from
-`http://192.168.50.145:8765/dist/` and flashed with M-VAVE's workbench, which needs no flag.
+**From another computer on the same network (2026-11-05).** `.\start_web.ps1 -Lan` also serves this folder over HTTPS on port 8766
+and prints the addresses (this machine: `https://192.168.50.145:8766/install.html`, and `song.html` the same way; Windows Firewall
+already lets Python in). Chrome gives Web MIDI only to `localhost` or HTTPS, so on the other computer accept the self-signed
+certificate warning once (*Advanced*, *Continue to ...*); no flag is needed (the Chrome flag *Insecure origins treated as secure*
+did not take in our test). The certificate is `test_emu\lan_cert.pem` (made by `test_emu\lan_cert.ps1`, also used by
+`start_emu.ps1 -Lan`, whose HTTPS port is 8782). The packages can also be fetched from `http://192.168.50.145:8765/dist/` and
+flashed with M-VAVE's workbench, which needs no certificate.
+
+### 3c. The MIDI file player: a song in the FM-1's RAM (branch sf2-midiplay, 2026-11-05, run in fm1-emu)
+
+```powershell
+.\build_fw.ps1 -Name sf2player_midiplay        # dist\sf2player_midiplay.fwsc; node make_install.js packs it for install.html
+node fm1_song.js <file.mid> [out.fm1s]          # what the page does: events, length, the song's size
+```
+
+Open <http://localhost:8765/song.html>, drop a `.mid` file and click **Send to FM-1**; then PLAY on the FM-1 (or **Play** on the
+page) plays it from the start, PLAY again stops it (pedal up and all notes off on every channel). `fm1_song.js` merges the tracks and
+works out the tempo: the song is the channel messages with their times in ms (aftertouch, meta events and SysEx left out), 4 bytes an
+event, about the MIDI file's size (the test files: 5-80 KB). It goes over the bank's SysEx upload, commands 4 to 8 (`sf2_upload.c`),
+into a block `malloc()` gives (`song.c`, at most `FM1_MIDIPLAY_MAX_BYTES`, 128 KB); it is gone when the FM-1 is switched off.
+The control task sends the events that are due through `fm1_app_midi_received()`, like MIDI in, so the channel page, mute and solo
+work as for MIDI from a computer; before the first event every channel is reset (controllers, bank, pan, sends, the panel's preset).
+It never fills the player's 32-place queue (`fm1b_queue_room()`): what does not fit goes a cycle later. The program page shows
+`PLAY <name> m:ss/m:ss` (green) or `SONG <name> m:ss  PLAY STARTS`; REC's info page also shows `FREE RAM n KB FOR A SONG`, the
+largest block `malloc()` gives (the emulator always says 512, its ceiling: the device's own number is the one to note).
+
+All of it is behind `FM1_MIDIPLAY` in `fm1b_config.h`: 0 leaves out the code (2.4 KB: 436 700 bytes against 439 132) and the PLAY
+button does nothing. The song's RAM is only taken when a song is uploaded.
+
+In fm1-emu (`test_emu\song_test.js`, MIDI into the DIN jack, which takes about 3 KB/s: 35 s for a 60 KB song; over USB it should be
+much faster): `R.ASTLEY.Never gonna give you up K.mid` (63 209 bytes, 15 771 events) arrived whole (`UPLOAD 154 R0`), played in time
+(20 s of the page's clock were 20 s of the song), with 16-30 voices and `DROPPED HELD 46` after 31 s; PLAY started and stopped it, the
+info page showed the song. Not yet run on the FM-1.
 
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
