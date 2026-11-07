@@ -4,8 +4,9 @@
 #   .\start_emu.ps1 -Script ''           no script: play it yourself
 #   .\start_emu.ps1 -Tap                 the page that records the emulator's audio into window.__cap (test_emu/tap.js)
 #   .\start_emu.ps1 -Bank dist\gm_32k_bfp8.fm1b   another bank (make_bank.js builds them): the same firmware plays every format
+#   .\start_emu.ps1 -Lan                 reachable from other computers on the network too (they need a Chrome flag, RUNNING.md section 4)
 #   .\start_emu.ps1 -Update              first fetch the emulator's newest files from its site (the old ones go to emu\previous\)
-param([int]$Port = 8781, [string]$Script = 'mt.script', [switch]$Tap, [switch]$NoBrowser, [string]$Bank = 'dist\gm_32k.fm1b', [switch]$Update)
+param([int]$Port = 8781, [string]$Script = 'mt.script', [switch]$Tap, [switch]$NoBrowser, [string]$Bank = 'dist\gm_32k.fm1b', [switch]$Update, [switch]$Lan)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $emu = Join-Path $root 'emu'
@@ -72,18 +73,26 @@ $catalog = Join-Path $emu 'firmwares.json'
 $json = Get-Content $catalog -Raw
 if ($json -notmatch '"id":\s*"sf2"') {                     # the site's catalog (a new one after -Update) has no entry of ours
     $entry = '{"id": "sf2", "name": "sf2player", "version": "test", "author": "local", "license": "GPL-3.0", "about": "local test", ' +
-             '"repo": "http://127.0.0.1", "package": "http://127.0.0.1:' + $Port + '/sf2player.fwsc"}'
+             '"repo": "http://127.0.0.1", "package": "sf2player.fwsc"}'
     $json = $json -replace '("firmwares":\s*\[)', "`$1`n    $entry,"
     if ($json -notmatch '"id":\s*"sf2"') { throw "firmwares.json: no firmwares list to add the sf2 entry to" }
 }
-# ?v= the package's time: each build gets its own address, and main.js (1b) boots a kept copy only of the same address
+# ?v= the package's time: each build gets its own address, and main.js (1b) boots a kept copy only of the same address. The address
+# is relative to the page, so the same catalog works at 127.0.0.1 and from another computer (-Lan).
 $version = (Get-Item $package).LastWriteTimeUtc.Ticks
-$json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc(\?v=\d+)?', "http://127.0.0.1:$Port/sf2player.fwsc?v=$version"
+$json = $json -replace '"package":\s*"(http://127\.0\.0\.1:\d+/)?sf2player\.fwsc(\?v=\d+)?"', "`"package`": `"sf2player.fwsc?v=$version`""
 Set-Content $catalog $json -NoNewline
 
-# 4. the server (127.0.0.1 only), unless one already answers on the port
-if (!(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)) {
-    Start-Process python -ArgumentList "`"$(Join-Path $root 'test_emu\cors_server.py')`" $Port `"$emu`"" -WindowStyle Hidden
+# 4. the server (127.0.0.1 only; -Lan: every address), unless one already answers on the port as asked
+$listening = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+if ($Lan -and $listening -and !($listening | Where-Object { $_.LocalAddress -in '::', '0.0.0.0' })) {
+    $listening | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }      # it answers on 127.0.0.1 only: start it again
+    $listening = @()
+    Start-Sleep -Milliseconds 500
+}
+if (!$listening) {
+    $bind = if ($Lan) { '::' } else { '127.0.0.1' }
+    Start-Process python -ArgumentList "`"$(Join-Path $root 'test_emu\cors_server.py')`" $Port `"$emu`" $bind" -WindowStyle Hidden
     Start-Sleep -Seconds 1
 }
 
@@ -91,3 +100,20 @@ if (!(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyC
 $url = "http://127.0.0.1:$Port/" + $(if ($Tap) { 'index_tap.html' } else { '' }) + "?fw=sf2&flash=$flashName&mhz=240" + $(if ($Script) { "&script=$Script" } else { '' })
 Write-Host $url
 if (!$NoBrowser) { Start-Process $url }
+# From another computer: Chrome runs the emulator's audio (AudioWorklet) only on localhost or HTTPS, so -Lan also serves HTTPS on
+# port+1 with a self-signed certificate (test_emu\lan_cert.pem): click through Chrome's warning once, no flag needed.
+if ($Lan) {
+    . (Join-Path $root 'test_emu\lan_cert.ps1')
+    $lanCert = Get-LanCertificate $root
+    $ips = $lanCert.Ips; $pem = $lanCert.Pem
+    if ($lanCert.Renewed) {                                   # a new certificate: a server with the old one stops
+        Get-NetTCPConnection -State Listen -LocalPort ($Port + 1) -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+        Start-Sleep -Milliseconds 500
+    }
+    if (!(Get-NetTCPConnection -State Listen -LocalPort ($Port + 1) -ErrorAction SilentlyContinue)) {
+        Start-Process python -ArgumentList "`"$(Join-Path $root 'test_emu\cors_server.py')`" $($Port + 1) `"$emu`" :: `"$pem`"" -WindowStyle Hidden
+        Start-Sleep -Seconds 1
+    }
+    $rest = $url.Substring($url.IndexOf('/', 8))
+    $ips | ForEach-Object { Write-Host ("From the network ($($_.InterfaceAlias)): https://$($_.IPAddress):$($Port + 1)$rest  (accept the certificate warning once)") }
+}

@@ -2,8 +2,9 @@
 # Both pages are served by the same server, from this folder. See RUNNING.md sections 3 and 3b.
 #   .\start_web.ps1              port 8765, opens both pages
 #   .\start_web.ps1 -NoBrowser   only starts the server
+#   .\start_web.ps1 -Lan         also an HTTPS server on port+1 (self-signed certificate), to install from another computer
 # Stop it by its port: Get-NetTCPConnection -State Listen -LocalPort 8765 | ForEach-Object { Stop-Process -Id $_.OwningProcess }
-param([int]$Port = 8765, [switch]$NoBrowser)
+param([int]$Port = 8765, [switch]$NoBrowser, [switch]$Lan)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -28,9 +29,25 @@ $pages | ForEach-Object { Write-Host $_ }
 if (!$NoBrowser) { $pages | ForEach-Object { Start-Process $_ } }
 Write-Host "http://localhost:$Port/song.html   (a MIDI file to the FM-1's MIDI file player, RUNNING.md section 3c)"
 
-# from another computer on the network: the server answers on every address (python -m http.server), but Chrome gives Web
-# MIDI only to a secure origin, which http://<this address> is not. On that computer, once: chrome://flags, "Insecure origins
-# treated as secure", add the address below, Relaunch. (Or fetch the .fwsc from /dist/ and flash it with M-VAVE's workbench.)
-$lan = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notmatch '^(127|169\.254)\.' -and $_.InterfaceAlias -notmatch '^vEthernet' -and $_.PrefixOrigin -ne 'WellKnown' }
-foreach ($a in $lan) { Write-Host "From the network ($($a.InterfaceAlias)): http://$($a.IPAddress):$Port/install.html  (Chrome flag needed, see start_web.ps1)" }
+# from another computer on the network. http://<this address> is not a secure origin, so Chrome gives that page no Web MIDI: -Lan
+# also serves this folder over HTTPS on port+1 with a self-signed certificate (test_emu\lan_cert.pem). On that computer, accept
+# the certificate warning once ("Advanced", "Continue to ..."). No Chrome flag is needed. (Or fetch the .fwsc from /dist/ and flash
+# it with M-VAVE's workbench.)
+if ($Lan) {
+    . (Join-Path $root 'test_emu\lan_cert.ps1')
+    $lanCert = Get-LanCertificate $root
+    $tls = $Port + 1
+    if ($lanCert.Renewed) {                                   # a new certificate: a server with the old one stops
+        Get-NetTCPConnection -State Listen -LocalPort $tls -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+        Start-Sleep -Milliseconds 500
+    }
+    if (!(Get-NetTCPConnection -State Listen -LocalPort $tls -ErrorAction SilentlyContinue)) {
+        Start-Process python -ArgumentList "`"$(Join-Path $root 'test_emu\cors_server.py')`" $tls `"$root`" :: `"$($lanCert.Pem)`"" -WindowStyle Hidden
+        for ($i = 0; $i -lt 20 -and !(Get-NetTCPConnection -State Listen -LocalPort $tls -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 250 }
+    }
+    foreach ($a in $lanCert.Ips) {
+        Write-Host "From the network ($($a.InterfaceAlias)): https://$($a.IPAddress):$tls/install.html   https://$($a.IPAddress):$tls/song.html   (accept the certificate warning once)"
+    }
+} else {
+    Write-Host "From another computer: .\start_web.ps1 -Lan (HTTPS; plain http://<address>:$Port gives no Web MIDI)"
+}

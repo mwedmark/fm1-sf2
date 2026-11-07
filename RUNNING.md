@@ -188,11 +188,13 @@ FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank a
 V15 refused, no FM-1 found. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
 not been run from this page yet.
 
-**From another computer on the same network (2026-11-05).** The server (`start_web.ps1`) answers on every address and prints them
-(this machine: `http://192.168.50.145:8765/install.html`; Windows Firewall already lets Python in). Chrome gives Web MIDI only to
-`localhost` or HTTPS, so on the other computer, once: `chrome://flags`, *Insecure origins treated as secure*, add
-`http://192.168.50.145:8765`, Relaunch. Without the flag the page says it has no Web MIDI. The packages can also be fetched from
-`http://192.168.50.145:8765/dist/` and flashed with M-VAVE's workbench, which needs no flag.
+**From another computer on the same network (2026-11-05).** `.\start_web.ps1 -Lan` also serves this folder over HTTPS on port 8766
+and prints the addresses (this machine: `https://192.168.50.145:8766/install.html`, and `song.html` the same way; Windows Firewall
+already lets Python in). Chrome gives Web MIDI only to `localhost` or HTTPS, so on the other computer accept the self-signed
+certificate warning once (*Advanced*, *Continue to ...*); no flag is needed (the Chrome flag *Insecure origins treated as secure*
+did not take in our test). The certificate is `test_emu\lan_cert.pem` (made by `test_emu\lan_cert.ps1`, also used by
+`start_emu.ps1 -Lan`, whose HTTPS port is 8782). The packages can also be fetched from `http://192.168.50.145:8765/dist/` and
+flashed with M-VAVE's workbench, which needs no certificate.
 
 ### 3c. The MIDI file player: a song in the FM-1's RAM (branch sf2-midiplay, 2026-11-05, run in fm1-emu)
 

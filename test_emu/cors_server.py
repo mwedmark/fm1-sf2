@@ -1,4 +1,4 @@
-import http.server, sys, os
+import http.server, socket, ssl, sys, os
 class H(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -8,4 +8,17 @@ class H(http.server.SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self.end_headers()
 os.chdir(sys.argv[2])
-http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+# argv[3]: the address to listen on, 127.0.0.1 unless given (start_emu.ps1 -Lan: '::', every address, IPv4 too)
+host = sys.argv[3] if len(sys.argv) > 3 else '127.0.0.1'
+class Server(http.server.ThreadingHTTPServer):
+    address_family = socket.AF_INET6 if ':' in host else socket.AF_INET
+    def server_bind(self):
+        if ':' in host: self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+server = Server((host, int(sys.argv[1])), H)
+# argv[4]: a PEM file with certificate and key: then HTTPS (Chrome runs AudioWorklet from a secure origin, so no flag is needed)
+if len(sys.argv) > 4:
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(sys.argv[4])
+    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+server.serve_forever()
