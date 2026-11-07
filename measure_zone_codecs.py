@@ -144,6 +144,22 @@ def main():
         bank = tables + mp3_bytes + rest_xz
         print(f'{thr:>25d} dB{use_mp3:12d}{mp3_bytes:11d}{rest_xz:9d}{bank:9d}{(bank / base - 1) * 100:11.1f}%')
     print(f'{"BFP8 + xz, nothing lossy":28s}{0:12d}{0:11d}{whole_xz:9d}{base:9d}{0.0:11.1f}%')
+    # Three tiers: per sample the smallest of BFP8 + xz, MP3 128 and MP3 64 whose SNR reaches the threshold. An MP3 tier is one stream,
+    # so its size is the nominal rate times the length (the per-sample sizes above carry the padding of whole frames).
+    nominal = {128: 16000, 64: 8000}
+    mp3_size = lambda r, k: nominal[k] * r['n'] / a.rate
+    xz_all = sum(r['bfp8_xz'] for r in rows) + tables
+    print(f'\nThree tiers, MP3 as one stream a tier ({nominal[128]} and {nominal[64]} bytes a second of audio), BFP8 + xz per sample, tables {tables} added')
+    print(f'(BFP8 + xz alone: {xz_all} bytes)')
+    print(f'{"smallest with SNR at least":28s}{"BFP8":>6s}{"MP3 128":>9s}{"MP3 64":>8s}{"bank":>9s}{"vs BFP8 xz":>12s}{"BFP8+MP3 64":>13s}')
+    for thr in (15, 17, 20, 25, 30):
+        n, total, two = {'bfp': 0, 128: 0, 64: 0}, tables, tables
+        for r in rows:
+            size, tier = min([(r['bfp8_xz'], 'bfp')] + [(mp3_size(r, k), k) for k in (128, 64) if r[f'snr_{k}'] >= thr], key=lambda o: o[0])
+            n[tier] += 1
+            total += size
+            two += min([r['bfp8_xz']] + ([mp3_size(r, 64)] if r['snr_64'] >= thr else []))
+        print(f'{thr:>25d} dB{n["bfp"]:6d}{n[128]:9d}{n[64]:8d}{total:9.0f}{(total / xz_all - 1) * 100:11.1f}%{two:13.0f}')
     if a.csv:
         with open(a.csv, 'w', newline='') as f:
             wr = csv.writer(f)

@@ -218,6 +218,47 @@ The firmware is flashed in step 5 and after, and `FIRMWARE.md` has not been run 
 (`sdk/firmware/FM-1_015.fwsc`, as `FIRMWARE.md` says) and M-VAVE's recovery have to be at hand first. The bank itself goes in over SysEx
 (`sf2_upload.c`) and does not touch the firmware.
 
+**Mixed tiers.** The format needs nothing new to mix quality in one bank: every pack entry has its own codec, and an MP3 stream's bitrate is
+in the stream, not in the entry. Three tiers, three entries:
+
+| Tier | Entry | Quality (SNR against the source on `1mgm.sf2`) |
+| --- | --- | --- |
+| lossless: BFP8 + xz | codec 1 in a BFP8 bank, codec 3 in a 16-bit bank | 43.8 dB |
+| MP3 128 kbit/s | codec 2 | 21.7 dB (whole set) |
+| MP3 64 kbit/s | codec 2 | 16.7 dB (whole set) |
+
+The zone table addresses the unpacked data, so the converter is free to lay the samples out sorted by tier: each tier is then one contiguous
+range and one stream, with no padding per sample (the 8 030 B/s of one stream against 14 200 for a stream per sample). A bank of the three
+tiers has three entries; a bank with two has two. The loop crossfade of codec 2 applies to both MP3 tiers. In a BFP8 bank the MP3 tiers
+are decoded and put into BFP8 groups as codec 2 says.
+
+*Choosing the tier of a sample* is the converter's job, by one of:
+
+1. a list by hand, sample by sample (the result of listening);
+2. a threshold: the smallest tier whose per-sample SNR against the source reaches it (`measure_zone_codecs.py` prints this table);
+3. a flash budget: begin with every sample lossless and move samples to a cheaper tier, the ones that save the most bytes for each dB lost
+   first, until the bank fits. A list by hand overrides both.
+
+What the threshold gives on `1mgm.sf2` (152 samples, 32 kHz, `measure_zone_codecs.py`; zone tables 8 194 bytes xz packed are in every row;
+MP3 tiers are counted as one stream each, 16 000 and 8 000 bytes a second of audio, BFP8 + xz per sample, so BFP8 + xz alone is 346 123):
+
+| Smallest tier whose SNR reaches | BFP8 | MP3 128 | MP3 64 | Bank | Against BFP8 + xz | BFP8 and MP3 64 only |
+| --- | --- | --- | --- | --- | --- | --- |
+| 25 dB | 91 | 53 | 8 | 282 628 | -18.3 % | 341 115 |
+| 20 dB | 35 | 55 | 62 | 192 999 | -44.2 % | 228 094 |
+| 17 dB | 25 | 38 | 89 | 173 898 | -49.8 % | 202 709 |
+| 15 dB | 18 | 24 | 110 | 159 298 | -54.0 % | 184 178 |
+
+The 128 kbit/s tier is worth having: at 20 dB it saves 15 % over BFP8 + xz and MP3 64 only (192 999 against 228 094), because a sample that does not
+reach the threshold at 64 kbit/s often does at 128. These are estimates, not three streams written and measured: the SNR of a sample is
+that of its own MP3 file, and in a long stream the neighbours may change it a little; the sizes of the MP3 tiers are the nominal rates. And
+SNR is a measure of the waveform, not of what is heard (an MP3 hides its noise under the signal), so the thresholds are not a quality
+statement: which tier a sample can take is for the listening test (step 3 above), and the 20 dB row only says where the bytes would go.
+A tier per sample on `4gmgsmt.sf2` has not been worked out; its one-stream numbers are in the table of fonts above.
+
+Tests that follow from it: the round trip per tier (codecs 1 and 3 exact; MP3 with each sample's SNR not below the value the converter
+chose it by), and the A/B listening files with a column for each tier.
+
 Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
 then codecs 3 and 2 per sample for the ones that pass a listening test.
 
