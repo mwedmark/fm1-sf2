@@ -15,7 +15,7 @@ function build(out, packed) {
   if (packed) srcs.push(path.join(root, 'test_mt/wrap_cache.c'), path.join(lc, 'mp3_sound.c'), path.join(lc, 'sound_cache.c'));
   const deps = srcs.concat(['fm1b.h', 'fm1b_config.h'].map(h => path.join(app, h)), [path.join(lc, 'sound_cache.h'), path.join(lc, 'mp3_sound.h')]);
   if (!fs.existsSync(out) || deps.some(s => fs.statSync(s).mtimeMs > fs.statSync(out).mtimeMs))
-    execFileSync(clang, ['--target=wasm32', '-nostdlib', '-O2', '-ffreestanding', '-fno-builtin', '-Wall', '-Wextra', '-Wno-unused-function', '-Wno-unused-parameter', '-DFM1_HOST_TEST', ...(packed ? ['-DFM1B_PACKED=1'] : []),
+    execFileSync(clang, ['--target=wasm32', '-nostdlib', '-O2', '-ffreestanding', '-fno-builtin', '-Wall', '-Wextra', '-Wno-unused-function', '-Wno-unused-parameter', '-DFM1_HOST_TEST', ...(packed ? ['-DFM1B_PACKED=1', '-DFM1B_BFP8_ONLY=1'] : []),
       '-I' + stubs, '-I' + app, '-I' + path.join(app, 'synth'), '-I' + path.join(root, 'fm1_open/sdk/include'), '-I' + lc, '-I' + mp3, '-Wl,--no-entry', '-Wl,--export-dynamic',
       '-Wl,-z,stack-size=262144', '-Wl,--initial-memory=16777216', ...srcs, '-o', out], { stdio: 'inherit' });
   return new WebAssembly.Module(fs.readFileSync(out));
@@ -74,6 +74,7 @@ check(player(modPlain, P, 0).rc !== 0, 'the plain engine refuses the packed bank
 check(player(modPacked, P, 0).rc !== 0, 'the packed engine refuses a packed bank while no pool is attached');
 check(player(modPacked, P, 262144).rc === 0, 'the packed engine binds the packed bank');
 check(player(modPacked, U, 262144).rc === 0, 'the packed engine still binds an unpacked bank');
+{ const b16 = A.writeFm1(A.buildBank(sf, [0], { rate: 32000, bits: 16 })); check(player(modPlain, b16, 0).rc === 0 && player(modPacked, b16, 262144).rc !== 0, 'built with FM1B_BFP8_ONLY (as the firmware with the live cache is), the engine refuses a 16-bit bank that the plain engine binds'); }
 // a packed bank with a damaged pack table must be refused, not played
 { const bad = Uint8Array.from(P); new DataView(bad.buffer).setUint32(offPack + 8, 0x7fffffff, true); check(player(modPacked, bad, 262144).rc !== 0, 'a pack entry that lies outside the file is refused'); }
 

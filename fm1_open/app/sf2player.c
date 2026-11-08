@@ -285,6 +285,12 @@ static char *put_compile_date(char *d)
                              date[4] == ' ' ? '0' : date[4], date[5], ' ', time[0], time[1], ':', time[3], time[4], 0});
     return d;
 }
+#if FM1B_BFP8_ONLY
+/* The build with the live cache has no room for the SDRAM test (the image is at the layout's limit) and the FM-1 most likely has no SDRAM: the page and the SAVE key do without it. */
+static void sdram_button(void) {}
+static void sdram_poll(void) {}
+static void sdram_lines(void) {}
+#else
 /* ---- the SDRAM test (the info page: SAVE twice) --------------------------------------------------------------------
  * The AC7911BA and BB carry 2 and 8 MB of SDRAM in the package (AC7911B datasheet, "Package Type Specification"), but the firmware's boot
  * configuration has ENABLE_SDRAM and SDRAM_SIZE at 0 and nothing here uses the memory. This finds out whether it answers, and how much:
@@ -391,6 +397,7 @@ static void sdram_lines(void)
         line_show(14, 217, line, 1, GREY);
     }
 }
+#endif
 static void info_update(void)
 {
     char line[LINE_CHARS + 1], *d;

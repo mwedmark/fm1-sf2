@@ -12,6 +12,11 @@
 #ifndef FM1B_PACKED
 #define FM1B_PACKED 0
 #endif
+/* 1: the engine plays BFP8 banks only (and packed ones, which are BFP8 after decoding): one voice loop and one with the effect buses instead of ten, the others' code gone from the
+ * image (the live cache build, which has no room for them: sdk/Build.ps1 -LiveCache sets it). fm1b_bind() refuses every other format. */
+#ifndef FM1B_BFP8_ONLY
+#define FM1B_BFP8_ONLY 0
+#endif
 
 /* The same in the browser and on the device. Measured in fm1-emu at 240 MHz, player at 32 kHz, flute, 32 voices: BFP8 bank
  * 42-48 % (63 % while the notes start), SEA6 bank 70-78 % (88 %): RUNNING.md, section 7b. On the device the audio interrupt's

@@ -457,6 +457,10 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.dqt = bank.sea_bits == 5U ? dqt : bank.sea_bits == 6U ? fm1b_dqt6 : NULL;   /* the caller has the SEA5 table, the engine the others */
     if (bank.format == FORMAT_SEA && !bank.dqt)
         return -1;
+#if FM1B_BFP8_ONLY
+    if (bank.format != FORMAT_BFP8)
+        return -1;
+#endif
     bank.bytes = bytes;
     bank.rate = rd32(image + 8);
     bank.preset_count = rd16(image + 12);
@@ -1629,6 +1633,9 @@ done:
 /* voice_run for the bank's format, without and with the effect buses: ten loops in all. */
 static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, int32_t *out, unsigned frames)
 {
+#if FM1B_BFP8_ONLY
+    voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_BFP8);
+#else
     switch (bank.format) {
     case FORMAT_SEA: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_SEA); break;
     case FORMAT_PCM16: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM16); break;
@@ -1636,10 +1643,14 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, i
     case FORMAT_BFP8: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_BFP8); break;
     default: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM8); break;
     }
+#endif
 }
 static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
                                                                    unsigned frames, int32_t rg, int32_t cg, int32_t sg)
 {
+#if FM1B_BFP8_ONLY
+    voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_BFP8);
+#else
     switch (bank.format) {
     case FORMAT_SEA: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_SEA); break;
     case FORMAT_PCM16: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM16); break;
@@ -1647,6 +1658,7 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice
     case FORMAT_BFP8: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_BFP8); break;
     default: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM8); break;
     }
+#endif
 }
 /* A filtered voice: played into a block of its own, through its filter, then added to the mix and, times rg, cg and sg as
  * voice_run does, to the buses it has. */
