@@ -226,6 +226,9 @@ function Test-Firmware {
         application_callbacks_verified=$true; board_validation='not performed'}
     Write-Text $report ($result | ConvertTo-Json -Depth 6)
     Write-Host "FM1: $appImage bytes app image; SRAM/BLE/USB checks passed"
+    $imageLimit = 453921   # sdk/Package.cs: FlashLimit - UserSize - BtSize - MinimumVm - Area - AppData - 383 - 64 (FIRMWARE.md)
+    if ($appImage -gt $imageLimit) { Write-Host "FM1: the app image is $appImage bytes, $($appImage - $imageLimit) over the $imageLimit the FM1 layout has: the next step will stop with 'Application does not fit the FM1 layout.'" }
+    else { Write-Host "FM1: the app image has $($imageLimit - $appImage) bytes to spare (limit $imageLimit)" }
     if ($LiveCache) { Write-Host "FM1: live cache on: pool $CacheKB KB, $CacheFrames MP3 frames a control cycle; the runtime heap left is $heapBytes bytes (the build stops under 49152)" }
 }
 
@@ -393,6 +396,8 @@ try {
         # Storage and screen run only from control; keep audio DSP on O2.
         if ($source -in @('app/project.c','app/transfer.c','app/samples.c','app/screen.c','app/presets.c','app/midi_router.c','app/fm_factory.c','app/fm_library.c')) { $options += '-Oz' }
         if ($source -eq 'app/screen.c') { $options += '-fno-inline-functions' }
+        # The live cache runs from the control task only (flash), and minimp3 is 36 KB at -O2 against 18 KB at -Oz (host clang, thumb2): the image has about 30 KB to spare.
+        if ($source -like 'live_cache/*') { $options += '-Oz' }
         $arguments = @($options) + @('-MMD','-MF',($output + '.d'),'-c',$inputFile,'-o',$output)
         Write-Host "Compile $source"
         Run (Join-Path $bin 'clang.exe') $arguments
