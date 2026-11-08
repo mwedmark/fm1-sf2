@@ -423,6 +423,15 @@ What this does not show, and what it needs:
   (24.8 at 128), 49 KB against 188 KB, and 2.3 times the audio of `1mgm.sf2`'s piano in 82 KB. Not yet listened to: the rest. In the 16 s excerpts of three songs the weakest sounds are the
   noise-like ones, hi-hats, cabasa and ride cymbal, 4 to 5 dB at 64 kbit/s and 7 to 9 at 128 (strings about 14), and a few such sounds are what a lossless tier in "Mixed tiers" is for: the 4 MB
   font's kit hi-hats and cymbals stay BFP8 and cost a small part of the flash. The loops need the crossfade of the packed-data proposal (used in the renderings).
+  **Songs, same listener, same day** (16 s excerpts of *Dancing Queen*, *Africa* and *Under the Sea*, rendered with the zones' own envelopes): the 4 MB font as BFP8 is "clearly the best"
+  and the whole sound is better than `1mgm.sf2`'s; the MP3 versions (64 and 128 kbit/s) are audibly different from it, and brighter than `1mgm.sf2` (the font is: 0.19 % of the energy
+  above 8 kHz against 0.10 %; the MP3 versions have 11 to 14 % less than the uncompressed font in the 8 to 16 kHz band). So the MP3 step costs something in a full mix, unlike the piano alone.
+  **A lossless tier costs more than it looks**: as raw BFP8 a sound is 4.1 times its MP3 64 size, so the 12 weakest sounds (under 6 dB) are 58 KB instead of 12, and the flash has 27 KB
+  over (128 melodic presets and kit 0: 112 KB of tables, 315 KB of MP3). Picking by how often the 15 songs use a sound and how badly MP3 handles it, within 24 KB, gives eight: the closed,
+  foot and open hi-hat, cabasa, maracas, ride ping and two short tonal sounds, 452 of 456 KB in all (`High Hat Closed` alone is used 2 941 times in the 15 files). In the excerpts this
+  brings the 8 to 16 kHz band back to 1.00 of the uncompressed font in two songs (0.86 to 0.89 with all sounds MP3) and the difference to it from 22.5 dB to 23.3 dB; it has not been listened to
+  yet. The weak sounds left as MP3 include the crash cymbals, the gunshot and the agogo bell. Merging neighbouring zones does not buy the room: the 4 MB font's zones differ in envelope hold and
+  filter by key, and merging those within a factor 2 saves 2 KB of the 112 KB of tables.
 - **The engine.** A zone points into the flash today; it would point at a cache block, or at nothing yet. A voice pins its sound; a note whose sound cannot be loaded needs a decision (late or
   silent). The random access into one MP3 stream (a frame index and 2 or 3 frames of lead-in) is another reason the sounds are not stored as a stream each, which costs 77 % more on `1mgm.sf2`.
 - **The songs.** 15 files, GM arrangements played from bank 0 and kit 0: a performer changing programs by hand, or a song with many different programs and kits, has a larger working set.
