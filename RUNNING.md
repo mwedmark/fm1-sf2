@@ -11,6 +11,7 @@ Everything needed to get the SF2 player going again. Facts marked **(verified)**
 | JieLi device toolchain 2.5.3 | **`D:\JL\pi32`** (not `C:\JL`). Needs `bin\clang.exe` |
 | WASI SDK 27 (for the WebAssembly tests) | `fm1_open\build\tools\wasi-sdk-27.0-x86_64-windows` (downloaded by `Build-Web.ps1`) |
 | Node, Python 3.13 | on `PATH` (Python only for `http.server`) |
+| ffmpeg with libmp3lame | on `PATH`; only for the live cache (`pack_bank.js`, `test_pack_bank.js`, `test_sound_cache.js`, `test_packed_engine.js`, `measure_zone_codecs.py`). Install: `winget install --id Gyan.FFmpeg`, open a new PowerShell and check `ffmpeg -version` and `ffmpeg -hide_banner -encoders \| Select-String libmp3lame` (a minimal build without libmp3lame cannot encode the MP3 stream). Without winget: the "release essentials" zip from gyan.dev, and `$env:PATH += ';D:\tools\ffmpeg\bin'` for the session |
 | Docker | **not needed**. The firmware builds natively (verified). The Docker images on the machine are for other projects |
 | Recovery firmware | `fm1_open\sdk\firmware\FM-1_015.fwsc`, keep it at hand before flashing anything |
 
