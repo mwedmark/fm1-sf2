@@ -396,10 +396,10 @@ try {
         # Storage and screen run only from control; keep audio DSP on O2.
         if ($source -in @('app/project.c','app/transfer.c','app/samples.c','app/screen.c','app/presets.c','app/midi_router.c','app/fm_factory.c','app/fm_library.c')) { $options += '-Oz' }
         if ($source -eq 'app/screen.c') { $options += '-fno-inline-functions' }
-        # The live cache runs from the control task only (flash), and minimp3 is 36 KB at -O2 against 18 KB at -Oz (host clang, thumb2): the image has about 30 KB to spare.
-        if ($source -like 'live_cache/*') { $options += '-Oz' }
-        # The live cache build is 443 bytes over the layout with only that: the player's control code (keys, screen, upload, binding) does not run in the audio interrupt either.
-        if ($LiveCache -and $source -in @('app/sf2player.c','app/sf2_upload.c','app/fm1b_bank.c')) { $options += '-Oz' }
+        # The live cache (mp3_sound.c, sound_cache.c, minimp3) runs from the control task only and the image has 13.6 KB to spare. -Oz does nothing under -flto here (the
+        # optimisation level is the link's, two builds came out to the byte alike), so these are compiled as native objects, as the units above, where it counts.
+        # The rest of the firmware does not call into them but fm1b.c, which the linker sees through the symbols.
+        if ($source -like 'live_cache/*') { $options += @('-fno-lto', '-Oz') }
         $arguments = @($options) + @('-MMD','-MF',($output + '.d'),'-c',$inputFile,'-o',$output)
         Write-Host "Compile $source"
         Run (Join-Path $bin 'clang.exe') $arguments
