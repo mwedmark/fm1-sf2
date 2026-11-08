@@ -397,25 +397,40 @@ the kit on channel 10, bank select ignored) and counts what the song does to a c
 
 | Cache (KB of BFP8) | Sounds found in it | Misses (decodes) | Sounds that could not be loaded | Decoded audio, average, % of a core (K 5 to 12) | Worst second, audio decoded | Most misses in 50 ms |
 | --- | --- | --- | --- | --- | --- | --- |
-| 96 | 87.7 % | 5 886 | 3 563 | 0.3 to 0.8 | 5.2 s | 15 |
-| 128 | 94.0 % | 3 147 | 1 432 | 0.2 to 0.5 | 5.8 s | 15 |
-| 192 | 98.6 % | 996 | 67 (two songs: 21 and 46) | 0.1 | 6.2 s | 15 |
-| 256 | 99.4 % | 432 | **0** | 0.0 to 0.1 | 6.2 s | 15 |
+| 96 | 87.7 % | 5 886 | 3 563 | 0.3 to 0.7 | 3.9 s | 15 |
+| 128 | 94.0 % | 3 147 | 1 432 | 0.2 to 0.4 | 4.5 s | 15 |
+| 192 | 98.6 % | 996 | 67 (two songs: 21 and 46) | 0.0 to 0.1 | 5.3 s | 15 |
+| 256 | 99.4 % | 432 | **0** | 0.0 | 5.3 s | 15 |
 
   "Could not be loaded" is a sound that is needed while the cache is full of sounds that are playing; that note would be silent or late. K is the decoder's cost in million cycles for each
-  second of mono audio on a 240 MHz core, an **assumption** (5 and 12 are tried; none measured on a pi32v2). The worst second is the song's start, when everything is cold: 6.2 s of
-  audio to decode is 13 to 31 % of a core, and 15 cold sounds at once would wait, one after the other, about 45 to 110 ms for the last (4 frames of each: 3 of lead-in for the
-  bit reservoir and the first; also an assumption), where a sound already in the cache costs nothing.
+  second of mono audio on a 240 MHz core, an **assumption** (5 and 12 are tried; none measured on a pi32v2). The worst second is the song's start, when everything is cold: 5.3 s of
+  audio to decode is 11 to 26 % of a core, and 15 cold sounds at once would wait, one after the other, about 22 to 54 ms for the last (2 frames of each: one of lead-in and the first;
+  with the bit reservoir off, see "Built so far"; also an assumption), where a sound already in the cache costs nothing. (The first version of this table assumed 3 lead-in frames.)
 - Flash: the 4 MB font's 138 presets are 136 KB of tables and about 354 KB of MP3 (8 009 bytes for each second of audio, measured on one stream of all its sounds) and an index of 4 bytes a
   sound: 492 KB, 36 KB too much. The 128 melodic presets and kit 0 are 112 KB and about 315 KB: 429 KB, which fits (27 KB over); the melodic presets alone 390 KB. That is 1 419 KB of BFP8, 3.1
   times what the flash holds now (`measure_working_set.js`, 464 636 bytes for `1mgm.sf2`).
+
+**Built so far** (branch `claude/live-cache`; `fm1_open/live_cache`, kept out of `app/` because nothing here has been built with the pi32v2 toolchain; `node test_sound_cache.js`, 22 checks, and each of
+five broken versions of the C is caught):
+
+- `mp3_sound.c`: a sound of a packed stream decoded into BFP8 a few MP3 frames at a time (minimp3, `fm1_open/third_party/mp3`, CC0, unmodified, pinned), the BFP8 packer (the converter's bytes
+  for 3000 random groups) and the loop crossfade. Against ffmpeg's decode of the same stream every sound is at least 40 dB (BFP8's own noise is about 44), whatever the slice size.
+- `sound_cache.c`: a pool, best-fit gaps, drop of the least recently used sound that is not pinned, pins, a queue of decodes, sounds that play in place, groups held back until the crossfade is done.
+  4 000 random requests: no two sounds overlap, and every sound left is right. Songs played through it: every sound that was ready when a note found it is bit for bit a decode of that sound, also
+  after it has been dropped and decoded again (the 4 MB font, 128 KB: 107 dropped and decoded again in 30 s).
+- **The stream must be coded with the bit reservoir off** (`ffmpeg ... -reservoir 0`). With it on a frame may borrow bits from the two before, and a sound that starts in the middle of the stream decodes
+  to silence unless 4 frames of lead-in are decoded first (with 2, 41 of the 165 sounds of `1mgm.sf2` came out silent). Off, one frame of lead-in is enough, every sound decodes, and the quality is
+  the same to a quarter of a dB (the whole stream 13.59 dB against 13.36 on, `1mgm.sf2`). The rest of the design assumes this.
+- The stream is 8 014 bytes for each second of audio for the 4 MB font's 448 sounds (323 181 bytes), as budgeted.
+- **Not written:** the converter's writer of the packed bank (the pack table above, the stream, the index of each sound's byte offset and the samples to throw away) and the engine's use of it (a
+  zone points at a cache block or at flash, a voice pins its sound and waits for its first groups). Not tried: the build with JieLi's compiler.
 
 What this does not show, and what it needs:
 
 - **The SRAM.** 192 to 256 KB is at the top of the plausible 150 to 250 KB that the firmware leaves, and a cache of sounds of every length needs an allocator that does not fragment; with
   10 to 25 % lost to that, 256 KB would act like 190 to 230. Below 192 KB, songs start to lose notes. The real figure is in the build's `firmware-report.json`.
-- **The decoder.** An MP3 layer-III decoder that runs on the pi32v2 in the control task (the audio interrupt only reads the cache), 15 to 25 KB of code (a guess; the image has roughly 30 KB
-  to spare), at a speed nobody has measured here. Decoding must stay ahead of a voice's read position (20 to 48 times real time at K 5 to 12, against a voice that reads at the pitch's speed, up to
+- **The decoder.** minimp3 (CC0) runs on WebAssembly here, not yet on the pi32v2 (built with its clang 4.0.1? not tried). In the control task (the audio interrupt only reads the cache), 15 to 25 KB of code (a guess; the image has roughly 30 KB
+  to spare), 14 KB of stack for its working data, 32-bit floats (whether the OS saves the FPU registers across tasks is not checked), at a speed nobody has measured here. Decoding must stay ahead of a voice's read position (20 to 48 times real time at K 5 to 12, against a voice that reads at the pitch's speed, up to
   2 or 4 times); a note may start as soon as the lead-in is done.
 - **The sound.** MP3 at 64 kbit/s is 16.7 dB against the source over the whole font (BFP8 is 43.8), and then goes into BFP8, whose noise is far below the MP3's. **Listened to, 2026-11-08,
   one listener:** the piano (a note, a chord, an arpeggio over the keyboard, bass and treble notes; the 4 MB font's Piano 1 against `1mgm.sf2`'s, rendered by a stand-in for the player with
@@ -423,6 +438,9 @@ What this does not show, and what it needs:
   (24.8 at 128), 49 KB against 188 KB, and 2.3 times the audio of `1mgm.sf2`'s piano in 82 KB. Not yet listened to: the rest. In the 16 s excerpts of three songs the weakest sounds are the
   noise-like ones, hi-hats, cabasa and ride cymbal, 4 to 5 dB at 64 kbit/s and 7 to 9 at 128 (strings about 14), and a few such sounds are what a lossless tier in "Mixed tiers" is for: the 4 MB
   font's kit hi-hats and cymbals stay BFP8 and cost a small part of the flash. The loops need the crossfade of the packed-data proposal (used in the renderings).
+  **A caveat on all the listening above** (found when the decoder was built): the renderings coded each sound as a file of its own, which costs 77 % more flash than one stream (every file
+  has its own padding frames and codec delay), so they had in effect about 113 kbit/s, not 64. The stream the flash budget assumes, decoded by the decoder of `fm1_open/live_cache`, is
+  17.2 dB per sound on average for the 4 MB font against 19.1 for the separate files. About 2 dB worse, to be listened to again, with this decoder's own output.
   **Songs, same listener, same day** (16 s excerpts of *Dancing Queen*, *Africa* and *Under the Sea*, rendered with the zones' own envelopes): the 4 MB font as BFP8 is "clearly the best"
   and the whole sound is better than `1mgm.sf2`'s; the MP3 versions (64 and 128 kbit/s) are audibly different from it, and brighter than `1mgm.sf2` (the font is: 0.19 % of the energy
   above 8 kHz against 0.10 %; the MP3 versions have 11 to 14 % less than the uncompressed font in the 8 to 16 kHz band). So the MP3 step costs something in a full mix, unlike the piano alone.

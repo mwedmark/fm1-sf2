@@ -13,3 +13,4 @@ test_fluid/out/
 fm1_open/app/build_info.h
 test_sdram/*.wasm
 __pycache__/
+test_sound_cache/*.wasm

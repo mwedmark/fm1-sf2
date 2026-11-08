@@ -4,13 +4,13 @@
 // playing go when the cache is full. This plays standard MIDI files against the converter's bank and counts, for each cache size, what the
 // song does to it: sounds touched, misses, the audio that has to be decoded each second, and notes that find the cache full of playing sounds.
 //   node measure_live_cache.js font.sf2 file.mid [file.mid ...]       (the font at 32 kHz, bank 0 and the percussion kits of bank 128)
-// Assumptions, not measurements: a miss decodes the whole sound plus 3 MP3 frames of lead-in (the bit reservoir); the decoder needs
+// Assumptions, not measurements: a miss decodes the whole sound plus 1 MP3 frame of lead-in (the stream is coded with the bit reservoir off); the decoder needs
 // K million cycles for each second of mono audio (5 and 12 are tried), on a 240 MHz core; a voice keeps its sound until the note has ended
 // and 0.4 s of release, a percussion sound until it has played out. Bank select is ignored, so GS variation banks are not used.
 const fs = require('fs'), path = require('path');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const A = new Function(html.match(/<script id="core">([\s\S]*?)<\/script>/)[1] + '\nreturn { parseSf2, buildBank };')();
-const CACHE_KB = [96, 128, 192, 256], K_CYCLES = [5e6, 12e6], CLOCK = 240e6, RELEASE = 0.4, LEAD_IN_FRAMES = 3 * 1152, RATE = 32000;
+const CACHE_KB = [96, 128, 192, 256], K_CYCLES = [5e6, 12e6], CLOCK = 240e6, RELEASE = 0.4, LEAD_IN_FRAMES = 1152, RATE = 32000;
 const bfp = frames => Math.ceil(frames / 32) * 33;
 
 function loadBank(file) {
