@@ -340,6 +340,49 @@ chose it by), and the A/B listening files with a column for each tier.
 Order of work if it is built: first bit 4 with codecs 0 and 1 only (a lossless -27 %; the unpacker is an LZMA2 decoder, perhaps 10 KB of code, a guess not measured),
 then codecs 3 and 2 per sample for the ones that pass a listening test.
 
+## Calculation: a sample cache in the FM-1's SRAM (not built)
+
+Without SDRAM the room is the 466 944 bytes of flash and the SRAM, 578 KB with 64 KB of it the caches, so about 514 KB usable. How much of that this
+firmware leaves free is not known here: the stock firmware's static RAM is about 135 KB (AL-255/FM-1-RE), this one's is in the build's
+`firmware-report.json` (`runtime_heap_bytes`, which `sdk/Build.ps1` insists is at least 48 KB), and a cache of 150 to 250 KB is the plausible range. The
+question: could the flash hold the bank packed (MP3, xz) and the player decode what sounds into SRAM? Worked out with `measure_working_set.js` and
+`measure_sample_rates.py`, 32 kHz, the converter's own banks.
+
+**What the SRAM would have to hold** (the sounds of the programs that sound at once; a preset's sounds counted once; KB):
+
+| | `1mgm.sf2` | `4gmgsmt.sf2` |
+| --- | --- | --- |
+| one melodic preset, median / largest (PCM16) | 17 / 155 (Piano 1) | 18 / 361 (Piano 3) |
+| percussion kit 0 (PCM16 / BFP8) | 216 / 111 | 360 / 186 |
+| 4 random programs and a kit: median, 99 % (BFP8) | 136, 215 | 250, 493 |
+| 15 random programs and a kit: median, 99 % (BFP8) | 190, 273 | 440, 692 |
+| a typical band, 10 programs and kit 0 (BFP8 / PCM16) | 246 / 476 | 555 / 1 077 |
+| the whole bank in BFP8 (all melodic, kit 0, everything) | 333, 111, 405 | 1 155, 186, 1 457 |
+
+(The flash holds 456 KB.) For `1mgm.sf2` the whole bank in BFP8 is 405 KB: it already fits the flash and plays in place, so a cache buys nothing. For
+the 4 MB font a typical band needs 555 KB of BFP8, more than the SRAM has at all, and even 4 programs and a kit need 493 KB one time in a hundred; the kit alone
+is 186 KB. Keeping what sounds resident does not fit.
+
+**Decoding while it plays instead** (no resident set, each voice decodes from the flash). Measured in fm1-emu at 240 MHz (`RUNNING.md` 7b): BFP8 and 8-bit
+need no decoding; SEA5 and SEA6 cost about one point of CPU for each voice (16 voices 52 to 59 % against 32 to 37 %; 24 voices 57 to 59 % against 35 to 41 %), for a
+bank 24 % (SEA5) or 12 % (SEA6) smaller. 32 voices of BFP8 already run at 50 to 55 % and the CPU guard acts at 80 %, so about 25 points are left. MP3 per voice is an
+estimate, not a measurement: assumed 5 to 12 million cycles for each second of mono audio from a fixed-point layer-III decoder (from memory of such decoders' speeds,
+not looked up here and not run on a pi32v2), which is 2 to 5 points per voice at 240 MHz, so 5 to 12 voices of the 32. xz would need the stream in blocks and costs more
+than SEA per voice.
+
+**A rate of its own for each sound** (no decoding, but the engine has no rate per zone: a field per zone and a step multiplier would be needed). The lowest of 8, 11.025, 16,
+22.05, 24 and 32 kHz that keeps 99.9 % of a sound's energy (99.99 %) saves, in BFP8: `1mgm.sf2` 11 % (4 %), `4gmgsmt.sf2` 19 % (9 %).
+
+**What follows.**
+
+- A cache does not bring a 4 MB font to the FM-1: the working set does not fit the SRAM, and decoding per voice does not fit the CPU. It is not worth building on this hardware.
+- 456 KB of flash is the budget, in a format that plays in place. The 4 MB font's melodic part and kit 0 are 1 300 KB of BFP8: 35 % of it fits, which is what `1mgm.sf2`
+  (405 KB) already is, a font of that class thinned to fit. Changing font does not buy more on its own; choosing the sounds better does.
+- What is left, none of it three times as much: SEA5 or SEA6 (12 to 24 % more, one point per voice, so the 24-voice firmware), a rate per sound (4 to 19 %), thinning zones and
+  presets by hand, and not storing the loops repeated (29 KB of the 1mgm bank).
+- The proposal above (packed in the flash, unpacked into SDRAM) stays valid for an AC7911BA or BB board, which has the memory.
+- Not measured: how much SRAM is free, and the speed of any decoder on the FM-1.
+
 ## Proposal: more of the SoundFont (not implemented)
 
 With the room that packed sample data gives (see the proposal above), the parts of a SoundFont that the converter leaves out
