@@ -11,6 +11,7 @@ Everything needed to get the SF2 player going again. Facts marked **(verified)**
 | JieLi device toolchain 2.5.3 | **`D:\JL\pi32`** (not `C:\JL`). Needs `bin\clang.exe` |
 | WASI SDK 27 (for the WebAssembly tests) | `fm1_open\build\tools\wasi-sdk-27.0-x86_64-windows` (downloaded by `Build-Web.ps1`) |
 | Node, Python 3.13 | on `PATH` (Python only for `http.server`) |
+| ffmpeg with libmp3lame | on `PATH`; only for the live cache (`pack_bank.js`, `test_pack_bank.js`, `test_sound_cache.js`, `test_packed_engine.js`, `measure_zone_codecs.py`). Install: `winget install --id Gyan.FFmpeg`, open a new PowerShell and check `ffmpeg -version` and `ffmpeg -hide_banner -encoders \| Select-String libmp3lame` (a minimal build without libmp3lame cannot encode the MP3 stream). Without winget: the "release essentials" zip from gyan.dev, and `$env:PATH += ';D:\tools\ffmpeg\bin'` for the session |
 | Docker | **not needed**. The firmware builds natively (verified). The Docker images on the machine are for other projects |
 | Recovery firmware | `fm1_open\sdk\firmware\FM-1_015.fwsc`, keep it at hand before flashing anything |
 
@@ -27,6 +28,15 @@ cd D:\git\fm1-sf2
 It writes the name and time to `fm1_open\app\build_info.h` (git ignores it), runs the plain build below, removes the header again,
 copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prints next to it. A plain build shows
 `FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
+
+**With the live cache** (2026-11-08, **not built yet**; `-LiveCache` on `build_fw.ps1` or `sdk\Build.ps1`): plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
+The image is at the layout's limit, so this build also plays BFP8 banks only (`FM1B_BFP8_ONLY`: one voice loop in place of ten; the packed bank is BFP8 after decoding; SEA, 8-, 12- and 16-bit banks are refused), and leaves out the MIDI file player (`FM1_MIDIPLAY=0`; the code stays and the plain build has it: with it the image was 2 235 bytes over, and a song takes its RAM from the heap the cache leaves short). (The SDRAM test of the info page is gone from every build since 2026-11-08: on the FM-1 it restarted the device, there is no SDRAM.)
+It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 96, 16 to 400) in the SRAM, which the link takes from the
+runtime heap; `-CacheFrames` (default 2) is the MP3 frames (1152 samples) decoded in one control cycle. The build prints the heap that is left (`runtime_heap_bytes` in `firmware-report.json`), and stops under 49 152
+bytes, which is how the free SRAM is found: raise `-CacheKB` until it stops. Without the switch the firmware is what it was. What to look at in the first build, none of it known:
+the compiler's warnings (`-Wframe-larger-than`: minimp3's decode takes about 16 KB of stack, and the control task that calls `fm1b_cache_service` must have it), the image size against the 30 KB or so spare
+(`Application does not fit the FM1 layout.`), and whether minimp3's floats link (on WebAssembly it needs only `memcpy`, `memset`, `memmove`, `memcmp`). Then the bank: `node pack_bank.js in.fm1b out.fm1b`, to the
+flash as any bank (the file's size is in its header, so the existing flash path binds it); a packed bank the player binds without the switch is refused, so nothing plays rather than the wrong thing.
 
 **Plain:**
 
@@ -56,6 +66,11 @@ SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
 
+**Before flashing any build** (2026-11-08): start it in fm1-emu (section 4) and check that the screen draws and a note sounds:
+`.\start_emu.ps1 -Tap -NoBrowser -Bank <bank>`, open the address it prints, and check that the page says `Running sf2player.fwsc?v=` with the new
+build's number. A build with too small a runtime heap shows a blank screen and about 320 % load there, and on the FM-1 it does not start at all. The build
+stops under 111 468 bytes of heap. If a bank makes the player crash: safe mode, OCT- and OCT+ held at power-on (FIRMWARE.md).
+
 ## 2. Tests that need no device (verified, all pass)
 
 Each one compiles the real C source to WebAssembly with the WASI SDK on the first run (and again when a source is newer).
@@ -74,6 +89,11 @@ node test_zone.js             # zone level, exclusive class (hi-hat choke), scal
 node test_lfo.js              # the zone's LFOs (vibrato, tremolo, delay) and key to hold/decay, at 44.1 and 32 kHz, on a sine bank
 node test_filter.js           # the low-pass filter and the modulation envelope against the same filter in floating point; 1mgm.sf2
 node test_layers.js           # stacked layers: every zone that covers a key sounds; 1mgm.sf2 at 32 kHz, BFP8
+node test_dropped_presets.js  # the zones and sounds of presets the bank map drops are not written (a bank made by hand, no font)
+python3 test_sdram_config.py  # make_sdram_config.py: boot-config.bin read as its entries, the copy with the SDRAM on differs in two keys only (python3, no packages)
+node pack_bank.js in.fm1b out.fm1b          # the live cache's packed bank from a BFP8 bank (ffmpeg); node test_pack_bank.js [font] unpacks it again with the C decoder
+node test_packed_engine.js [font]            # the engine (fm1b.c, FM1B_PACKED) playing a packed bank against the plain engine, bit for bit; ffmpeg and any clang for wasm32 (1 min with the 4 MB font)
+node test_sound_cache.js [font] [mid]  # the live cache's decoder and cache (fm1_open/live_cache): minimp3 into BFP8, the pool, a song played through it; ffmpeg and any clang for wasm32
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover

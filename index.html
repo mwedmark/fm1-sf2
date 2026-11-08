@@ -603,20 +603,29 @@ function bankInfo(name, when = new Date()) {
 function writeFm1(bank, info) {
   // only GM's two banks have a slot in the bank map: melodic (0) and percussion (128)
   const slot = p => p.bank === 0 ? p.preset : p.bank === 128 ? 128 + p.preset : -1;
-  const presets = bank.presets.filter(p => slot(p) >= 0 && slot(p) < 256 && p.count <= 254);
-  bank.dropped = bank.presets.length - presets.length;
-  const np = presets.length, nz = bank.zones.length;
+  const written = new Set(bank.presets.filter(p => slot(p) >= 0 && slot(p) < 256 && p.count <= 254));
+  bank.dropped = bank.presets.length - written.size;
+  // The zones of a dropped preset are not written either, nor the sounds only they use: nothing in the file reaches them (a font with
+  // GS and MT-32 variation banks has several hundred such presets). Zones that belong to no preset (a bank of loose samples) stay.
+  const gone = new Uint8Array(bank.zones.length), newIndex = new Int32Array(bank.zones.length);
+  for (const p of bank.presets) if (!written.has(p)) gone.fill(1, p.first, p.first + p.count);
+  const zones = [];
+  bank.zones.forEach((z, i) => { if (!gone[i]) { newIndex[i] = zones.length; zones.push(z); } });
+  const presets = bank.presets.filter(p => written.has(p)).map(p => Object.assign({}, p, { first: newIndex[p.first] }));
+  const usedSounds = new Set(zones.map(z => z.sample)), sounds = bank.samples.filter(s => usedSounds.has(s));
+  bank.zonesWritten = zones.length; bank.soundsWritten = sounds.length;      // what the file holds, for the page's summary
+  const np = presets.length, nz = zones.length;
 
   const offInfo = info ? FM1B_INFO_HEADER : 0, offPitch = info ? FM1B_INFO_HEADER + FM1B_INFO : FM1B_HEADER, offBank = offPitch + 512, offPre = offBank + 512;
   const offKey = offPre + FM1B_PRESET * np, offZone = offKey + 128 * np, offExtra = offZone + FM1B_ZONE * nz, offEnv = offExtra + FM1B_ZONE_EXTRA * nz;
   const envs = [], envIndex = new Map();                    // envelopes are shared between zones
-  for (const z of bank.zones) {
+  for (const z of zones) {
     const e = z.env || envRecord(null, false), k = [e.attack, e.hold, e.decay, e.sustain, e.release, e.fixed].join();
     if (!envIndex.has(k)) { envIndex.set(k, envs.length); envs.push(e); }
     z.envIndex = envIndex.get(k);
   }
   const mods = [], modIndex = new Map();                    // so are the modulation records; a zone without one has 0
-  for (const z of bank.zones) {
+  for (const z of zones) {
     z.modNumber = 0;
     if (!z.mod) continue;
     const k = MOD_FIELDS.map(f => z.mod[f]).join();
@@ -628,9 +637,9 @@ function writeFm1(bank, info) {
   const layers = presets.map(p => {
     const list = [];
     for (let k = 1; k < p.count; k++) {
-      const z = bank.zones[p.first + k];
+      const z = zones[p.first + k];
       for (let j = 0; j < k; j++) {
-        const o = bank.zones[p.first + j];
+        const o = zones[p.first + j];
         if (o.lo <= z.hi && o.hi >= z.lo) { list.push([z.lo, z.hi, k]); break; }
       }
     }
@@ -641,7 +650,7 @@ function writeFm1(bank, info) {
   const offMod = offEnv + FM1B_ENV * envs.length, offLayer = offMod + FM1B_MOD * mods.length;
   const offSmp = offLayer + (nLayers ? 4 * np + 4 * nLayers : 0);
   let end = offSmp;
-  for (const s of bank.samples) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
+  for (const s of sounds) { s.fileOff = end; end += (s.bytes + 3) & ~3; }
 
   const out = new Uint8Array(end), dv = new DataView(out.buffer);
   out.set([0x46, 0x4d, 0x31, 0x42]);                       // 'FM1B'
@@ -680,11 +689,11 @@ function writeFm1(bank, info) {
     const km = offKey + pi * 128;
     out.fill(0xff, km, km + 128);
     for (let k = 0; k < p.count; k++) {                    // lowest zone wins where ranges overlap
-      const z = bank.zones[p.first + k];
+      const z = zones[p.first + k];
       for (let n = z.lo; n <= z.hi; n++) if (out[km + n] === 0xff) out[km + n] = k;
     }
   });
-  bank.zones.forEach((z, i) => {
+  zones.forEach((z, i) => {
     const o = offZone + i * FM1B_ZONE;
     dv.setUint32(o, z.sample.fileOff, true);
     dv.setUint32(o + 4, z.sample.pcm.length, true);
@@ -713,7 +722,7 @@ function writeFm1(bank, info) {
     dv.setUint16(o, e.attack, true); dv.setUint16(o + 2, e.hold, true); dv.setUint16(o + 4, e.decay, true);
     dv.setUint16(o + 6, e.sustain, true); dv.setUint16(o + 8, e.release, true); dv.setUint16(o + 10, e.fixed ? 1 : 0, true);
   });
-  for (const s of bank.samples) out.set(s.enc || new Uint8Array(s.pcm.buffer, s.pcm.byteOffset, s.pcm.byteLength), s.fileOff);
+  for (const s of sounds) out.set(s.enc || new Uint8Array(s.pcm.buffer, s.pcm.byteOffset, s.pcm.byteLength), s.fileOff);
   return out;
 }
 
@@ -919,7 +928,7 @@ function writeSf2(bank, name) {
     if (!bank.zones.length) { $('result').hidden = true; showErr('The preset has no playable sounds.'); return; }
     bank.info = bankInfo(baseName + '_fm1.bin');             // one name and time a conversion: the file sent and the one saved are the same
     const bin = writeFm1(bank, bank.info);
-    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + bank.zones.length + ' zones, ' + bank.samples.length + ' unique sounds, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
+    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + (bank.zonesWritten ?? bank.zones.length) + ' zones, ' + (bank.soundsWritten ?? bank.samples.length) + ' unique sounds, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
       '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
       (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(more than the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (fits in the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
       (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets outside bank 0/128 are not in the .bin)</span>' : '');

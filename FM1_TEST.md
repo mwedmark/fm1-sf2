@@ -38,6 +38,7 @@ Syftet är att bevisa att vi kan komma tillbaka till originalet innan något ann
 | A4 | Anslut workbenchen igen medan SF2-firmwaren kör. | Workbenchen hittar FM-1 över USB-MIDI. | |
 | A5 | Flasha tillbaka `FM-1_015.fwsc`. | FM-1 startar med originalfirmwaren och fungerar som vanligt. | |
 | A6 | Flasha `dist\sf2player_32v_32k.fwsc` igen. | Som A2-A3. | |
+| A7 | Stäng av. Håll OCT− och OCT+ och slå på, håll tills skärmen visar `SAFE MODE`. Anslut installationssidan. | `SAFE MODE`, inget ljud från tangenterna, sidan hittar FM-1 och kan installera. Slå av och på utan knappar: spelar som vanligt. | |
 
 Om A4 eller A5 misslyckas: sluta testa och använd M-VAVE:s återställning (workbenchen kan återgå till V15; SDK:n har ett eget
 USB-uppdateringsläge). Notera exakt vad som visades.
@@ -120,6 +121,14 @@ gränsen. Kanalsidan visar samma CPU-värden på näst sista raden. Skriv gärna
 
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).
+
+## F. SDRAM-test (borttaget 2026-11-08)
+
+**Kört på FM-1 den 2026-11-08** (`sf2player_sdram.fwsc`): SAVE två gånger på infosidan startade om FM-1. Adressen `0x04000000`, där
+JieLis SDK lägger SDRAM, svarar inte. Det stämmer med att chippet är en AC7911B8 utan SDRAM (FORMAT.md, "What is known about the SDRAM
+so far"). Det skiljer inte helt "inget SDRAM" från "SDRAM avstängt i bootkonfigurationen" (`ENABLE_SDRAM` 0); bara chippets märkning
+gör det. Testet, `sdram_test.c` och `test_sdram.js` är borttagna; SAVE nollställer nu bara räknaren för tappade noter. Det som finns är
+de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
 ## G. Avsluta
 

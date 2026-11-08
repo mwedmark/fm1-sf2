@@ -4,6 +4,11 @@
 #include "engine.h"
 #include <string.h>
 #include "fm1b_dqt6.inc"
+/* FM1B_PACKED: banks of version 2 with flag 0x10, whose sounds are one MP3 stream decoded into a cache in RAM when a note needs them (FORMAT.md,
+ * "Calculation: a live cache of decoded sounds"; live_cache/). Off in the firmware build until the decoder is built with JieLi's compiler. */
+#if FM1B_PACKED
+#include "sound_cache.h"
+#endif
 
 /* An envelope step is ENV_STEP frames: 32 at 44.1 kHz (0.726 ms, the step the converter's envelope factors are made for), 23 at
  * 32 kHz (0.719 ms: envelopes run 1 % fast there). ENV_STEPS_PER_S1000 is the steps in 1000 ms, for the attack and hold times. */
@@ -15,6 +20,12 @@ static const uint8_t default_env[12] = {2, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x00, 0
 
 struct voice {
     uint32_t position, fraction, step, base_step, age, data, length, loop_start, loop_end;   /* step: base_step with bend and vibrato */
+#if FM1B_PACKED
+    const uint8_t *base;                      /* the sound's BFP8 groups: in the bank, or in the cache once granted */
+    uint32_t groups;                          /* the sound's length in BFP8 groups */
+    uint16_t serial;                          /* tells this note from the next one in the same slot, for the cache's answers */
+    uint8_t packed, waiting, has_entry, entry;   /* waiting: the cache has not granted the sound yet; has_entry: a cache entry is pinned for it */
+#endif
     int32_t gain, level, level_step;          /* gain: the voice's peak; level: the gain now, with the envelope, ramped per frame */
     const void *owner;
     uint32_t env, attack_inc, sustain, left;  /* envelope level Q24 at the start of a step, the attack's rise per step, sustain Q24 */
@@ -80,6 +91,9 @@ static struct {
     int32_t last_note, last_zone, last_voice, last_drum;   /* the latest note that sounded: for the panel */
     int32_t last_program_channel, last_program;            /* the latest MIDI program change: for the panel */
     const uint8_t *last_zone_record, *last_env;
+#if FM1B_PACKED
+    uint32_t packed, pack_table, pack_count, pack_stride, pack_smp, stream_bytes;   /* packed: 1 for a bank of version 2 with the pack table */
+#endif
 } bank;
 static struct voice voices[FM1B_VOICES];
 /* The voices that may sound at once (fm1b_voice_limit): FM1B_VOICES unless the audio interrupt runs short of time. Over it, the
@@ -190,6 +204,205 @@ static inline __attribute__((always_inline)) int region_ok(uint32_t offset, uint
     return offset <= bank.bytes && size <= bank.bytes - offset;
 }
 
+#if FM1B_PACKED
+/* ---- The live cache's side of the engine. The cache itself (sound_cache.c) belongs to the control task alone; the audio interrupt, where notes start,
+ * never touches it except to read a pinned entry's data and `groups_ready`. They talk through three single-writer rings:
+ *   requests (interrupt -> control): a voice waits for `sound`;
+ *   grants   (control -> interrupt): the cache entry for that voice, already pinned; if the voice is gone by then the interrupt hands the pin back;
+ *   unpins   (interrupt -> control): a voice is over, or was refused a grant.
+ * A voice that has no grant yet, or has played up to the groups decoded so far, stands still (voice_run returns before it moves anything). The control
+ * task calls fm1b_cache_service() often (a few ms): that is the latency of a note whose sound is not in the cache, or even of one that is. */
+enum { PK_RING = 32, PK_UNPIN_RING = 64, PK_PENDING = 32 };
+struct pk_request { uint32_t sound; uint8_t slot; uint16_t serial; };
+struct pk_grant { uint8_t slot, entry; uint16_t serial; };
+static struct {
+    struct sound_cache cache;
+    struct mp3_stream stream;
+    uint8_t *pool;
+    uint32_t pool_bytes;
+    struct pk_request req[PK_RING];
+    struct pk_grant grant[PK_RING];
+    uint8_t unpin[PK_UNPIN_RING];
+    volatile uint32_t req_head, req_tail, grant_head, grant_tail, unpin_head, unpin_tail;
+    struct pk_request pending[PK_PENDING];                    /* control task: asked for, no room yet (or no place in the grant ring) */
+    uint32_t pending_count, serial, requested, granted_late, lost;
+} pk;
+static FM1_DSP_CODE uint32_t pk_find(uint32_t data)                          /* the sound whose unpacked offset is `data`, or ~0 */
+{
+    uint32_t lo = 0, hi = bank.pack_count;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2U, at = rd32(bank.image + bank.pack_table + mid * bank.pack_stride);
+        if (at == data) return mid;
+        if (at < data) lo = mid + 1U; else hi = mid;
+    }
+    return ~0U;
+}
+static FM1_DSP_CODE const uint8_t *pk_entry(uint32_t sound) { return bank.image + bank.pack_table + sound * bank.pack_stride; }
+static uint32_t pk_zone_of(uint32_t sound, uint32_t loop_only)    /* a zone using the sound (with a loop), as an index, or ~0 */
+{
+    uint32_t data = rd32(pk_entry(sound));
+    for (uint32_t z = 0; z < bank.zone_count; ++z) {
+        const uint8_t *zone = bank.image + bank.zones + z * 24U;
+        if (rd32(zone) == data && (!loop_only || (zone[17] & 1U))) return z;
+    }
+    return ~0U;
+}
+static uint32_t pk_frames(void *context, uint32_t sound)
+{
+    (void)context;
+    uint32_t z = pk_zone_of(sound, 0);
+    return z == ~0U ? 0U : rd32(bank.image + bank.zones + z * 24U + 4);
+}
+static const uint8_t *pk_direct(void *context, uint32_t sound)
+{
+    (void)context;
+    const uint8_t *e = pk_entry(sound);
+    return e[16] == 0U ? bank.image + bank.pack_smp + rd32(e + 8) : NULL;
+}
+static void pk_begin(void *context, uint32_t sound, struct mp3_sound_job *job, uint8_t *out)
+{
+    (void)context;
+    const uint8_t *e = pk_entry(sound);
+    mp3_sound_begin(job, &pk.stream, rd32(e + 8), rd16(e + 18), pk_frames(NULL, sound), out);
+}
+static int pk_loop(void *context, uint32_t sound, uint32_t *start, uint32_t *end, uint32_t *xfade)
+{
+    (void)context;
+    const uint8_t *e = pk_entry(sound);
+    uint32_t z = pk_zone_of(sound, 1);
+    if (z == ~0U || !rd16(e + 20)) return 0;
+    const uint8_t *zone = bank.image + bank.zones + z * 24U;
+    *start = rd32(zone + 8); *end = rd32(zone + 12); *xfade = rd16(e + 20);
+    return 1;
+}
+static int packed_attached(void) { return pk.pool != NULL && pk.pool_bytes != 0U; }
+static void packed_start(const uint8_t *image)
+{
+    struct sound_source source = {NULL, pk_frames, pk_direct, pk_begin, pk_loop};
+    pk.stream.data = image + bank.pack_smp;
+    pk.stream.bytes = bank.stream_bytes;
+    pk.req_head = pk.req_tail = pk.grant_head = pk.grant_tail = pk.unpin_head = pk.unpin_tail = 0;
+    pk.pending_count = 0;
+    sound_cache_init(&pk.cache, &source, pk.pool, pk.pool_bytes);
+    for (unsigned i = 0; i < FM1B_VOICES; ++i) voices[i].has_entry = voices[i].packed = voices[i].waiting = 0;
+}
+void fm1b_cache_attach(uint8_t *pool, unsigned bytes) { pk.pool = pool; pk.pool_bytes = bytes; }
+static FM1_DSP_CODE void pk_unpin_later(unsigned entry)                      /* interrupt: the ring cannot fill up (it holds more than there are voices and grants) */
+{
+    uint32_t head = pk.unpin_head;
+    pk.unpin[head % PK_UNPIN_RING] = (uint8_t)entry;
+    __asm__ volatile("" ::: "memory");
+    pk.unpin_head = head + 1U;
+}
+/* A voice is over with its sound (or its slot is taken for another note). */
+static FM1_DSP_CODE void packed_free(struct voice *v)
+{
+    if (v->has_entry) { pk_unpin_later(v->entry); v->has_entry = 0; }
+    v->waiting = 0;
+}
+/* Interrupt: take the grants that the control task has made. */
+static FM1_DSP_CODE void packed_grants(void)
+{
+    while (pk.grant_tail != pk.grant_head) {
+        struct pk_grant g = pk.grant[pk.grant_tail % PK_RING];
+        __asm__ volatile("" ::: "memory");
+        pk.grant_tail = pk.grant_tail + 1U;
+        struct voice *v = &voices[g.slot];
+        if (v->active && v->packed && v->waiting && v->serial == g.serial) {
+            v->base = pk.cache.pool + pk.cache.entry[g.entry].offset;     /* what sound_cache_data() says: read here, the interrupt runs from SRAM */
+            v->entry = g.entry;
+            v->has_entry = 1;
+            v->waiting = 0;
+        } else {
+            pk_unpin_later(g.entry);
+        }
+    }
+}
+/* Interrupt: after a block, give back the sounds of the voices that ended. */
+static FM1_DSP_CODE void packed_release(void)
+{
+    for (unsigned i = 0; i < FM1B_VOICES; ++i)
+        if (!voices[i].active && (voices[i].has_entry || voices[i].waiting))
+            packed_free(&voices[i]);
+}
+/* Interrupt, in zone_start: set the new voice up on its sound. 0: it cannot be started. */
+static FM1_DSP_CODE int packed_voice_start(struct voice *v, unsigned slot, uint32_t data, uint32_t length)
+{
+    uint32_t sound = pk_find(data);
+    if (sound == ~0U) return 0;
+    const uint8_t *e = pk_entry(sound);
+    v->packed = 1;
+    v->groups = (length + 31U) / 32U;
+    if (e[16] == 0U) {                                        /* stored BFP8: plays in the bank */
+        if ((uint64_t)bank.pack_smp + rd32(e + 8) + (uint64_t)v->groups * 33U > bank.pack_table) return 0;
+        v->base = bank.image + bank.pack_smp + rd32(e + 8);
+        return 1;
+    }
+    if (pk.req_head - pk.req_tail >= PK_RING) return 0;
+    if (!++pk.serial) ++pk.serial;
+    v->serial = (uint16_t)pk.serial;
+    v->waiting = 1;
+    struct pk_request *r = &pk.req[pk.req_head % PK_RING];
+    r->sound = sound; r->slot = (uint8_t)slot; r->serial = v->serial;
+    __asm__ volatile("" ::: "memory");
+    pk.req_head = pk.req_head + 1U;
+    return 1;
+}
+/* Interrupt, at the start of a voice's block: may it run? It stands still while its sound is not granted or not decoded as far as the block reads. */
+static FM1_DSP_CODE int packed_ready(const struct voice *v, unsigned frames)
+{
+    if (v->waiting) return 0;
+    if (!v->has_entry) return 1;
+    uint32_t ready = pk.cache.entry[v->entry].groups_ready;
+    if (ready >= v->groups) return 1;
+    uint64_t last = (uint64_t)v->position + (((uint64_t)v->fraction + (uint64_t)frames * v->step) >> 16) + 3U;   /* the last frame the block can read */
+    if (v->loop_end && last > (uint64_t)v->loop_end + 2U) last = (uint64_t)v->loop_end + 2U;   /* past the loop end it is back at the start */
+    if (last >= v->length) last = v->length - 1U;
+    return (last >> 5) < ready;
+}
+/* Control task. */
+unsigned fm1b_cache_service(unsigned mp3_frames)
+{
+    if (!bank.image || !bank.packed) return 0;
+    while (pk.unpin_tail != pk.unpin_head) {
+        sound_cache_unpin(&pk.cache, pk.unpin[pk.unpin_tail % PK_UNPIN_RING]);
+        __asm__ volatile("" ::: "memory");
+        pk.unpin_tail = pk.unpin_tail + 1U;
+    }
+    while (pk.req_tail != pk.req_head && pk.pending_count < PK_PENDING) {
+        pk.pending[pk.pending_count++] = pk.req[pk.req_tail % PK_RING];
+        __asm__ volatile("" ::: "memory");
+        pk.req_tail = pk.req_tail + 1U;
+        ++pk.requested;
+    }
+    uint32_t keep = 0;
+    for (uint32_t i = 0; i < pk.pending_count; ++i) {
+        struct pk_request r = pk.pending[i];
+        const volatile struct voice *v = &voices[r.slot];
+        if (!v->active || v->serial != r.serial) { ++pk.lost; continue; }   /* the note is over before its sound came */
+        if (pk.grant_head - pk.grant_tail >= PK_RING) { pk.pending[keep++] = r; continue; }
+        const uint8_t *direct;
+        int entry = sound_cache_request(&pk.cache, r.sound, &direct);
+        if (entry < 0) { pk.pending[keep++] = r; continue; }          /* no room: try again when a voice has let go of a sound */
+        struct pk_grant *g = &pk.grant[pk.grant_head % PK_RING];
+        g->slot = r.slot; g->serial = r.serial; g->entry = (uint8_t)entry;
+        __asm__ volatile("" ::: "memory");
+        pk.grant_head = pk.grant_head + 1U;
+    }
+    pk.pending_count = keep;
+    sound_cache_step(&pk.cache, mp3_frames);
+    return sound_cache_pending(&pk.cache) + pk.pending_count;
+}
+void fm1b_cache_stats(struct fm1b_cache_stats *s)
+{
+    s->hits = pk.cache.stats.hits; s->misses = pk.cache.stats.misses; s->evictions = pk.cache.stats.evictions;
+    s->no_room = pk.cache.stats.no_room; s->decoded_mp3_frames = pk.cache.stats.decoded_mp3_frames;
+    s->requested = pk.requested; s->lost = pk.lost; s->waiting = pk.pending_count;
+    s->pinned = 0;
+    for (unsigned i = 0; i < SOUND_CACHE_ENTRIES; ++i) s->pinned += pk.cache.entry[i].pins;
+}
+#endif
+
 /* FM1B_INTERP4: the sample between two frames from four frames (Catmull-Rom, as FluidSynth's 4-point interpolation) in
  * place of two. Linear interpolation loses -0.7 dB at 4 kHz and -3 dB at 8 kHz of a 32 kHz bank; this keeps the top within
  * a few tenths of a dB. interp4[i] are the four weights for a fraction of i / 256, Q14, summing to 16384 (2 KB, in RAM). */
@@ -218,6 +431,9 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
         interp4_make();
 #endif
     bank.image = NULL;
+#if FM1B_PACKED
+    bank.packed = 0;
+#endif
     bank.preset = -1;
     bank.drum_preset = -1;
     bank.last_note = -1;
@@ -227,8 +443,13 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     /* flags: bit 0 16-bit, bit 1 SEA chunks, bit 2 12-bit, bit 3 BFP8 (at most one of them; none: 8-bit), bits 8..11 the SEA
      * code bits (0: 5) */
     uint32_t flags = bytes < 48 ? 0 : rd16(image + 6), sea_bits = (flags >> 8) & 15U;
-    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != 1 || (flags & ~0x0f0fU) || __builtin_popcount(flags & 15U) > 1 ||
-        rd32(image + 40) != bytes || (sea_bits && !(flags & 2U)))
+#if FM1B_PACKED
+    uint32_t packed = bytes >= 92 && !memcmp(image, "FM1B", 4) && rd16(image + 4) == 2 && (flags & 0x10U) && (flags & 8U) ? 1U : 0U;   /* BFP8 after unpacking */
+#else
+    const uint32_t packed = 0;
+#endif
+    if (bytes < 48 || memcmp(image, "FM1B", 4) || rd16(image + 4) != (packed ? 2U : 1U) || (flags & ~(packed ? 0x0f1fU : 0x0f0fU)) ||
+        __builtin_popcount(flags & 15U) > 1 || rd32(image + 40) != bytes || (sea_bits && !(flags & 2U)))
         return -1;
     bank.format = flags & 1U ? FORMAT_PCM16 : flags & 4U ? FORMAT_PCM12 : flags & 2U ? FORMAT_SEA : flags & 8U ? FORMAT_BFP8 : FORMAT_PCM8;
     bank.sea_bits = sea_bits ? sea_bits : 5U;
@@ -236,6 +457,10 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bank.dqt = bank.sea_bits == 5U ? dqt : bank.sea_bits == 6U ? fm1b_dqt6 : NULL;   /* the caller has the SEA5 table, the engine the others */
     if (bank.format == FORMAT_SEA && !bank.dqt)
         return -1;
+#if FM1B_BFP8_ONLY
+    if (bank.format != FORMAT_BFP8)
+        return -1;
+#endif
     bank.bytes = bytes;
     bank.rate = rd32(image + 8);
     bank.preset_count = rd16(image + 12);
@@ -267,6 +492,28 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
         if (bank.envs > bank.bytes || bank.envs % 4U)
             return -1;
     }
+#if FM1B_PACKED
+    if (packed) {
+        bank.pack_table = rd32(image + 80);
+        bank.pack_count = rd32(image + 84);
+        bank.pack_stride = rd32(image + 88);
+        bank.pack_smp = rd32(image + 36);
+        bank.stream_bytes = 0;
+        if (bank.pitch < 92U || bank.pack_stride < 24U || bank.pack_stride % 4U || bank.pack_table % 4U || bank.pack_count > 65535U ||
+            !region_ok(bank.pack_table, (uint64_t)bank.pack_stride * bank.pack_count) || bank.pack_smp > bank.pack_table || !packed_attached())
+            return -1;
+        for (uint32_t i = 0; i < bank.pack_count; ++i) {      /* every sound lies in the sample data; the MP3 stream ends where its last sound does */
+            const uint8_t *e = image + bank.pack_table + i * bank.pack_stride;
+            uint64_t end = (uint64_t)bank.pack_smp + rd32(e + 8) + rd32(e + 12);
+            if (end > bank.pack_table || e[16] > 2U || e[16] == 1U || (i && rd32(e) < rd32(e - bank.pack_stride)))
+                return -1;
+            if (e[16] == 2U && rd32(e + 8) + rd32(e + 12) > bank.stream_bytes)
+                bank.stream_bytes = rd32(e + 8) + rd32(e + 12);
+        }
+        bank.packed = 1;
+        packed_start(image);
+    }
+#endif
     bank.image = image;
     for (unsigned slot = 0; slot < 256 && bank.preset < 0; ++slot) {
         uint32_t p = rd16(image + bank.bankmap + slot * 2U);
@@ -782,8 +1029,13 @@ static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner,
                   : bank.format == FORMAT_PCM12 ? ((uint64_t)length * 3U + 1U) / 2U
                   : bank.format == FORMAT_BFP8 ? (uint64_t)((length + BFP_GROUP - 1U) / BFP_GROUP) * BFP_GROUP_BYTES
                   : (uint64_t)length * (bank.format == FORMAT_PCM16 ? 2U : 1U);
+#if FM1B_PACKED
+    if (!length || (!bank.packed && !region_ok(data, span)))      /* a packed bank's zones address the unpacked sample data, which is not in the file */
+        return;
+#else
     if (!length || !region_ok(data, span))
         return;
+#endif
     if (bank.format == FORMAT_SEA) {                          /* the chunk header the decoder no longer checks per group */
         const uint8_t *chunk = bank.image + data;
         if (chunk[0] != 1U || chunk[1] != (0x40U | bank.sea_bits) || chunk[2] != FM1_SEA_GROUP)
@@ -820,6 +1072,9 @@ static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner,
         if (!voices[slot].cut) drop_count(&voices[slot], 0);
     }
     struct voice *v = &voices[slot];
+#if FM1B_PACKED
+    if (bank.packed) packed_free(v);                          /* the voice it takes may hold a sound */
+#endif
     memset(v, 0, sizeof *v);
     v->active = 1;
     v->owner = owner;
@@ -832,6 +1087,12 @@ static FM1_DSP_CODE __attribute__((noinline)) void zone_start(const void *owner,
     v->length = length;
     v->loop_start = start;
     v->loop_end = end;
+#if FM1B_PACKED
+    if (bank.packed && !packed_voice_start(v, slot, data, length)) {
+        v->active = 0;
+        return;
+    }
+#endif
     v->base_step = v->step = (uint32_t)(((uint64_t)pitch * bank.rate + ENGINE_RATE / 2U) / ENGINE_RATE);
     v->lfo = 16384;                                           /* the triangle's centre: vibrato starts at the note's own pitch */
     int32_t zone_pan = (int16_t)rd16(zone + 22);              /* SF2 units, -500..500 (0.1 %); 0 in banks made before pan */
@@ -1298,7 +1559,11 @@ static FM1_DSP_CODE void queue_drain(void)
 static inline __attribute__((always_inline)) void voice_run(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
                                                            unsigned frames, int32_t rg, int32_t cg, int32_t sg, const int bus, const unsigned format)
 {
+#if FM1B_PACKED
+    const uint8_t *pcm = v->packed ? v->base : bank.image + v->data;
+#else
     const uint8_t *pcm = bank.image + v->data;
+#endif
     const uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
     uint32_t position = v->position, fraction = v->fraction, step = v->step;
     int32_t level = v->level, level_step = v->level_step;
@@ -1369,6 +1634,9 @@ done:
 /* voice_run for the bank's format, without and with the effect buses: ten loops in all. */
 static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, int32_t *out, unsigned frames)
 {
+#if FM1B_BFP8_ONLY
+    voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_BFP8);
+#else
     switch (bank.format) {
     case FORMAT_SEA: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_SEA); break;
     case FORMAT_PCM16: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM16); break;
@@ -1376,10 +1644,14 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play(struct voice *v, i
     case FORMAT_BFP8: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_BFP8); break;
     default: voice_run(v, out, NULL, NULL, NULL, frames, 0, 0, 0, 0, FORMAT_PCM8); break;
     }
+#endif
 }
 static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
                                                                    unsigned frames, int32_t rg, int32_t cg, int32_t sg)
 {
+#if FM1B_BFP8_ONLY
+    voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_BFP8);
+#else
     switch (bank.format) {
     case FORMAT_SEA: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_SEA); break;
     case FORMAT_PCM16: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM16); break;
@@ -1387,6 +1659,7 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice
     case FORMAT_BFP8: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_BFP8); break;
     default: voice_run(v, out, rev, cho, side, frames, rg, cg, sg, 1, FORMAT_PCM8); break;
     }
+#endif
 }
 /* A filtered voice: played into a block of its own, through its filter, then added to the mix and, times rg, cg and sg as
  * voice_run does, to the buses it has. */
@@ -1409,17 +1682,27 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_filtered(struct voice *
 }
 FM1_DSP_CODE void fm1b_render(const void *owner, int32_t *out, unsigned frames)
 {
+#if FM1B_PACKED
+    if (bank.packed) packed_grants();
+#endif
     queue_drain();
     gates_update(frames);
     if (!bank.image)
         return;
     for (unsigned n = 0; n < FM1B_VOICES; ++n)
         if (voices[n].active && voices[n].owner == owner) {
+#if FM1B_PACKED
+            if (voices[n].packed && !packed_ready(&voices[n], frames))   /* stands still: not even its filter runs */
+                continue;
+#endif
             if (voices[n].filtered)
                 voice_filtered(&voices[n], out, NULL, NULL, NULL, frames, 0, 0, 0);
             else
                 voice_play(&voices[n], out, frames);
         }
+#if FM1B_PACKED
+    if (bank.packed) packed_release();
+#endif
 }
 /* A voice's sends: its channel's (CC 91, CC 93) plus its zone's own, at most 127. */
 static inline __attribute__((always_inline)) int voice_reverb(const struct voice *v)
@@ -1436,6 +1719,9 @@ static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};            
 FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
                                         uint8_t sends[2])
 {
+#if FM1B_PACKED
+    if (bank.packed) packed_grants();
+#endif
     queue_drain();
     gates_update(frames);
     sends[0] = last_sends[0];
@@ -1467,6 +1753,10 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
         struct voice *v = &voices[n];
         if (!v->active || v->owner != owner)
             continue;
+#if FM1B_PACKED
+        if (v->packed && !packed_ready(v, frames))
+            continue;
+#endif
         if (!buses) {
             if (v->filtered)
                 voice_filtered(v, out, NULL, NULL, NULL, frames, 0, 0, 0);
@@ -1482,5 +1772,8 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
                 voice_play_buses(v, out, rev, cho, side, frames, rg, cg, sg);
         }
     }
+#if FM1B_PACKED
+    if (bank.packed) packed_release();
+#endif
     return buses;
 }

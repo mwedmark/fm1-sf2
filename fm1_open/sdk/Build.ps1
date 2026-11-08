@@ -3,6 +3,11 @@
 param(
     [switch]$Package,
     [switch]$FirmwareOnly,
+    # The live cache (FORMAT.md, "Calculation: a live cache of decoded sounds"): plays banks packed as MP3 (pack_bank.js). Off by default; with it the build adds
+    # live_cache/*.c and third_party/mp3 (minimp3), defines FM1B_PACKED=1, and puts a static pool of CacheKB KB in the SRAM, taken from the runtime heap.
+    [switch]$LiveCache,
+    [int]$CacheKB = 96,
+    [int]$CacheFrames = 2,
     [string]$Toolchain = $env:FM1_PI32_TOOLCHAIN,
     [string]$SourceUrl = $env:FM1_SOURCE_URL
 )
@@ -134,7 +139,10 @@ function Test-Firmware {
     if ($acl.tx -lt 1024 -or $acl.rx -lt 4096) { throw 'Classic ACL pools too small; need 1024/4096 bytes.' }
     if ($map -cnotmatch '0x([0-9a-fA-F]+)[^\r\n]*_MALLOC_SIZE[ ]*=') { throw 'Cannot find runtime heap in link map.' }
     $heapBytes = [Convert]::ToInt64($Matches[1],16)
-    if ($heapBytes -lt 49152) { throw "FM1 runtime heap is $heapBytes bytes; need at least 49152." }
+    # The smallest runtime heap seen to boot on the FM-1 is 111468 bytes (-LiveCache, 2026-11-08); with 88812 it did not start at all (no USB
+    # device; it took the chip's ROM boot to recover), and fm1-emu showed the same (blank screen). The limit before, 48 KB, was not enough.
+    $minimumHeap = 111468
+    if ($heapBytes -lt $minimumHeap) { throw "FM1 runtime heap is $heapBytes bytes; need at least $minimumHeap (the smallest seen to boot)." }
     $callbacks = @('fm1_r_e7d3da61dac2','fm1_r_1993f9b103e3','fm1_r_05431712fb7b','fm1_r_ffe3f82683f6','fm1_audio_irq','fm1_flash_worker_prepare',
         'fm1_r_7e12ed19990d','fm1_r_74310ca1fed9',
         'fm1_engine_render','fm1_engine_output_level','fm1_audio_copy','fm1_output_mix',
@@ -213,7 +221,7 @@ function Test-Firmware {
     $result = [ordered]@{passed=$true; elf_sha256=(Hash $elf); allocated_image_bytes=$payload; app_image_bytes=$appImage;
         startup_entry_verified=$true; startup_entry=$entry;
         instrument_ready=$engineReady; image_definition='Sum of ELF allocated non-NOBITS sections; excludes bootloader/filesystem packaging';
-        sections=@($sections.ToArray()); heap_symbols=$heap; runtime_heap_bytes=$heapBytes; minimum_runtime_heap_bytes=49152;
+        sections=@($sections.ToArray()); heap_symbols=$heap; runtime_heap_bytes=$heapBytes; minimum_runtime_heap_bytes=$minimumHeap;
         classic_acl_tx_bytes=$acl.tx; classic_acl_rx_bytes=$acl.rx; registration_tables_verified=$true; rtos_abi_verified=$true;
         audio_callbacks_in_sram=$true; extra_audio_symbols_in_sram=@($extra); bluetooth_and_usb_midi_linked=$true;
         usb_audio_playback_and_capture_linked=$true; bluetooth_audio_absent=$false; ble_roles='peripheral/central'; lvgl_absent=$true;
@@ -221,6 +229,10 @@ function Test-Firmware {
         application_callbacks_verified=$true; board_validation='not performed'}
     Write-Text $report ($result | ConvertTo-Json -Depth 6)
     Write-Host "FM1: $appImage bytes app image; SRAM/BLE/USB checks passed"
+    $imageLimit = 453921   # sdk/Package.cs: FlashLimit - UserSize - BtSize - MinimumVm - Area - AppData - 383 - 64 (FIRMWARE.md)
+    if ($appImage -gt $imageLimit) { Write-Host "FM1: the app image is $appImage bytes, $($appImage - $imageLimit) over the $imageLimit the FM1 layout has: the next step will stop with 'Application does not fit the FM1 layout.'" }
+    else { Write-Host "FM1: the app image has $($imageLimit - $appImage) bytes to spare (limit $imageLimit)" }
+    if ($LiveCache) { Write-Host "FM1: live cache on: pool $CacheKB KB, $CacheFrames MP3 frames a control cycle; the runtime heap left is $heapBytes bytes (the build stops under $minimumHeap)" }
 }
 
 function Package-Firmware {
@@ -345,8 +357,13 @@ foreach ($file in Get-ChildItem -LiteralPath $sdk -Recurse -Force -File) {
 $variantName = 'release'
 $variant = [pscustomobject]@{user_bytes=536576; frozen='sdk/lib/libfm1_engine.a'; update_family=7}
 $include = @('sdk/include','sdk/include/libc','app/synth','sdk/config','app','app/board')
+if ($LiveCache) {
+    if ($CacheKB -lt 16 -or $CacheKB -gt 400 -or $CacheFrames -lt 1 -or $CacheFrames -gt 16) { throw '-CacheKB is 16..400 and -CacheFrames 1..16.' }
+    $include += @('live_cache','third_party/mp3')
+}
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'app') -Recurse -File |
     Where-Object { $_.Extension -in @('.c','.S') -and !$_.FullName.StartsWith(([IO.Path]::GetFullPath((Join-Path $root 'app/synth'))+'\'),[StringComparison]::OrdinalIgnoreCase) } | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($root.Length+1).Replace('\','/') })
+if ($LiveCache) { $sources += @('live_cache/mp3_sound.c','live_cache/sound_cache.c') }
 $extra = @('groove_sequence_render','groove_sequence_clock','groove_sequence_position','groove_sequence_transport','fm1_sea_decode_groups','fm1_codec_sea_mono_s16_run') + @($synth.sram_required) + @(
     'synth_dx7_render','synth_dx7_midi','synth_dx7_key','fm1_dx7_panic','fm_exp2_fixed','bass303_bank_render','bass303_bank_key','bass303_bank_set','drum808_kit_render','drum808_kit_trigger','psg_render','psg_key','psg_midi','psg_panic','psg_set','psg_get','pluck_render','pluck_key','pluck_midi','pluck_panic','pluck_set','pluck_get','fm1_mix128','fm1_mix_mono_stereo128','fm1_bus_output128','fm1_master_mix128','fm1_master_gain','fm1_declick128','fm1_render_begin','fm1_render_end','synth_dx7_active','bass303_bank_active','drum808_kit_active','psg_active','pluck_active','sampledrum_active','synth_dx7_limit','psg_limit','pluck_limit','sampledrum_limit','bass303_advance_idle','fm1_send128','fm1_fx_render','fm1_fx_clear','fm1_fx_active','sampledrum_render','sampledrum_trigger','sampledrum_panic','psg_active_chips')
 [IO.Directory]::CreateDirectory((Join-Path $build 'obj')) | Out-Null
@@ -361,6 +378,9 @@ $flags = @('-target','pi32v2','-integrated-as','-mcpu=r3','-mfprev1','-Wuninitia
     '-fno-unwind-tables','-ffunction-sections','-fdata-sections','-fmessage-length=0',
     '-cl-single-precision-constant','-mllvm','-pi32v2-large-program=true','-D__GCC_PI32V2__','-O2')
 foreach ($dir in $include) { $flags += '-I' + (Join-Path $root $dir) }
+# The live cache build also leaves out the MIDI file player (FM1_MIDIPLAY=0; its code stays, the plain build has it): with it the image
+# was 2 235 bytes over the layout (2026-11-08), and a song takes its RAM from the same runtime heap the cache leaves short.
+if ($LiveCache) { $flags += @('-DFM1B_BFP8_ONLY=1', '-DFM1B_PACKED=1', "-DFM1B_CACHE_KB=$CacheKB", "-DFM1B_CACHE_FRAMES=${CacheFrames}U", '-DFM1_MIDIPLAY=0') }
 $objects = @()
 $commands = @()
 Push-Location -LiteralPath $build
@@ -381,6 +401,11 @@ try {
         # Storage and screen run only from control; keep audio DSP on O2.
         if ($source -in @('app/project.c','app/transfer.c','app/samples.c','app/screen.c','app/presets.c','app/midi_router.c','app/fm_factory.c','app/fm_library.c')) { $options += '-Oz' }
         if ($source -eq 'app/screen.c') { $options += '-fno-inline-functions' }
+        # The live cache runs from the control task only and must fit the 13.6 KB the base image leaves. -Oz does nothing under -flto here (the optimisation level is
+        # the link's), so mp3_sound.c (with minimp3) is a native object, with -fno-inline-functions: minimp3 inlines its layer 3 stages into mp3dec_decode_frame.
+        # Measured 2026-11-08 (app image, limit 453921): all LTO 460700; both native -Oz 454524; mp3_sound native -Oz 454428; that plus -fno-inline-functions 453788
+        # (133 to spare); both native with it 453884. sound_cache.c stays LTO. The decoder's speed with the calls not inlined is not measured on the FM-1 yet.
+        if ($source -eq 'live_cache/mp3_sound.c') { $options += @('-fno-lto', '-Oz', '-fno-inline-functions') }
         $arguments = @($options) + @('-MMD','-MF',($output + '.d'),'-c',$inputFile,'-o',$output)
         Write-Host "Compile $source"
         Run (Join-Path $bin 'clang.exe') $arguments

@@ -11,4 +11,20 @@ tools/fluidsynth/
 test_fluid/*.wasm
 test_fluid/out/
 fm1_open/app/build_info.h
+__pycache__/
+test_sound_cache/*.wasm
+soundfonts/1mgm.sf2
+soundfonts/8MBGMGS__UNOFFICIAL_.SF2
+soundfonts/AWE64 Gold Presets.sf2
+soundfonts/big/choriumreva.sf2
+soundfonts/big/fluidr3_gm.sf2
+soundfonts/big/NY Steinway D Sombre\[Pianoteq 9\].sf2
+soundfonts/Gravis_UltraSound_4.11.sf2
+soundfonts/Roland SC-55 Presets.sf2
+soundfonts/SUPER5.SF2
+soundfonts/TimGM6mb.sf2
+soundfonts/VoiceCrystal_4MB_GM_V4.1.sf2
+soundfonts/win-gm.sf2
+soundfonts/Yamaha DB50XG Presets.sf2
+*.sf2
 test_emu/lan_cert.pem*

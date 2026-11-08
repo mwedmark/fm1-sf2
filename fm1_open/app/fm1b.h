@@ -8,6 +8,15 @@
 #ifndef FM1B_H
 #define FM1B_H
 #include <stdint.h>
+/* 1: banks of version 2 whose sounds are MP3 (the live cache) can be played; see the end of this file. Set with -DFM1B_PACKED=1, together with live_cache/ and third_party/mp3. */
+#ifndef FM1B_PACKED
+#define FM1B_PACKED 0
+#endif
+/* 1: the engine plays BFP8 banks only (and packed ones, which are BFP8 after decoding): one voice loop and one with the effect buses instead of ten, the others' code gone from the
+ * image (the live cache build, which has no room for them: sdk/Build.ps1 -LiveCache sets it). fm1b_bind() refuses every other format. */
+#ifndef FM1B_BFP8_ONLY
+#define FM1B_BFP8_ONLY 0
+#endif
 
 /* The same in the browser and on the device. Measured in fm1-emu at 240 MHz, player at 32 kHz, flute, 32 voices: BFP8 bank
  * 42-48 % (63 % while the notes start), SEA6 bank 70-78 % (88 %): RUNNING.md, section 7b. On the device the audio interrupt's
@@ -119,8 +128,22 @@ struct fm1b_info {
     char name[33], date[21];
 };
 void fm1b_info(struct fm1b_info *info);
-/* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
+#if FM1B_PACKED
+/* Banks of version 2 whose sounds are an MP3 stream (FORMAT.md, "Calculation: a live cache of decoded sounds"; build with -DFM1B_PACKED=1 and live_cache/,
+ * third_party/mp3). Before fm1b_bind(): give the cache its pool (the RAM the decoded sounds live in; it must stay). The audio interrupt only starts notes and
+ * reads the cache; the CONTROL TASK must call fm1b_cache_service() every few ms: it answers the notes' requests, drops what no voice plays, and decodes for
+ * at most mp3_frames MP3 frames (1152 samples each). Returns the sounds still waiting or being decoded. */
+void fm1b_cache_attach(uint8_t *pool, unsigned bytes);
+unsigned fm1b_cache_service(unsigned mp3_frames);
+struct fm1b_cache_stats {
+    uint32_t hits, misses, evictions, no_room, decoded_mp3_frames, requested, lost, waiting, pinned;   /* lost: notes over before their sound came; pinned: pins held now */
+};
+void fm1b_cache_stats(struct fm1b_cache_stats *stats);
+#endif
+/* Firmware only: attach the live cache's pool (app/fm1b_bank.c); binds nothing. */
 void fm1b_device_init(void);
+/* Firmware only, control task: bind the bank in the user flash, else the one compiled into the image, if there is one. */
+void fm1b_device_bind(void);
 /* Firmware only: bind the FM1B bank in the user flash (1), or leave things as they are (0). */
 int fm1b_bind_flash(void);
 #endif

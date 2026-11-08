@@ -16,6 +16,14 @@
 #define HAVE_BUILT_IN 1
 #endif
 
+#if FM1B_PACKED
+/* The live cache's pool: static, so the link's runtime heap (firmware-report.json, runtime_heap_bytes) is what is left of the SRAM after it. */
+#ifndef FM1B_CACHE_KB
+#define FM1B_CACHE_KB 96
+#endif
+static uint8_t cache_pool[FM1B_CACHE_KB * 1024U] __attribute__((aligned(4)));
+#endif
+
 /* Bind the bank in flash: 1 if there is a usable one, else 0. A bank is trusted for its magic, version and size only: fm1b_bind() checks the rest. */
 int fm1b_bind_flash(void)
 {
@@ -31,6 +39,14 @@ int fm1b_bind_flash(void)
 
 void fm1b_device_init(void)
 {
+#if FM1B_PACKED
+    fm1b_cache_attach(cache_pool, sizeof cache_pool);
+#endif
+}
+
+/* Control task: the player binds the bank once it knows the FM-1 was not started in safe mode (sf2player.c). */
+void fm1b_device_bind(void)
+{
     if (fm1b_bind_flash())
         return;
 #ifdef HAVE_BUILT_IN
@@ -39,5 +55,6 @@ void fm1b_device_init(void)
 }
 #else
 void fm1b_device_init(void) {}
+void fm1b_device_bind(void) {}
 int fm1b_bind_flash(void) { return 0; }
 #endif

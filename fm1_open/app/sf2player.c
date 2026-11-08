@@ -7,6 +7,11 @@
 #include "fm_patch.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
+#if FM1B_PACKED
+#ifndef FM1B_CACHE_FRAMES
+#define FM1B_CACHE_FRAMES 2U                             /* MP3 frames (1152 samples) decoded in one control cycle */
+#endif
+#endif
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sf2out.h"
@@ -358,12 +363,12 @@ static void info_update(void)
     }
     upload_line();
 #if FM1_MIDIPLAY
-    song_line(13, 204);
+    song_line(13, 206);
     d = put_text(line, "FREE RAM ");
     d = put_number(d, (int32_t)(info_free_ram / 1024U), 0);
     d = put_text(d, " KB FOR A SONG");
     *d = 0;
-    line_show(14, 214, line, 1, GREY);
+    line_show(14, 217, line, 1, GREY);
 #endif
     line_show(11, 228, "REC BACK", 1, GREY);
 }
@@ -723,9 +728,45 @@ static void leds_update(void)
     fm1_led_set(BUTTON_SEQ, (int)((leds >> 1) & 1U));
     fm1_led_set(BUTTON_PLAY, (int)(leds >> 2));
 }
+/* Safe mode: OCT- and OCT+ (buttons 0 and 1) held while the FM-1 starts, as the stock firmware's update mode. The bank is then not bound
+ * and the live cache does nothing, so a bank or a code path that crashes cannot keep the FM-1 from starting; USB-MIDI, the firmware update
+ * (install.html, the workbench) and the bank upload work as always. It does not help when the SDK fails before the control task runs
+ * (a runtime heap too small, 2026-11-08): that is the build's heap check and a boot in fm1-emu first (RUNNING.md). */
+enum { SAFE_BUTTONS = 3U, SAFE_WINDOW_MS = 300U };
+static uint8_t start_state;                               /* 0: the first SAFE_WINDOW_MS of the control task, 1: playing, 2: safe mode */
+static uint32_t start_ms;
+static int safe_start(void)
+{
+    if (start_state)
+        return start_state == 2;
+    struct fm1_controls controls;
+    fm1_controls_read(&controls);
+    uint32_t now = fm1_millis();
+    if (!start_ms)
+        start_ms = now | 1U;
+    if ((controls.buttons & SAFE_BUTTONS) == SAFE_BUTTONS) {
+        start_state = 2;
+        line_show(0, 90, "SAFE MODE", 2, ORANGE);
+        line_show(1, 120, "NO BANK. UPDATE OVER USB", 1, WHITE);
+        return 1;
+    }
+    if (now - start_ms < SAFE_WINDOW_MS)
+        return 1;
+    start_state = 1;
+#if FM1B_IN_FIRMWARE
+    fm1b_device_bind();
+#endif
+    return 0;
+}
+
 void groove_screen_control(void)
 {
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
+    if (safe_start())
+        return;
+#if FM1B_PACKED
+    fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+#endif
 #if FM1_MIDIPLAY
     song_poll();                                              /* the song's events that are due */
 #endif
@@ -792,7 +833,7 @@ void groove_screen_control(void)
         channels = page == PAGE_CHANNELS;
         page_clear();
     }
-    if (pressed & (1U << BUTTON_SAVE))                        /* SAVE: count the dropped notes from zero (the program page's line) */
+    if (pressed & (1U << BUTTON_SAVE))                        /* SAVE: count the dropped notes from zero */
         fm1b_drops_reset();
     if (pressed & (1U << BUTTON_REC)) {                       /* REC: the info page, and back */
         if (page == PAGE_INFO)

@@ -81,6 +81,7 @@ if ($json -notmatch '"id":\s*"sf2"') {                     # the site's catalog 
 # is relative to the page, so the same catalog works at 127.0.0.1 and from another computer (-Lan).
 $version = (Get-Item $package).LastWriteTimeUtc.Ticks
 $json = $json -replace '"package":\s*"(http://127\.0\.0\.1:\d+/)?sf2player\.fwsc(\?v=\d+)?"', "`"package`": `"sf2player.fwsc?v=$version`""
+if ($json -notmatch [regex]::Escape("sf2player.fwsc?v=$version")) { throw "firmwares.json: the sf2 package address was not updated (the page would boot a kept older build)" }
 Set-Content $catalog $json -NoNewline
 
 # 4. the server (127.0.0.1 only; -Lan: every address), unless one already answers on the port as asked

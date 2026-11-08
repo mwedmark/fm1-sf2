@@ -105,6 +105,7 @@
     <ul class="muted">
       <li>The firmware is written by M-VAVE's own update loader, the same route Workbench uses. If it is interrupted, plug in again and run the page once more; it continues from where the FM-1 is.</li>
       <li>If the FM-1 runs the original firmware (V15) or another firmware, install the SF2 firmware with <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> the first time. This page only flashes over the SF2 player's own firmware.</li>
+      <li>If the FM-1 plays a bank that makes it restart or freeze: hold OCT&minus; and OCT+ while you switch it on, until the screen shows <code>SAFE MODE</code>. It then starts without the bank, and this page can install firmware and a new bank. (It cannot help when the firmware itself does not start: then the FM-1 shows no USB device at all.)</li>
       <li>The bank lives in the sample flash and stays there when the firmware is updated. It only needs to be sent when it has changed.</li>
       <li>During the bank transfer the FM-1 shows <code>UPLOAD n Rx</code>; <code>R0</code> is good, <code>R3</code> is a flash error.</li>
     </ul>
@@ -335,7 +336,7 @@
       if (!r.ok) throw new Error('dist/install/manifest.json is missing. Run node make_install.js after building the firmware.');
       manifest = await r.json();
       pkg = await FM1Web.prepare(manifest.firmware);            // fetches the package and checks its SHA-256, header and loader
-      $('fwInfo').textContent = 'SF2 player ' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices, ' + kb(pkg.bytes) + ', build ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
+      $('fwInfo').textContent = (manifest.name ? manifest.name + ': ' : '') + 'SF2 player ' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices, ' + kb(pkg.bytes) + ', build ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
       const b = await fetch(manifest.bank.url, { cache: 'no-store' });
       const bytes = new Uint8Array(await b.arrayBuffer());
       if (bytes.length !== manifest.bank.bytes || crc32(bytes) !== manifest.bank.crc32) throw new Error('The bank in dist/install does not match the manifest. Run node make_install.js again.');
