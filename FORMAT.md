@@ -375,13 +375,54 @@ than SEA per voice.
 
 **What follows.**
 
-- A cache does not bring a 4 MB font to the FM-1: the working set does not fit the SRAM, and decoding per voice does not fit the CPU. It is not worth building on this hardware.
-- 456 KB of flash is the budget, in a format that plays in place. The 4 MB font's melodic part and kit 0 are 1 300 KB of BFP8: 35 % of it fits, which is what `1mgm.sf2`
-  (405 KB) already is, a font of that class thinned to fit. Changing font does not buy more on its own; choosing the sounds better does.
-- What is left, none of it three times as much: SEA5 or SEA6 (12 to 24 % more, one point per voice, so the 24-voice firmware), a rate per sound (4 to 19 %), thinning zones and
+- Keeping the programs that sound resident does not bring a 4 MB font to the FM-1: the working set of whole programs does not fit the SRAM, and decoding per voice does not fit
+  the CPU. A cache of **single sounds**, filled by the notes that are played, is another matter: see the next section.
+- Without it, 456 KB of flash is the budget, in a format that plays in place. The 4 MB font's melodic part and kit 0 are 1 300 KB of BFP8: 35 % of it fits, which is what `1mgm.sf2`
+  (405 KB) already is, a font of that class thinned to fit.
+- What is left then, none of it three times as much: SEA5 or SEA6 (12 to 24 % more, one point per voice, so the 24-voice firmware), a rate per sound (4 to 19 %), thinning zones and
   presets by hand, and not storing the loops repeated (29 KB of the 1mgm bank).
 - The proposal above (packed in the flash, unpacked into SDRAM) stays valid for an AC7911BA or BB board, which has the memory.
 - Not measured: how much SRAM is free, and the speed of any decoder on the FM-1.
+
+## Calculation: a live cache of decoded sounds (not built)
+
+The idea: the flash holds the whole bank as MP3 at 64 kbit/s, in one stream with an index of where each sound starts; a note whose sound is not in a cache in the SRAM has it decoded
+into BFP8 (33 bytes for 32 frames, played in place by the engine as it is), and the least recently used sounds that no voice is playing go when the cache is full. Not whole programs
+resident, as above, but only what is played. `measure_live_cache.js` plays standard MIDI files against the converter's bank (the key maps and layers of the preset each channel has,
+the kit on channel 10, bank select ignored) and counts what the song does to a cache of a given size. The 15 files in `MIDIs/` (pop and band arrangements and piano music), the
+4 MB font, `node measure_live_cache.js 4gmgsmt.sf2 MIDIs/*.mid`:
+
+- A song touches few sounds: 8 to 57, 150 to 338 KB of BFP8 over the whole song (the 128 melodic presets and 10 kits of the font have 483 sounds, 1 457 KB).
+- Over the 15 files (every sound a note needs, chords counted once for each zone):
+
+| Cache (KB of BFP8) | Sounds found in it | Misses (decodes) | Sounds that could not be loaded | Decoded audio, average, % of a core (K 5 to 12) | Worst second, audio decoded | Most misses in 50 ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| 96 | 87.7 % | 5 886 | 3 563 | 0.3 to 0.8 | 5.2 s | 15 |
+| 128 | 94.0 % | 3 147 | 1 432 | 0.2 to 0.5 | 5.8 s | 15 |
+| 192 | 98.6 % | 996 | 67 (two songs: 21 and 46) | 0.1 | 6.2 s | 15 |
+| 256 | 99.4 % | 432 | **0** | 0.0 to 0.1 | 6.2 s | 15 |
+
+  "Could not be loaded" is a sound that is needed while the cache is full of sounds that are playing; that note would be silent or late. K is the decoder's cost in million cycles for each
+  second of mono audio on a 240 MHz core, an **assumption** (5 and 12 are tried; none measured on a pi32v2). The worst second is the song's start, when everything is cold: 6.2 s of
+  audio to decode is 13 to 31 % of a core, and 15 cold sounds at once would wait, one after the other, about 45 to 110 ms for the last (4 frames of each: 3 of lead-in for the
+  bit reservoir and the first; also an assumption), where a sound already in the cache costs nothing.
+- Flash: the 4 MB font's 138 presets are 136 KB of tables and about 354 KB of MP3 (8 009 bytes for each second of audio, measured on one stream of all its sounds) and an index of 4 bytes a
+  sound: 492 KB, 36 KB too much. The 128 melodic presets and kit 0 are 112 KB and about 315 KB: 429 KB, which fits (27 KB over); the melodic presets alone 390 KB. That is 1 419 KB of BFP8, 3.1
+  times what the flash holds now (`measure_working_set.js`, 464 636 bytes for `1mgm.sf2`).
+
+What this does not show, and what it needs:
+
+- **The SRAM.** 192 to 256 KB is at the top of the plausible 150 to 250 KB that the firmware leaves, and a cache of sounds of every length needs an allocator that does not fragment; with
+  10 to 25 % lost to that, 256 KB would act like 190 to 230. Below 192 KB, songs start to lose notes. The real figure is in the build's `firmware-report.json`.
+- **The decoder.** An MP3 layer-III decoder that runs on the pi32v2 in the control task (the audio interrupt only reads the cache), 15 to 25 KB of code (a guess; the image has roughly 30 KB
+  to spare), at a speed nobody has measured here. Decoding must stay ahead of a voice's read position (20 to 48 times real time at K 5 to 12, against a voice that reads at the pitch's speed, up to
+  2 or 4 times); a note may start as soon as the lead-in is done.
+- **The sound.** MP3 at 64 kbit/s is 16.7 dB against the source (BFP8 is 43.8), and has not been listened to; the decoded sound is then put into BFP8, whose noise is far below the MP3's.
+  Whether the 4 MB font as 64 kbit/s MP3 beats `1mgm.sf2` as BFP8 is a listening test, not a number. The loops need the crossfade of the packed-data proposal.
+- **The engine.** A zone points into the flash today; it would point at a cache block, or at nothing yet. A voice pins its sound; a note whose sound cannot be loaded needs a decision (late or
+  silent). The random access into one MP3 stream (a frame index and 2 or 3 frames of lead-in) is another reason the sounds are not stored as a stream each, which costs 77 % more on `1mgm.sf2`.
+- **The songs.** 15 files, GM arrangements played from bank 0 and kit 0: a performer changing programs by hand, or a song with many different programs and kits, has a larger working set.
+  The simulation counts every sound a note needs, with no look-ahead (a decoder could fetch the next likely zones when a program is chosen).
 
 ## Proposal: more of the SoundFont (not implemented)
 
