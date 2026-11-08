@@ -378,7 +378,9 @@ $flags = @('-target','pi32v2','-integrated-as','-mcpu=r3','-mfprev1','-Wuninitia
     '-fno-unwind-tables','-ffunction-sections','-fdata-sections','-fmessage-length=0',
     '-cl-single-precision-constant','-mllvm','-pi32v2-large-program=true','-D__GCC_PI32V2__','-O2')
 foreach ($dir in $include) { $flags += '-I' + (Join-Path $root $dir) }
-if ($LiveCache) { $flags += @('-DFM1B_BFP8_ONLY=1', '-DFM1B_PACKED=1', "-DFM1B_CACHE_KB=$CacheKB", "-DFM1B_CACHE_FRAMES=${CacheFrames}U") }
+# The live cache build also leaves out the MIDI file player (FM1_MIDIPLAY=0; its code stays, the plain build has it): with it the image
+# was 2 235 bytes over the layout (2026-11-08), and a song takes its RAM from the same runtime heap the cache leaves short.
+if ($LiveCache) { $flags += @('-DFM1B_BFP8_ONLY=1', '-DFM1B_PACKED=1', "-DFM1B_CACHE_KB=$CacheKB", "-DFM1B_CACHE_FRAMES=${CacheFrames}U", '-DFM1_MIDIPLAY=0') }
 $objects = @()
 $commands = @()
 Push-Location -LiteralPath $build

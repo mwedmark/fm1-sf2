@@ -51,7 +51,7 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
 - If still over: trim minimp3 for mono 32 kHz (stereo, free-format, intensity/MS paths and unused tables; it is CC0 but then no longer "unmodified" — update `fm1_open/third_party/mp3/README.md`
   and `THIRD_PARTY.md`), or other things in the image. `map_sizes.js` shows sections but LTO merges the application into one object, so names are lost.
 - `sdk/manifest.json` pins the SHA-256 of `sdk/Build.ps1`: **after every edit of `Build.ps1` put the new hash in the manifest** (`Get-FileHash`, lower case; the repo file has LF line ends and the hash is of those bytes) or the build stops with "SDK payload changed".
-- `-LiveCache` implies `FM1B_BFP8_ONLY=1`: the firmware plays BFP8 and packed banks only (SEA, 8/12/16-bit refused) and the info page has no SDRAM test (no room).
+- `-LiveCache` implies `FM1_MIDIPLAY=0` (since the merge of main, 2026-11-08: the MIDI file player made the image 2 235 bytes over; now 229 to spare) and `FM1B_BFP8_ONLY=1`: the firmware plays BFP8 and packed banks only (SEA, 8/12/16-bit refused) and the info page has no SDRAM test (no room).
 - ~~Compiler warnings expected: `-Wframe-larger-than` for minimp3 (16 KB) and the crossfade (4.2 KB).~~ **Measured on the FM-1, 2026-11-08:** with `-LiveCache` and the packed bank, every note restarted
   the FM-1 (the BFP8 bank played fine). Cause taken to be the stack (no warning is left; the SDK's stacks seen in the map are 4 KB): minimp3's scratch (`MINIMP3_STATIC_SCRATCH`, a four-line change
   to `minimp3.h`), `pcm[1152]` and `blended[1024]` in `mp3_sound.c` are now static. Image 453 596 (325 to spare), heap 88 812. Tests on the PC pass; **on the FM-1 not yet tried.** If it still
