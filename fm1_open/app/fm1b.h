@@ -116,6 +116,20 @@ struct fm1b_info {
     char name[33], date[21];
 };
 void fm1b_info(struct fm1b_info *info);
+#ifdef FM1B_PACKED
+#if FM1B_PACKED
+/* Banks of version 2 whose sounds are an MP3 stream (FORMAT.md, "Calculation: a live cache of decoded sounds"; build with -DFM1B_PACKED=1 and live_cache/,
+ * third_party/mp3). Before fm1b_bind(): give the cache its pool (the RAM the decoded sounds live in; it must stay). The audio interrupt only starts notes and
+ * reads the cache; the CONTROL TASK must call fm1b_cache_service() every few ms: it answers the notes' requests, drops what no voice plays, and decodes for
+ * at most mp3_frames MP3 frames (1152 samples each). Returns the sounds still waiting or being decoded. */
+void fm1b_cache_attach(uint8_t *pool, unsigned bytes);
+unsigned fm1b_cache_service(unsigned mp3_frames);
+struct fm1b_cache_stats {
+    uint32_t hits, misses, evictions, no_room, decoded_mp3_frames, requested, lost, waiting, pinned;   /* lost: notes over before their sound came; pinned: pins held now */
+};
+void fm1b_cache_stats(struct fm1b_cache_stats *stats);
+#endif
+#endif
 /* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
 void fm1b_device_init(void);
 /* Firmware only: bind the FM1B bank in the user flash (1), or leave things as they are (0). */

@@ -78,6 +78,7 @@ node test_dropped_presets.js  # the zones and sounds of presets the bank map dro
 node test_sdram.js            # the SDRAM test of the info page (sdram_test.c) against a model of the memory with faults; any clang for wasm32
 python3 test_sdram_config.py  # make_sdram_config.py: boot-config.bin read as its entries, the copy with the SDRAM on differs in two keys only (python3, no packages)
 node pack_bank.js in.fm1b out.fm1b          # the live cache's packed bank from a BFP8 bank (ffmpeg); node test_pack_bank.js [font] unpacks it again with the C decoder
+node test_packed_engine.js [font]            # the engine (fm1b.c, FM1B_PACKED) playing a packed bank against the plain engine, bit for bit; ffmpeg and any clang for wasm32 (1 min with the 4 MB font)
 node test_sound_cache.js [font] [mid]  # the live cache's decoder and cache (fm1_open/live_cache): minimp3 into BFP8, the pool, a song played through it; ffmpeg and any clang for wasm32
 ```
 

@@ -435,8 +435,19 @@ five broken versions of the C is caught):
   `test_sound_cache.js` passed anyway; it now refuses such a stream), and **the decoder must be given the stream up to the end of the last MP3 entry, not the sample data to the end of the file**: minimp3
   takes a frame only when the next ones match or the buffer ends, so BFP8 bytes after the stream make the last frames fail. The engine takes `bytes` from the entries (the largest packed offset + packed
   bytes of a codec 2 entry). The encoder also needs 3 frames of silence after the last sound, or the last sounds have no samples left.
-- **Not written:** the engine's use of it (a zone points at a cache block or at flash, a voice pins its sound and waits for its first groups) and the converter page (the browser has no MP3 encoder
-  here; the page makes the BFP8 bank that `pack_bank.js` takes). Not tried: the build with JieLi's compiler.
+- **The engine, `fm1b.c` with `-DFM1B_PACKED=1`** (off by default: the firmware build is unchanged; `node test_packed_engine.js`, 14 checks on WebAssembly, and four broken versions of the C, as well as a fifth, are caught).
+  It binds version 2 banks (flags `0x18`, the pack table checked: sorted, every entry inside the sample data, codecs 0 and 2 only) when a pool has been given (`fm1b_cache_attach`), and refuses them
+  otherwise; the plain engine refuses them. **The interrupt never touches the cache**: a note that starts a voice on an MP3 sound puts a request in a ring (interrupt to control task); `fm1b_cache_service()`,
+  called from the control task every few ms, drops what voices have let go, asks the cache for the sounds (which pins them), decodes for a budget of MP3 frames and answers in a second ring with the cache
+  entry; the interrupt takes the answer at the start of the next block (if the voice is gone by then, it hands the pin back through a third ring). A voice with no answer yet, or that would read past the
+  groups decoded so far, **stands still** (nothing of it runs, not its envelope or filter), so a slow decoder delays a note and never plays half a sound. A stored (lossless) sound plays in place at once.
+  Results: with the cache serviced between blocks, a note's output is the plain engine's on the unpacked bank **bit for bit, one block (128 frames, 4 ms) later**, on 52 program and note sets
+  (`1mgm.sf2`; 40 of 40 without lossless sounds with the 4 MB font); with a decoder that gives one MP3 frame every 8 blocks, voices stop in the middle of a note and the rest of it is exactly the plain
+  engine's; a note over before the control task answered costs no decode, and no pin is left after any of it (a 24 KB pool and 6 000 blocks of random notes on random programs).
+  What this shows about the design, and what it costs: a note whose sound is in the cache still waits for the control task's next turn (the latency is the service period plus a block, not 0), and **the
+  voices of one note that has stacked layers start when their own sounds are ready, one by one**, so layers can begin a few blocks apart where the plain engine starts them together (the exact tests
+  therefore use notes with one voice). Not done: a note-off while the voice still waits (it plays its start when the sound comes), starting a layered note's voices together.
+- **Not written:** the converter page (the browser has no MP3 encoder here; the page makes the BFP8 bank that `pack_bank.js` takes). Not tried: the build with JieLi's compiler, the decoder's speed, the free SRAM.
 
 What this does not show, and what it needs:
 
