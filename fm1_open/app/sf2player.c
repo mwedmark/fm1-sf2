@@ -480,12 +480,12 @@ static void info_update(void)
     upload_line();
 #if FM1_MIDIPLAY
     if (sdram_idle()) {                                       /* lines 13 and 14: the song until SAVE starts the SDRAM test */
-        song_line(13, 204);
+        song_line(13, 206);
         d = put_text(line, "FREE RAM ");
         d = put_number(d, (int32_t)(info_free_ram / 1024U), 0);
         d = put_text(d, " KB FOR A SONG");
         *d = 0;
-        line_show(14, 214, line, 1, GREY);
+        line_show(14, 217, line, 1, GREY);
     } else
 #endif
     sdram_lines();
