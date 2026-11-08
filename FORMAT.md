@@ -417,8 +417,12 @@ What this does not show, and what it needs:
 - **The decoder.** An MP3 layer-III decoder that runs on the pi32v2 in the control task (the audio interrupt only reads the cache), 15 to 25 KB of code (a guess; the image has roughly 30 KB
   to spare), at a speed nobody has measured here. Decoding must stay ahead of a voice's read position (20 to 48 times real time at K 5 to 12, against a voice that reads at the pitch's speed, up to
   2 or 4 times); a note may start as soon as the lead-in is done.
-- **The sound.** MP3 at 64 kbit/s is 16.7 dB against the source (BFP8 is 43.8), and has not been listened to; the decoded sound is then put into BFP8, whose noise is far below the MP3's.
-  Whether the 4 MB font as 64 kbit/s MP3 beats `1mgm.sf2` as BFP8 is a listening test, not a number. The loops need the crossfade of the packed-data proposal.
+- **The sound.** MP3 at 64 kbit/s is 16.7 dB against the source over the whole font (BFP8 is 43.8), and then goes into BFP8, whose noise is far below the MP3's. **Listened to, 2026-11-08,
+  one listener:** the piano (a note, a chord, an arpeggio over the keyboard, bass and treble notes; the 4 MB font's Piano 1 against `1mgm.sf2`'s, rendered by a stand-in for the player with
+  the sounds' pitch, loops and envelopes) as MP3 64 kbit/s decoded to BFP8 "sounds almost like" the same piano not compressed. The piano is an easy case: its ten sounds are 21.3 dB at 64 kbit/s
+  (24.8 at 128), 49 KB against 188 KB, and 2.3 times the audio of `1mgm.sf2`'s piano in 82 KB. Not yet listened to: the rest. In the 16 s excerpts of three songs the weakest sounds are the
+  noise-like ones, hi-hats, cabasa and ride cymbal, 4 to 5 dB at 64 kbit/s and 7 to 9 at 128 (strings about 14), and a few such sounds are what a lossless tier in "Mixed tiers" is for: the 4 MB
+  font's kit hi-hats and cymbals stay BFP8 and cost a small part of the flash. The loops need the crossfade of the packed-data proposal (used in the renderings).
 - **The engine.** A zone points into the flash today; it would point at a cache block, or at nothing yet. A voice pins its sound; a note whose sound cannot be loaded needs a decision (late or
   silent). The random access into one MP3 stream (a frame index and 2 or 3 frames of lead-in) is another reason the sounds are not stored as a stream each, which costs 77 % more on `1mgm.sf2`.
 - **The songs.** 15 files, GM arrangements played from bank 0 and kit 0: a performer changing programs by hand, or a song with many different programs and kits, has a larger working set.
