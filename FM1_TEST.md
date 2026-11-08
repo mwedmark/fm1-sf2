@@ -130,7 +130,8 @@ bootladdaren gör om dess SDRAM-test misslyckas vet vi inte. En felaktig bootkon
 
 | # | Steg | Resultat |
 | --- | --- | --- |
-| F1 | Tryck REC (infosidan). Längst ned står `SDRAM  NOT TESTED  (SAVE TWICE)`. | |
+| F0 | Tryck REC (infosidan) och skriv ned raden `ID ........ SDR ........ PSR ........` under SDRAM-raden, **innan** något test. Det är chippets eget ID-register (`0x10200`) och första registret i SDRAM- och PSRAM-kontrollern (`0x40400`, `0x40500`); stock-firmwaren läser dem också vid varje start. Vad bitarna betyder för SDRAM är inte dokumenterat: värdena kan bara jämföras mellan enheter (BA, BB, chip utan SDRAM). | |
+| F1 | Längst ned står `SDRAM  NOT TESTED  (SAVE TWICE)`. | |
 | F2 | Tryck SAVE **en** gång: `SDRAM  PRESS SAVE AGAIN TO START` och `NO SDRAM CAN RESTART THE FM-1`. Vänta 5 s: det går tillbaka till det som stod. | |
 | F3 | Tryck SAVE **två** gånger inom 5 s. Raden visar fasen och procent: `DATA BUS`, `ADDRESS BUS`, `FILL`, `CHECK`, `CHECK INVERSE`, `WAIT` (3 s), `CHECK LATE`. Noteras: hur lång tid hela testet tar. | |
 | F4 | Under testet: håll en tangent. Ljudet ska gå på utan knaster, skärmen ska uppdateras, och CPU-raden på programsidan (REC tillbaka) ska inte gå upp märkbart. Noteras: ljud och CPU. | |

@@ -315,6 +315,14 @@ static void sdram_poll(void)                              /* every control cycle
     } else if (sdram_state == TEST_ARMED && now - sdram_armed_at >= SDRAM_ARM_MS)
         sdram_state = sdram.phase == SDRAM_DONE ? TEST_DONE : TEST_NEVER;   /* nobody pressed again: back to what was shown */
 }
+/* What the chip says about itself, read once when the info page is first shown, before any test: JL_INTEST->CHIP_ID (0x10200), the
+ * SDRAM controller's CON0 (0x40400) and the PSRAM controller's CON (0x40500), the addresses of JieLi's WL82.h. M-VAVE's own firmware
+ * reads all three (AL-255/FM-1-RE, docs/io/01-boot.md 2.1 and 03-audio-dac.md: the latter two as "chip straps" at every start, the first
+ * as a silicon check that gives 0x6F00), so this does nothing the stock firmware does not. What the bits mean for the SDRAM is NOT
+ * documented; the line is there to write the values down for each unit and compare a BA, a BB and a chip with no SDRAM. */
+static uint32_t hw_id[3];
+static unsigned hw_id_read;
+static uint32_t sfr_read(uint32_t address) { return *(volatile uint32_t *)(uintptr_t)address; }
 static char *put_size(char *d, uint32_t words)
 {
     uint32_t bytes = words * 4U;
@@ -365,7 +373,17 @@ static void sdram_lines(void)
         line_show(14, 217, line, 1, GREY);
     } else {
         line_show(13, 206, "SDRAM  NOT TESTED  (SAVE TWICE)", 1, GREY);
-        line_show(14, 217, "", 1, GREY);
+        if (!hw_id_read) {
+            hw_id[0] = sfr_read(0x10200U);
+            hw_id[1] = sfr_read(0x40400U);
+            hw_id[2] = sfr_read(0x40500U);
+            hw_id_read = 1;
+        }
+        d = put_hex(put_text(line, "ID "), hw_id[0]);
+        d = put_hex(put_text(d, " SDR "), hw_id[1]);
+        d = put_hex(put_text(d, " PSR "), hw_id[2]);
+        *d = 0;
+        line_show(14, 217, line, 1, GREY);
     }
 }
 static void info_update(void)

@@ -76,6 +76,7 @@ node test_filter.js           # the low-pass filter and the modulation envelope 
 node test_layers.js           # stacked layers: every zone that covers a key sounds; 1mgm.sf2 at 32 kHz, BFP8
 node test_dropped_presets.js  # the zones and sounds of presets the bank map drops are not written (a bank made by hand, no font)
 node test_sdram.js            # the SDRAM test of the info page (sdram_test.c) against a model of the memory with faults; any clang for wasm32
+python3 test_sdram_config.py  # make_sdram_config.py: boot-config.bin read as its entries, the copy with the SDRAM on differs in two keys only (python3, no packages)
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover

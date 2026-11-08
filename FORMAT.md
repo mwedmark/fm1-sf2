@@ -257,6 +257,20 @@ On the FM-1, in this order, and stop at the first step that fails:
   address lines, nothing there, a bus that holds the last value, a stuck cell, no refresh): 21 checks. It has not been run on a device.
   The window it tests, `0x04000000` and up to 8 MB, is where JieLi's SDK puts the SDRAM. With the SDRAM off in the boot configuration it
   is expected to fail, or to restart the FM-1.
+- **Is there a flag that says whether this unit has the SDRAM?** None is documented. The datasheet calls the memory letter a different
+  chip ("different packages or bindings"), which suggests bonding bits that software can read, but no document says which register or
+  which bit. Three read-only registers are worth writing down for each unit, and the info page shows them before any test (the
+  `ID ... SDR ... PSR ...` line): `JL_INTEST->CHIP_ID` at `0x10200` (M-VAVE's firmware checks it for `0x6F00`, as a silicon check), and
+  the first register of the SDRAM controller at `0x40400` and of the PSRAM controller at `0x40500`, whose bit 11 and bit 0 M-VAVE's
+  start-up code reads as "chip straps" every time it starts ([AL-255/FM-1-RE](https://github.com/AL-255/FM-1-RE), `docs/io/01-boot.md`
+  and `03-audio-dac.md`), so reading them is nothing the stock firmware does not do. The boot loader also leaves a hardware block at
+  `0x01C7FD50` with a chip-id byte and two "sizes" words that are not traced. With one unit the values cannot be read as "has" or "has
+  not": it takes a BA, a BB and a chip without SDRAM side by side. The marking on the chip is the first check, and the only sure one.
+- `make_sdram_config.py` (`--show`, `--size 2M|8M`) reads `boot-config.bin` as the 42 entries it is (they use the 721 bytes to the last one)
+  and writes a copy with `ENABLE_SDRAM` 1 and `SDRAM_SIZE` 2M or 8M, 2 to 4 bytes different; nothing in the build uses the copy and the
+  script never writes the original. `--encoding` picks how `2M` is stored (bytes, the guess; decimal; megabytes). `test_sdram_config.py`: 18
+  checks. M-VAVE's file also has two keys that are neither in JieLi's ini file nor in the table above, `SDRAM_TEST_SIZE` (4096) and
+  `SDRAM_CONFIG_VAL` (0); the boot loader has both among its strings and what they do is not known; the copy leaves them as they are.
 
 The firmware is flashed in step 5 and after, and `FIRMWARE.md` has not been run on the device even once, so the stock firmware
 (`sdk/firmware/FM-1_015.fwsc`, as `FIRMWARE.md` says) and M-VAVE's recovery have to be at hand first. The bank itself goes in over SysEx
