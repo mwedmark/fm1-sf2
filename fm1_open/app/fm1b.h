@@ -47,6 +47,9 @@ void fm1b_note(const void *owner, unsigned note, unsigned velocity, unsigned lev
 void fm1b_drum_note(const void *owner, unsigned note, unsigned velocity, unsigned level);
 unsigned fm1b_has_drums(void);
 void fm1b_panic(void);
+/* Free places in the queue the calls above and below write to (32 in all; the audio interrupt empties it every block). A
+ * caller that sends many events at once (the MIDI file player, song.c) keeps under it: a full queue loses the event. */
+unsigned fm1b_queue_room(void);
 
 /* Multitimbral use: the 16 MIDI channels each have their own preset, volume and expression. A channel that never got a
  * program change follows the preset fm1b_program() selected, and fm1b_note()/fm1b_drum_note() (the panel, the browser

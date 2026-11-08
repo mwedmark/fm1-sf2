@@ -16,6 +16,7 @@
 #include "sf2fx.h"
 #include "sdram_test.h"
 #include "sf2out.h"
+#include "song.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
@@ -223,6 +224,36 @@ static char *put_cpu(char *d)
     *d++ = '%';
     return d;
 }
+#if FM1_MIDIPLAY
+/* ms as m:ss */
+static char *put_time(char *d, uint32_t ms)
+{
+    uint32_t s = ms / 1000U;
+    d = put_number(d, (int32_t)(s / 60U), 0);
+    *d++ = ':';
+    return put_number(d, (int32_t)(s % 60U), 2);
+}
+/* The song in RAM (song.c): green while it plays, with where it is; grey while it waits for PLAY. Empty with no song. */
+static void song_line(unsigned n, unsigned y)
+{
+    struct song_state so;
+    char line[LINE_CHARS + 1], *d = line;
+    song_state(&so);
+    if (so.ready) {
+        d = put_text(d, so.playing ? "PLAY " : "SONG ");
+        for (unsigned i = 0; i < 16 && so.name[i]; ++i) *d++ = so.name[i];
+        *d++ = ' ';
+        if (so.playing) {
+            d = put_time(d, so.ms);
+            *d++ = '/';
+        }
+        d = put_time(d, so.length_ms);
+        if (!so.playing) d = put_text(d, "  PLAY STARTS");
+    }
+    *d = 0;
+    line_show(n, y, line, 1, so.playing ? GREEN : GREY);
+}
+#endif
 /* ---- the info page (REC): which firmware and which bank, each with its CRC32, and the two together ------------------ */
 /* The firmware's name and build time: from build_fw.ps1 (build_info.h), else the package's name and the compiler's clock. */
 #ifndef FM1_BUILD_NAME
@@ -253,8 +284,14 @@ static uint32_t firmware_crc_state, firmware_crc, bank_crc, soundset_crc;
 static uint32_t firmware_bytes;
 static unsigned firmware_crc_done;
 static struct fm1b_info info_bank;
+#if FM1_MIDIPLAY
+static uint32_t info_free_ram;
+#endif
 static void info_compute(void)
 {
+#if FM1_MIDIPLAY
+    info_free_ram = song_free_ram();
+#endif
     if (!firmware_crc_done) {
         firmware_bytes = (uint32_t)(uintptr_t)text_size + (uint32_t)(uintptr_t)data_size + (uint32_t)(uintptr_t)_ram0_data_size +
                          (uint32_t)(uintptr_t)cache_ram_data_size;
@@ -290,6 +327,7 @@ static char *put_compile_date(char *d)
 static void sdram_button(void) {}
 static void sdram_poll(void) {}
 static void sdram_lines(void) {}
+static int sdram_idle(void) { return 1; }
 #else
 /* ---- the SDRAM test (the info page: SAVE twice) --------------------------------------------------------------------
  * The AC7911BA and BB carry 2 and 8 MB of SDRAM in the package (AC7911B datasheet, "Package Type Specification"), but the firmware's boot
@@ -301,6 +339,7 @@ enum { TEST_NEVER, TEST_ARMED, TEST_RUNNING, TEST_DONE };
 static unsigned sdram_state;
 static uint32_t sdram_armed_at;
 static struct sdram_test sdram;
+static int sdram_idle(void) { return sdram_state == TEST_NEVER; }   /* the info page's bottom lines are the song's until SAVE arms the test */
 static uint32_t sdram_read(void *context, uint32_t word) { (void)context; return ((volatile uint32_t *)(uintptr_t)SDRAM_BASE)[word]; }
 static void sdram_write(void *context, uint32_t word, uint32_t value) { (void)context; ((volatile uint32_t *)(uintptr_t)SDRAM_BASE)[word] = value; }
 static void sdram_button(void)                            /* SAVE on the info page: the first press asks, the second within 5 s starts */
@@ -439,6 +478,16 @@ static void info_update(void)
         line_show(10, 170, line, 2, YELLOW);
     }
     upload_line();
+#if FM1_MIDIPLAY
+    if (sdram_idle()) {                                       /* lines 13 and 14: the song until SAVE starts the SDRAM test */
+        song_line(13, 204);
+        d = put_text(line, "FREE RAM ");
+        d = put_number(d, (int32_t)(info_free_ram / 1024U), 0);
+        d = put_text(d, " KB FOR A SONG");
+        *d = 0;
+        line_show(14, 214, line, 1, GREY);
+    } else
+#endif
     sdram_lines();
     line_show(11, 228, "REC BACK", 1, GREY);
 }
@@ -717,6 +766,9 @@ static void screen_update(void)
     d = put_number(d, (int32_t)st.drops_guard, 0);
     *d = 0;
     line_show(12, 200, line, 1, st.drops_held || st.drops_guard ? ORANGE : GREY);
+#if FM1_MIDIPLAY
+    song_line(13, 214);
+#endif
     line_show(7, 228, "SEL PRG SCL DRUM HOME CH SAVE ZERO DROPS", 1, GREY);
 }
 
@@ -773,8 +825,8 @@ void groove_screen_init(void)
     memset(shown_back, 0, sizeof shown_back);
     bar_drawn = 1000;
 }
-/* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only). */
-enum { BUTTON_SAVE = 9, BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_REC = 13 };
+/* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only), PLAY while a song plays. */
+enum { BUTTON_SAVE = 9, BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_PLAY = 12, BUTTON_REC = 13 };
 static void leds_update(void)
 {
     struct fm1b_channel info;
@@ -783,11 +835,17 @@ static void leds_update(void)
         fm1b_channel_info(cursor, &info);
         leds = info.muted | info.solo << 1;
     }
+#if FM1_MIDIPLAY
+    struct song_state so;
+    song_state(&so);
+    leds |= so.playing << 2;                                  /* PLAY lights while a song plays */
+#endif
     if (leds == leds_shown)
         return;
     leds_shown = leds;
     fm1_led_set(BUTTON_ARP, (int)(leds & 1U));
-    fm1_led_set(BUTTON_SEQ, (int)(leds >> 1));
+    fm1_led_set(BUTTON_SEQ, (int)((leds >> 1) & 1U));
+    fm1_led_set(BUTTON_PLAY, (int)(leds >> 2));
 }
 /* Safe mode: OCT- and OCT+ (buttons 0 and 1) held while the FM-1 starts, as the stock firmware's update mode. The bank is then not bound
  * and the live cache does nothing, so a bank or a code path that crashes cannot keep the FM-1 from starting; USB-MIDI, the firmware update
@@ -828,6 +886,9 @@ void groove_screen_control(void)
     sdram_poll();                                            /* the SDRAM test of the info page, one slice */
 #if FM1B_PACKED
     fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+#endif
+#if FM1_MIDIPLAY
+    song_poll();                                              /* the song's events that are due */
 #endif
     struct fm1_controls controls;
     fm1_controls_read(&controls);
@@ -908,6 +969,14 @@ void groove_screen_control(void)
         }
         page_clear();
     }
+#if FM1_MIDIPLAY
+    if (pressed & (1U << BUTTON_PLAY)) {                      /* PLAY: the song from the start, or stop it */
+        struct song_state so;
+        song_state(&so);
+        if (so.playing) song_stop();
+        else song_play();
+    }
+#endif
     if (channels && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
         struct fm1b_channel info;
         fm1b_channel_info(cursor, &info);
