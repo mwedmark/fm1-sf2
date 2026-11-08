@@ -447,6 +447,8 @@ five broken versions of the C is caught):
   What this shows about the design, and what it costs: a note whose sound is in the cache still waits for the control task's next turn (the latency is the service period plus a block, not 0), and **the
   voices of one note that has stacked layers start when their own sounds are ready, one by one**, so layers can begin a few blocks apart where the plain engine starts them together (the exact tests
   therefore use notes with one voice). Not done: a note-off while the voice still waits (it plays its start when the sound comes), starting a layered note's voices together.
+- **In the firmware build, behind `-LiveCache`** (`sdk/Build.ps1`, `build_fw.ps1`; RUNNING.md, section 1): a static pool (`-CacheKB`, default 96) in the SRAM, `fm1b_cache_service` once a control cycle (`-CacheFrames` MP3
+  frames, default 2), the interrupt's side of the engine in SRAM. **Never built with JieLi's compiler**, and the script has only been read, not run (no PowerShell here).
 - **Not written:** the converter page (the browser has no MP3 encoder here; the page makes the BFP8 bank that `pack_bank.js` takes). Not tried: the build with JieLi's compiler, the decoder's speed, the free SRAM.
 
 What this does not show, and what it needs:

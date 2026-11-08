@@ -28,6 +28,14 @@ It writes the name and time to `fm1_open\app\build_info.h` (git ignores it), run
 copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prints next to it. A plain build shows
 `FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
 
+**With the live cache** (2026-11-08, **not built yet**; `-LiveCache` on `build_fw.ps1` or `sdk\Build.ps1`): plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
+It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 96, 16 to 400) in the SRAM, which the link takes from the
+runtime heap; `-CacheFrames` (default 2) is the MP3 frames (1152 samples) decoded in one control cycle. The build prints the heap that is left (`runtime_heap_bytes` in `firmware-report.json`), and stops under 49 152
+bytes, which is how the free SRAM is found: raise `-CacheKB` until it stops. Without the switch the firmware is what it was. What to look at in the first build, none of it known:
+the compiler's warnings (`-Wframe-larger-than`: minimp3's decode takes about 16 KB of stack, and the control task that calls `fm1b_cache_service` must have it), the image size against the 30 KB or so spare
+(`Application does not fit the FM1 layout.`), and whether minimp3's floats link (on WebAssembly it needs only `memcpy`, `memset`, `memmove`, `memcmp`). Then the bank: `node pack_bank.js in.fm1b out.fm1b`, to the
+flash as any bank (the file's size is in its header, so the existing flash path binds it); a packed bank the player binds without the switch is refused, so nothing plays rather than the wrong thing.
+
 **Plain:**
 
 ```powershell

@@ -7,6 +7,11 @@
 #include "fm_patch.h"
 #include "fm1b.h"
 #include "fm1b_config.h"
+#if FM1B_PACKED
+#ifndef FM1B_CACHE_FRAMES
+#define FM1B_CACHE_FRAMES 2U                             /* MP3 frames (1152 samples) decoded in one control cycle */
+#endif
+#endif
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sdram_test.h"
@@ -781,6 +786,9 @@ void groove_screen_control(void)
 {
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
     sdram_poll();                                             /* the SDRAM test of the info page, one slice */
+#if FM1B_PACKED
+    fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+#endif
     struct fm1_controls controls;
     fm1_controls_read(&controls);
     (void)groove_master_update(controls.knob);               /* MASTER: the output level on every page; without it the output stays muted */

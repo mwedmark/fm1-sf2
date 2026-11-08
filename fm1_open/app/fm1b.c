@@ -6,9 +6,6 @@
 #include "fm1b_dqt6.inc"
 /* FM1B_PACKED: banks of version 2 with flag 0x10, whose sounds are one MP3 stream decoded into a cache in RAM when a note needs them (FORMAT.md,
  * "Calculation: a live cache of decoded sounds"; live_cache/). Off in the firmware build until the decoder is built with JieLi's compiler. */
-#ifndef FM1B_PACKED
-#define FM1B_PACKED 0
-#endif
 #if FM1B_PACKED
 #include "sound_cache.h"
 #endif
@@ -230,7 +227,7 @@ static struct {
     struct pk_request pending[PK_PENDING];                    /* control task: asked for, no room yet (or no place in the grant ring) */
     uint32_t pending_count, serial, requested, granted_late, lost;
 } pk;
-static uint32_t pk_find(uint32_t data)                          /* the sound whose unpacked offset is `data`, or ~0 */
+static FM1_DSP_CODE uint32_t pk_find(uint32_t data)                          /* the sound whose unpacked offset is `data`, or ~0 */
 {
     uint32_t lo = 0, hi = bank.pack_count;
     while (lo < hi) {
@@ -240,7 +237,7 @@ static uint32_t pk_find(uint32_t data)                          /* the sound who
     }
     return ~0U;
 }
-static const uint8_t *pk_entry(uint32_t sound) { return bank.image + bank.pack_table + sound * bank.pack_stride; }
+static FM1_DSP_CODE const uint8_t *pk_entry(uint32_t sound) { return bank.image + bank.pack_table + sound * bank.pack_stride; }
 static uint32_t pk_zone_of(uint32_t sound, uint32_t loop_only)    /* a zone using the sound (with a loop), as an index, or ~0 */
 {
     uint32_t data = rd32(pk_entry(sound));
@@ -290,7 +287,7 @@ static void packed_start(const uint8_t *image)
     for (unsigned i = 0; i < FM1B_VOICES; ++i) voices[i].has_entry = voices[i].packed = voices[i].waiting = 0;
 }
 void fm1b_cache_attach(uint8_t *pool, unsigned bytes) { pk.pool = pool; pk.pool_bytes = bytes; }
-static void pk_unpin_later(unsigned entry)                      /* interrupt: the ring cannot fill up (it holds more than there are voices and grants) */
+static FM1_DSP_CODE void pk_unpin_later(unsigned entry)                      /* interrupt: the ring cannot fill up (it holds more than there are voices and grants) */
 {
     uint32_t head = pk.unpin_head;
     pk.unpin[head % PK_UNPIN_RING] = (uint8_t)entry;
@@ -298,13 +295,13 @@ static void pk_unpin_later(unsigned entry)                      /* interrupt: th
     pk.unpin_head = head + 1U;
 }
 /* A voice is over with its sound (or its slot is taken for another note). */
-static inline void packed_free(struct voice *v)
+static FM1_DSP_CODE void packed_free(struct voice *v)
 {
     if (v->has_entry) { pk_unpin_later(v->entry); v->has_entry = 0; }
     v->waiting = 0;
 }
 /* Interrupt: take the grants that the control task has made. */
-static void packed_grants(void)
+static FM1_DSP_CODE void packed_grants(void)
 {
     while (pk.grant_tail != pk.grant_head) {
         struct pk_grant g = pk.grant[pk.grant_tail % PK_RING];
@@ -312,7 +309,7 @@ static void packed_grants(void)
         pk.grant_tail = pk.grant_tail + 1U;
         struct voice *v = &voices[g.slot];
         if (v->active && v->packed && v->waiting && v->serial == g.serial) {
-            v->base = sound_cache_data(&pk.cache, g.entry);
+            v->base = pk.cache.pool + pk.cache.entry[g.entry].offset;     /* what sound_cache_data() says: read here, the interrupt runs from SRAM */
             v->entry = g.entry;
             v->has_entry = 1;
             v->waiting = 0;
@@ -322,14 +319,14 @@ static void packed_grants(void)
     }
 }
 /* Interrupt: after a block, give back the sounds of the voices that ended. */
-static void packed_release(void)
+static FM1_DSP_CODE void packed_release(void)
 {
     for (unsigned i = 0; i < FM1B_VOICES; ++i)
         if (!voices[i].active && (voices[i].has_entry || voices[i].waiting))
             packed_free(&voices[i]);
 }
 /* Interrupt, in zone_start: set the new voice up on its sound. 0: it cannot be started. */
-static int packed_voice_start(struct voice *v, unsigned slot, uint32_t data, uint32_t length)
+static FM1_DSP_CODE int packed_voice_start(struct voice *v, unsigned slot, uint32_t data, uint32_t length)
 {
     uint32_t sound = pk_find(data);
     if (sound == ~0U) return 0;
@@ -352,11 +349,11 @@ static int packed_voice_start(struct voice *v, unsigned slot, uint32_t data, uin
     return 1;
 }
 /* Interrupt, at the start of a voice's block: may it run? It stands still while its sound is not granted or not decoded as far as the block reads. */
-static inline int packed_ready(const struct voice *v, unsigned frames)
+static FM1_DSP_CODE int packed_ready(const struct voice *v, unsigned frames)
 {
     if (v->waiting) return 0;
     if (!v->has_entry) return 1;
-    uint32_t ready = sound_cache_groups_ready(&pk.cache, v->entry);
+    uint32_t ready = pk.cache.entry[v->entry].groups_ready;
     if (ready >= v->groups) return 1;
     uint64_t last = (uint64_t)v->position + (((uint64_t)v->fraction + (uint64_t)frames * v->step) >> 16) + 3U;   /* the last frame the block can read */
     if (v->loop_end && last > (uint64_t)v->loop_end + 2U) last = (uint64_t)v->loop_end + 2U;   /* past the loop end it is back at the start */
