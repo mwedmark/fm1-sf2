@@ -435,7 +435,7 @@ five broken versions of the C is caught):
   `test_sound_cache.js` passed anyway; it now refuses such a stream), and **the decoder must be given the stream up to the end of the last MP3 entry, not the sample data to the end of the file**: minimp3
   takes a frame only when the next ones match or the buffer ends, so BFP8 bytes after the stream make the last frames fail. The engine takes `bytes` from the entries (the largest packed offset + packed
   bytes of a codec 2 entry). The encoder also needs 3 frames of silence after the last sound, or the last sounds have no samples left.
-- **The engine, `fm1b.c` with `-DFM1B_PACKED=1`** (off by default: the firmware build is unchanged; `node test_packed_engine.js`, 14 checks on WebAssembly, and four broken versions of the C, as well as a fifth, are caught).
+- **The engine, `fm1b.c` with `-DFM1B_PACKED=1`** (off by default: the firmware build is unchanged; `node test_packed_engine.js`, 14 checks on WebAssembly; each of five broken versions of the C is caught).
   It binds version 2 banks (flags `0x18`, the pack table checked: sorted, every entry inside the sample data, codecs 0 and 2 only) when a pool has been given (`fm1b_cache_attach`), and refuses them
   otherwise; the plain engine refuses them. **The interrupt never touches the cache**: a note that starts a voice on an MP3 sound puts a request in a ring (interrupt to control task); `fm1b_cache_service()`,
   called from the control task every few ms, drops what voices have let go, asks the cache for the sounds (which pins them), decodes for a budget of MP3 frames and answers in a second ring with the cache
