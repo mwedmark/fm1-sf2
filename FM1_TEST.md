@@ -141,6 +141,42 @@ bootladdaren gör om dess SDRAM-test misslyckas vet vi inte. En felaktig bootkon
 
 För varje enhet (i RUNNING.md avsnitt 5): chippets markering (`AC7911BA` eller `BB`, en bild), firmware, utfall i F5, om F6 hände.
 
+### Jämförelse mellan enheter (ID-raden i F0)
+
+Syftet är att se **vilka bitar** i `ID`, `SDR` och `PSR` som skiljer sig mellan en enhet med SDRAM (BA eller BB) och en utan. Ett enskilt värde säger ingenting
+om SDRAM: ingen källa säger vilken bit som betyder "har SDRAM". Bara skillnader mellan enheter kan peka på en kandidat, och bara om chippmarkeringen på varje enhet
+är känd. Skriv hexvärdena exakt som de står (8 siffror) och läs raden **två gånger**, med en omstart emellan: ändras ett värde på samma enhet mellan starterna är det
+tillstånd och inte en egenskap, och de bitarna ska inte användas.
+
+| Enhet | Chippmarkering (bild) | Firmware | `ID` | `SDR` | `PSR` | Samma efter omstart? | F5: utfall och storlek | F6: omstart eller hängning | Datum |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| *Förväntat enligt stock-koden* | | | `0x6F00` (kisel-kontroll i `audio_dac_open`, enligt AL-255/FM-1-RE; **inte verifierat** på din enhet) | | | | | | |
+| 1 (din) | | | | | | | | | |
+| 2 | | | | | | | | | |
+| 3 | | | | | | | | | |
+| 4 | | | | | | | | | |
+
+Räkna ut vilka bitar som skiljer mellan två rader genom att XOR:a värdena, ett register i taget (bit 0 är den lägsta siffran). Exemplet använder påhittade
+värden; byt ut dem mot dina:
+
+```bash
+python3 -c "a,b=0x00006F00,0x00006F08; print(f'{a^b:08X}', bin(a^b))"
+```
+
+| Jämförelse (rad A mot rad B) | Bitar som skiljer i `ID` | i `SDR` | i `PSR` | Samma på två enheter av samma sort? | Slutsats |
+| --- | --- | --- | --- | --- | --- |
+| BA mot BB | | | | | |
+| BA eller BB mot ett chip utan SDRAM | | | | | |
+| Två enheter med samma markering | | | | (ska vara tomt) | |
+
+Hur du läser den:
+
+- Börja med den sista raden: två enheter med **samma** markering ska ge noll skillnad. Om de ger skillnad är registret inte en egenskap hos chippet och kan inte användas.
+- En bit är en kandidat för "har SDRAM" bara om den skiljer mellan en enhet med SDRAM och en utan, **och** är lika på alla enheter av samma sort. Stock-koden läser bit 11 i `SDR` och bit 0 i `PSR`
+  som "chip straps": börja där, men det är en gissning att de har med SDRAM att göra.
+- Med bara din enhet går det inte att dra någon slutsats: skriv ned värdena och spara dem tills du har en andra enhet att jämföra med.
+- Ingen kandidat ersätter chippmarkeringen eller SDRAM-testet i F1–F7. Den är en genväg att kolla före ett test, inte ett bevis.
+
 ## G. Avsluta
 
 | # | Steg | Resultat |
