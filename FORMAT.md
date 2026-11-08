@@ -69,6 +69,14 @@ The decoder is `fm1_sea_decode`; `index.html` has the encoder (`seaEncode`, bit-
 
 ## Proposal: packed sample data (not implemented)
 
+> **Update 2026-11-08: this proposal needs SDRAM, and the FM-1 most likely has none.** Public teardowns of FM-1 boards read the SoC's
+> marking as `...-11B8` on three units (`C156211-11B8`, `C188612-11B8`, `C188760-11B8`; see "What is known about the SDRAM so far"). By the
+> datasheet's type code (the last character is the memory in the package: `8` is 8 Mbit of flash, `A` and `B` are the 2 and 8 MB SDRAM) that is an
+> **AC7911B8**: the 1 MB flash the FM-1 boots from is inside the package, and there is no SDRAM. The AC7911BA and BB are other chips. Nobody
+> has read the marking on the unit this repository is tried on, and one source disagrees, so it is not settled; but until a unit with SDRAM is
+> found, read the rest of this section as a proposal for AC7911BA/BB hardware. On the FM-1 the room is the 466 944 bytes of flash and about
+> 514 KB of SRAM, and "unpack once into SDRAM" has nowhere to go.
+
 Nothing in the converter, the player or `fm1b_bind()` reads this yet; it is the format a bank would have if the FM-1's SDRAM (the AC7911BA
 has 2 MB, the BB 8 MB, in the package; the AC7911B datasheet, "Package Type Specification") were used to hold the sound set unpacked. The flash
 holds the bank packed, the player unpacks it once at start into SDRAM and then binds the result as it binds any bank, so the engine, the
@@ -216,9 +224,21 @@ On the FM-1, in this order, and stop at the first step that fails:
 
 **What is known about the SDRAM so far.**
 
-- The AC7911B datasheet ("Package Type Specification"): the last letter of the type is the memory in the package, A 1M×16 SDRAM (2 MB),
-  B 4M×16 SDRAM (8 MB), C and D PSRAM, 2 to 7 flash, 0 none. Which letter the FM-1's chip has is not verified, and the FM-1 has an
-  external flash either way.
+- The AC7911B datasheet ("Package Type Specification", page 15 of V1.1): the last character of the type is the memory in the package, one
+  kind per type: 2 to 7 flash (`8` is 8 Mbit, 1 MB), A 1M×16 SDRAM (2 MB), B 4M×16 SDRAM (8 MB), C and D PSRAM, 0 none.
+- **What the FM-1's chip is.** Four public documentation projects, with photos of at least three units: the SoC is marked `JL C156211-11B8`
+  (aroum's unit), `C188612-11B8` (the owner's unit in [ip2k/lunar-modulator](https://github.com/ip2k/lunar-modulator), `docs/01-hardware.md`)
+  and `C188760-11B8` ([DimmKirr/modd](https://github.com/DimmKirr/modd), `docs/hardware/board/README.md`), QFN-48. Read with the datasheet's code,
+  `11B8` is an AC7911B**8**: 8 Mbit (1 MB) of flash in the package, which is exactly the Puya flash (JEDEC `0x856014`) the FM-1 boots from.
+  [TEG-Lizard-Man/cyma-1](https://github.com/TEG-Lizard-Man/cyma-1) (`notes/FM-1-hardware-atlas.md`) says the same: "The chip is an AC7911B8 ...
+  The flash is inside the package", "The B8 has no SDRAM", and no separate flash chip is found on the board (the SOIC-8 `U12` is the charger).
+  ip2k/lunar-modulator: "the FM-1 has none", and it checked that an AC7911B8 is 1 MB of in-package flash and no SDRAM against datasheet V1.4 and
+  the SDK's selection table. Against it: modd lists the marking `11B8` and calls the part an AC7911BA with 2 MB SDRAM, which does not follow from
+  its own marking; [aroum/fm1-custom-fw](https://github.com/aroum/fm1-custom-fw) (`REVERSE_ENGINEERING.md`), where "AC7911BA or BB with 2 or 8 MB SDRAM"
+  seems to come from, reads the marking as `11A-B` (the others read the same photo as `11B8`) and gives both the SDRAM and the 1 MB in-package
+  flash to one chip, which a single type does not have. A type has one memory, so a chip with the FM-1's in-package flash is not also an SDRAM
+  variant. This rests on other people's photos and on reading the marking as the datasheet's code; the marking of this repository's own unit has
+  not been read.
 - The boot configuration, in M-VAVE's `FM-1_015.fwsc` and in this repo's `sdk/tools/pack/boot-config.bin` (`Package.cs` takes it as 721
   bytes and works the checksums out), has `ENABLE_SDRAM` and `SDRAM_SIZE` at 0. The boot loader (the SPL, `uboot.boot`) has the names of
   these keys among its strings, so it is what reads them, and with `ENABLE_SDRAM` set it sets the SDRAM up before the application starts

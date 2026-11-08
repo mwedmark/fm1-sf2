@@ -119,6 +119,13 @@ Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v
 
 ## F. SDRAM-test (infosidan, SAVE två gånger)
 
+**OBS (2026-11-08): troligen finns inget SDRAM att testa på en FM-1.** Offentliga öppningar av FM-1 (aroum, lunar-modulator, modd, cyma-1; foton av minst tre
+enheter) läser chippets markering som `...-11B8`, och enligt databladets typkod är det en **AC7911B8**: 1 MB flash i kapseln, inget SDRAM (`A` och `B` är
+SDRAM-varianterna). Det stämmer med att FM-1 startar från en flash i kapseln och att tillverkarens konfiguration har SDRAM avstängt. En källa säger BA, men visar
+själv markeringen `11B8`. Din egen enhets markering har ingen läst. Därför: **kör inte SDRAM-testet (F1–F7) på din enda enhet utan skäl**. Det kan starta om FM-1 och kan
+inte ge något annat än "inget svar" om minnet inte finns. ID-raden (F0) är ofarlig (stock-firmwaren läser samma register) och behöver ingen skruvmejsel: den kan jämföras
+senare mot en enhet som har SDRAM. Se FORMAT.md, "What is known about the SDRAM so far".
+
 Bakgrund: AC7911BA/BB har 2 respektive 8 MB SDRAM i kapseln enligt databladet, men M-VAVE:s firmware (och bootkonfigurationen i det här
 repot, `fm1_open/sdk/tools/pack/boot-config.bin`) har `ENABLE_SDRAM` och `SDRAM_SIZE` på 0. **Med den konfigurationen förväntas testet
 misslyckas, och det visar inte att kortet saknar SDRAM**, bara att minnet inte är påslaget. Testet säger bara något om minnet slagits på i
