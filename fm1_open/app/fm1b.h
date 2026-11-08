@@ -137,8 +137,10 @@ struct fm1b_cache_stats {
 };
 void fm1b_cache_stats(struct fm1b_cache_stats *stats);
 #endif
-/* Firmware only: bind the bank compiled into the image (app/fm1b_bank.c), if there is one. */
+/* Firmware only: attach the live cache's pool (app/fm1b_bank.c); binds nothing. */
 void fm1b_device_init(void);
+/* Firmware only, control task: bind the bank in the user flash, else the one compiled into the image, if there is one. */
+void fm1b_device_bind(void);
 /* Firmware only: bind the FM1B bank in the user flash (1), or leave things as they are (0). */
 int fm1b_bind_flash(void);
 #endif

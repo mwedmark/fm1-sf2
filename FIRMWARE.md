@@ -43,6 +43,16 @@ releasing them lowers it again, so the key -> note queue -> SEA5 decode -> mix p
 19 GM melodic programs at 12 kHz SEA5, 56 460 bytes, app image 452 764 of 453 921 allowed. The first encoder steps through the programs the bank has.
 The whole `1mgm.sf2` (343 732 bytes at 32 kHz) does not fit: the package carries the image, not the user flash.
 
+### Safe mode (2026-11-08)
+
+Hold **OCT- and OCT+** while the FM-1 starts (as the stock firmware's update mode), until the screen shows `SAFE MODE`. The player then binds no bank
+and the live cache does nothing; USB-MIDI, the firmware update (install.html, the workbench) and the bank upload work as always, so a bank that crashes
+the player can be replaced. The control task looks at the buttons for its first 300 ms and binds the bank only after that (`safe_start` in `sf2player.c`,
+`fm1b_device_bind` in `fm1b_bank.c`). It does **not** help when the SDK fails before the control task runs: a build whose runtime heap was 88 812 bytes
+showed no USB device at all and needed the chip's ROM boot (the Transporter). Against that: `sdk\Build.ps1` stops under 111 468 bytes of heap (the smallest
+seen to boot), and every build is started in fm1-emu before it is flashed (RUNNING.md section 4). Checked in fm1-emu with `test_emu\safe.script` (both buttons
+from 0 ms: the screen shows it, a note gives no sound, load 13 %) and `mt.script` (normal start, the packed bank plays). Not yet tried on the FM-1.
+
 ### What the player does with a SoundFont zone
 
 - **Envelope per zone** (attack, hold, decay, sustain, release from the SoundFont's volume envelope generators, FORMAT.md "Envelopes"). Decay and release are

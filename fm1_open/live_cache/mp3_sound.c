@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
-/* See mp3_sound.h. minimp3 (CC0) is compiled in here, scalar only. */
+/* See mp3_sound.h. minimp3 (CC0) is compiled in here, scalar only. Nothing big is on the stack (the FM-1's task stacks are a few KB; with minimp3's
+ * 16 KB scratch and the buffers below there, every note that decoded restarted the FM-1, 2026-11-08): minimp3's scratch and the buffers here are static,
+ * so one task decodes (the control task, fm1b_cache_service). */
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_ONLY_MP3
 #define MINIMP3_NO_SIMD
+#define MINIMP3_STATIC_SCRATCH
 #include "mp3_sound.h"
 
 void bfp8_pack_group(const int16_t *pcm, uint8_t *out)
@@ -56,7 +59,7 @@ uint32_t mp3_sound_step(struct mp3_sound_job *job, uint32_t max_frames)
 {
     uint32_t decoded = 0;
     while (decoded < max_frames && !job->done && !job->error) {
-        int16_t pcm[MP3_SOUND_FRAME_SAMPLES];
+        static int16_t pcm[MP3_SOUND_FRAME_SAMPLES];
         mp3dec_frame_info_t info;
         if (job->position >= job->stream->bytes) {
             job->error = 1;
@@ -116,7 +119,7 @@ uint32_t mp3_sound_loop_crossfade(uint8_t *bfp, uint32_t frames, uint32_t loop_s
         xfade = (loop_end - loop_start) / 2;
     if (!xfade)
         return frames / 32U;
-    int32_t blended[1024];
+    static int32_t blended[1024];
     if (xfade > 1024)
         xfade = 1024;
     for (uint32_t i = 0; i < xfade; ++i) {                    /* w = (i + 1) / (xfade + 1), computed on the samples as they are before any of them changes */

@@ -789,10 +789,43 @@ static void leds_update(void)
     fm1_led_set(BUTTON_ARP, (int)(leds & 1U));
     fm1_led_set(BUTTON_SEQ, (int)(leds >> 1));
 }
+/* Safe mode: OCT- and OCT+ (buttons 0 and 1) held while the FM-1 starts, as the stock firmware's update mode. The bank is then not bound
+ * and the live cache does nothing, so a bank or a code path that crashes cannot keep the FM-1 from starting; USB-MIDI, the firmware update
+ * (install.html, the workbench) and the bank upload work as always. It does not help when the SDK fails before the control task runs
+ * (a runtime heap too small, 2026-11-08): that is the build's heap check and a boot in fm1-emu first (RUNNING.md). */
+enum { SAFE_BUTTONS = 3U, SAFE_WINDOW_MS = 300U };
+static uint8_t start_state;                               /* 0: the first SAFE_WINDOW_MS of the control task, 1: playing, 2: safe mode */
+static uint32_t start_ms;
+static int safe_start(void)
+{
+    if (start_state)
+        return start_state == 2;
+    struct fm1_controls controls;
+    fm1_controls_read(&controls);
+    uint32_t now = fm1_millis();
+    if (!start_ms)
+        start_ms = now | 1U;
+    if ((controls.buttons & SAFE_BUTTONS) == SAFE_BUTTONS) {
+        start_state = 2;
+        line_show(0, 90, "SAFE MODE", 2, ORANGE);
+        line_show(1, 120, "NO BANK. UPDATE OVER USB", 1, WHITE);
+        return 1;
+    }
+    if (now - start_ms < SAFE_WINDOW_MS)
+        return 1;
+    start_state = 1;
+#if FM1B_IN_FIRMWARE
+    fm1b_device_bind();
+#endif
+    return 0;
+}
+
 void groove_screen_control(void)
 {
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
-    sdram_poll();                                             /* the SDRAM test of the info page, one slice */
+    if (safe_start())
+        return;
+    sdram_poll();                                            /* the SDRAM test of the info page, one slice */
 #if FM1B_PACKED
     fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
 #endif

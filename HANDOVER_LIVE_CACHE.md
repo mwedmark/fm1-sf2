@@ -41,13 +41,28 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
 - `-Oz` does nothing under `-flto` here (three builds came out to the byte alike, after two changes that were not in the user's checkout; see below). Commit `4d4b284` compiles `live_cache/*.c`
   as native objects (`-fno-lto -Oz`); **its result is not known yet**: the user built an older checkout (wrong local directory) each time since `de0de03`. First thing to do: `git log -1` must say
   `4d4b284` (or later), then `.\build_fw.ps1 -Name sf2player_live -LiveCache -CacheKB 96 -CacheFrames 2` and read the `FM1:` lines ("has N bytes to spare" is the goal).
+- **Update, local session 2026-11-08 (measured on the user's machine, from `7fbfc48`):** `4d4b284` gave **454 524** (603 over), worse than LTO's figure above; all LTO now gives 460 700.
+  Fixed in `Build.ps1`: only `mp3_sound.c` is native, with `-fno-lto -Oz -fno-inline-functions`; `sound_cache.c` stays LTO. **`-LiveCache` now 453 788 bytes, 133 to spare**, it links, and
+  `dist\sf2player_live.fwsc` is built (not flashed). Base now 440 348 (13 573 to spare). Other variants tried: `-Os` 1 019 over; no unrolling, `-inline-threshold=0` or the link's merge
+  options, each 507 over; both files native with no inlining, 37 to spare. Not known: how much slower the decoder is with its stages not inlined (measure K on the FM-1, step 3 below).
+  133 bytes is thin; the next feature in this build will need the minimp3 trim below.
 - If a link error says `mp3_sound_*`/`sound_cache_*` are undefined: the native objects were not seen by the LTO link (a comment in `Build.ps1` warns that this plugin can discard definitions
   when native SDK objects have weak defaults). Then go back to LTO objects and cut size another way.
 - If still over: trim minimp3 for mono 32 kHz (stereo, free-format, intensity/MS paths and unused tables; it is CC0 but then no longer "unmodified" — update `fm1_open/third_party/mp3/README.md`
   and `THIRD_PARTY.md`), or other things in the image. `map_sizes.js` shows sections but LTO merges the application into one object, so names are lost.
 - `sdk/manifest.json` pins the SHA-256 of `sdk/Build.ps1`: **after every edit of `Build.ps1` put the new hash in the manifest** (`Get-FileHash`, lower case; the repo file has LF line ends and the hash is of those bytes) or the build stops with "SDK payload changed".
 - `-LiveCache` implies `FM1B_BFP8_ONLY=1`: the firmware plays BFP8 and packed banks only (SEA, 8/12/16-bit refused) and the info page has no SDRAM test (no room).
-- Compiler warnings expected: `-Wframe-larger-than` for minimp3 (about 16 KB of stack in the decode) and the crossfade (4.2 KB). **The control task's stack must hold ~19 KB; not checked.** Also not checked: whether the OS saves FPU registers across tasks (minimp3 uses floats).
+- ~~Compiler warnings expected: `-Wframe-larger-than` for minimp3 (16 KB) and the crossfade (4.2 KB).~~ **Measured on the FM-1, 2026-11-08:** with `-LiveCache` and the packed bank, every note restarted
+  the FM-1 (the BFP8 bank played fine). Cause taken to be the stack (no warning is left; the SDK's stacks seen in the map are 4 KB): minimp3's scratch (`MINIMP3_STATIC_SCRATCH`, a four-line change
+  to `minimp3.h`), `pcm[1152]` and `blended[1024]` in `mp3_sound.c` are now static. Image 453 596 (325 to spare), heap 88 812. Tests on the PC pass; **on the FM-1 not yet tried.** If it still
+  restarts: next suspect is the FPU registers across tasks (minimp3 uses floats), not checked.
+- **Then the FM-1 did not boot at all** (2026-11-08, `-CacheKB 96` with the static buffers: heap 88 812; no USB device in Windows, so neither install.html nor
+  the workbench can reach it; it needs the Transporter/ROM boot). Reproduced in fm1-emu: that build shows a blank screen, no sound and 320 % load; `-CacheKB 72`
+  (heap 113 388) boots and plays the packed bank there (`mt.script`), as does the base build. So the SDK needs more than 88 KB of heap at boot; 111 468 booted on the
+  device. **Before flashing a build, boot it in fm1-emu** (`start_emu.ps1 -Tap`; check `Running sf2player.fwsc?v=` is the new build: until this date the catalog's
+  relative address was not updated and the page could run a kept older package). The emulator did not show the stack crash (that test may have run a kept package).
+  Wanted by the user: a failsafe. **Built:** safe mode, OCT- and OCT+ held at power-on (FIRMWARE.md, "Safe mode"); checked in fm1-emu, not on the FM-1.
+  The heap check in `Build.ps1` is now 111 468. `fm1_device_recovery()` exists in the SDK, undocumented and not used (it may enter the loader; try it in fm1-emu first, never first on the FM-1).
 
 ## Not done, in the order I would do it
 

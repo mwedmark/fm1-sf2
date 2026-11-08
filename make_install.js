@@ -24,11 +24,16 @@ const out = path.join(root, 'dist/install');
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'firmware.fwsc'), firmware);
 fs.writeFileSync(path.join(out, 'bank.fm1b'), bank);
+// the build's name: the dist/*.fwsc that build_fw.ps1 copied from this package (none for a plain sdk\Build.ps1)
+const dist = path.join(root, 'dist');
+const name = fs.readdirSync(dist).filter(f => f.endsWith('.fwsc')).sort()
+  .find(f => fs.statSync(path.join(dist, f)).size === firmware.length && fs.readFileSync(path.join(dist, f)).equals(firmware)) || '';
 const manifest = {
+  name,
   firmware: { schema: 1, product, family: 7, release_version: identity.release_version, build_id: identity.build_id,
     sha256: sha(firmware), bytes: firmware.length, loader_sha256: sha(loader), url: 'dist/install/firmware.fwsc?v=' + sha(firmware).slice(0, 12), voices },   // the version in the address: never a cached package
   bank: { url: 'dist/install/bank.fm1b?v=' + sha(bank).slice(0, 12), bytes: bank.length, crc32: (~crc) >>> 0, source: path.relative(root, bankPath).replace(/\\/g, '/') },
   made: new Date().toISOString(),
 };
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
-console.log(`dist/install: firmware ${firmware.length} bytes (${voices} voices, build ${identity.build_id.slice(0, 16)}), bank ${bank.length} bytes`);
+console.log(`dist/install: firmware ${name || '(no dist/*.fwsc is this package)'}, ${firmware.length} bytes (${voices} voices, build ${identity.build_id.slice(0, 16)}), bank ${bank.length} bytes`);

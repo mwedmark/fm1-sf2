@@ -66,6 +66,11 @@ SEA decoder (SEA5 and SEA6), 412 540 with 16 voices, 419 740 with the player at 
 
 `dist\*.fwsc` are older packages from earlier builds (not committed). Copy a new one there if you want to keep it.
 
+**Before flashing any build** (2026-11-08): start it in fm1-emu (section 4) and check that the screen draws and a note sounds:
+`.\start_emu.ps1 -Tap -NoBrowser -Bank <bank>`, open the address it prints, and check that the page says `Running sf2player.fwsc?v=` with the new
+build's number. A build with too small a runtime heap shows a blank screen and about 320 % load there, and on the FM-1 it does not start at all. The build
+stops under 111 468 bytes of heap. If a bank makes the player crash: safe mode, OCT- and OCT+ held at power-on (FIRMWARE.md).
+
 ## 2. Tests that need no device (verified, all pass)
 
 Each one compiles the real C source to WebAssembly with the WASI SDK on the first run (and again when a source is newer).

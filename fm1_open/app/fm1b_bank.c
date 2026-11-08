@@ -42,6 +42,11 @@ void fm1b_device_init(void)
 #if FM1B_PACKED
     fm1b_cache_attach(cache_pool, sizeof cache_pool);
 #endif
+}
+
+/* Control task: the player binds the bank once it knows the FM-1 was not started in safe mode (sf2player.c). */
+void fm1b_device_bind(void)
+{
     if (fm1b_bind_flash())
         return;
 #ifdef HAVE_BUILT_IN
@@ -50,5 +55,6 @@ void fm1b_device_init(void)
 }
 #else
 void fm1b_device_init(void) {}
+void fm1b_device_bind(void) {}
 int fm1b_bind_flash(void) { return 0; }
 #endif

@@ -74,7 +74,10 @@ if ($json -notmatch '"id":\s*"sf2"') {                     # the site's catalog 
 }
 # ?v= the package's time: each build gets its own address, and main.js (1b) boots a kept copy only of the same address
 $version = (Get-Item $package).LastWriteTimeUtc.Ticks
-$json = $json -replace 'http://127\.0\.0\.1:\d+/sf2player\.fwsc(\?v=\d+)?', "http://127.0.0.1:$Port/sf2player.fwsc?v=$version"
+# the site's catalog may hold the package as a relative address ("sf2player.fwsc?v=..."): before 2026-11-08 only the absolute one was
+# matched, the ?v= stayed the same and the page booted the package it had kept from an earlier build
+$json = $json -replace '"(http://127\.0\.0\.1:\d+/)?sf2player\.fwsc(\?v=\d+)?"', "`"http://127.0.0.1:$Port/sf2player.fwsc?v=$version`""
+if ($json -notmatch [regex]::Escape("sf2player.fwsc?v=$version")) { throw "firmwares.json: the sf2 package address was not updated" }
 Set-Content $catalog $json -NoNewline
 
 # 4. the server (127.0.0.1 only), unless one already answers on the port
