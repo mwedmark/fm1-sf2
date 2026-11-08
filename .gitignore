@@ -11,3 +11,4 @@ tools/fluidsynth/
 test_fluid/*.wasm
 test_fluid/out/
 fm1_open/app/build_info.h
+test_sdram/*.wasm

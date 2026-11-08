@@ -117,6 +117,26 @@ gränsen. Kanalsidan visar samma CPU-värden på näst sista raden. Skriv gärna
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).
 
+## F. SDRAM-test (infosidan, SAVE två gånger)
+
+Bakgrund: AC7911BA/BB har 2 respektive 8 MB SDRAM i kapseln enligt databladet, men M-VAVE:s firmware (och bootkonfigurationen i det här
+repot, `fm1_open/sdk/tools/pack/boot-config.bin`) har `ENABLE_SDRAM` och `SDRAM_SIZE` på 0. **Med den konfigurationen förväntas testet
+misslyckas, och det visar inte att kortet saknar SDRAM**, bara att minnet inte är påslaget. Testet säger bara något om minnet slagits på i
+bootkonfigurationen, och det har inte gjorts (värdena för en 1M×16-krets är inte kända). Testet skriver till minnet i ett fönster på upp till 8 MB från
+`0x04000000` (adressstegen också till adresser utspridda över hela fönstret). Om adressen inte är mappad kan FM-1 starta om; ha därför A (originalfirmware och återställning) till hands först.
+
+| # | Steg | Resultat |
+| --- | --- | --- |
+| F1 | Tryck REC (infosidan). Längst ned står `SDRAM  NOT TESTED  (SAVE TWICE)`. | |
+| F2 | Tryck SAVE **en** gång: `SDRAM  PRESS SAVE AGAIN TO START` och `NO SDRAM CAN RESTART THE FM-1`. Vänta 5 s: det går tillbaka till det som stod. | |
+| F3 | Tryck SAVE **två** gånger inom 5 s. Raden visar fasen och procent: `DATA BUS`, `ADDRESS BUS`, `FILL`, `CHECK`, `CHECK INVERSE`, `WAIT` (3 s), `CHECK LATE`. Noteras: hur lång tid hela testet tar. | |
+| F4 | Under testet: håll en tangent. Ljudet ska gå på utan knaster, skärmen ska uppdateras, och CPU-raden på programsidan (REC tillbaka) ska inte gå upp märkbart. Noteras: ljud och CPU. | |
+| F5 | Utfallet: `PASS` och storlek (2 eller 8 MB), eller `FAIL DATA BUS`, `FAIL ADDRESS BUS`, `FAIL CELLS`, `FAIL RETENTION`, `TOO SMALL`. Andra raden har detaljerna (felaktiga databitar eller adresslinjer som hex, antal fel, första ordet). Skriv ned allt. | |
+| F6 | Startade FM-1 om eller hängde sig? Om ja: under vilken fas (om raden hann visas) och efter hur lång tid? | |
+| F7 | Kör om efter en omstart. Samma resultat varje gång? | |
+
+För varje enhet (i RUNNING.md avsnitt 5): chippets markering (`AC7911BA` eller `BB`, en bild), firmware, utfall i F5, om F6 hände.
+
 ## G. Avsluta
 
 | # | Steg | Resultat |
@@ -129,4 +149,5 @@ Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v
 - Att workbenchen godtar paketet och att vi kan flasha tillbaka (A).
 - Bankuppladdningen hela vägen (B): emulatorn tar bara MIDI via DIN och svaren försvinner.
 - Skärmen (C, E): emulatorn ritar inte LCD:n.
+- SDRAM (F): om kortet har något och vad testet säger om det. Själva testet är körd mot en modell med fel (`node test_sdram.js`), inte mot minne.
 - Hur mycket flash-läsningar kostar på riktig hårdvara; emulatorn räknar troligen inte med väntetid.

@@ -214,6 +214,23 @@ On the FM-1, in this order, and stop at the first step that fails:
 8. *Codec 2 samples*, the ones that passed the listening test, then loops and the pan and effects as in the checklist. The effects
    moving into the SDRAM (longer delays) is a separate step after this one.
 
+**What is known about the SDRAM so far.**
+
+- The AC7911B datasheet ("Package Type Specification"): the last letter of the type is the memory in the package, A 1M×16 SDRAM (2 MB),
+  B 4M×16 SDRAM (8 MB), C and D PSRAM, 2 to 7 flash, 0 none. Which letter the FM-1's chip has is not verified, and the FM-1 has an
+  external flash either way.
+- The boot configuration, in M-VAVE's `FM-1_015.fwsc` and in this repo's `sdk/tools/pack/boot-config.bin` (`Package.cs` takes it as 721
+  bytes and works the checksums out), has `ENABLE_SDRAM`, `SDRAM_SIZE`, `SDRAM_MODE` and `SDRAM_COLUM` at 0, and the timing keys filled
+  in (`SDRAM_CL` 2, `TRFC` 60, `TRC` 55, `TRP` and `TRCD` 18, refresh 32 and 4096). So M-VAVE's firmware does not use the memory; that
+  says nothing about whether the chip has it. Turning it on means setting these keys in `boot-config.bin`; the values for a 1M×16 part are
+  not known, and a wrong boot configuration may stop the FM-1 booting, which only M-VAVE's recovery would undo. Not done.
+- Step 5 is built as the info page's SDRAM test (REC, then SAVE twice; `fm1_open/app/sdram_test.c`, `FM1_TEST.md` F). It checks the data
+  bus, the address bus (which also gives the size), every cell with a value of its own and with its inverse, and the inverse again after
+  3 s, and shows the verdict and the details. `test_sdram.js` runs that code against a model with faults (stuck and shorted data and
+  address lines, nothing there, a bus that holds the last value, a stuck cell, no refresh): 21 checks. It has not been run on a device,
+  and the window it tests (`0x04000000`, 8 MB) is the linker's SDRAM region without its 0x120-byte offset, not a verified address.
+  With the SDRAM off in the boot configuration it is expected to fail, or to restart the FM-1.
+
 The firmware is flashed in step 5 and after, and `FIRMWARE.md` has not been run on the device even once, so the stock firmware
 (`sdk/firmware/FM-1_015.fwsc`, as `FIRMWARE.md` says) and M-VAVE's recovery have to be at hand first. The bank itself goes in over SysEx
 (`sf2_upload.c`) and does not touch the firmware.
