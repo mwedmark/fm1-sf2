@@ -51,7 +51,8 @@ the player can be replaced. The control task looks at the buttons for its first 
 `fm1b_device_bind` in `fm1b_bank.c`). It does **not** help when the SDK fails before the control task runs: a build whose runtime heap was 88 812 bytes
 showed no USB device at all and needed the chip's ROM boot (the Transporter). Against that: `sdk\Build.ps1` stops under 111 468 bytes of heap (the smallest
 seen to boot), and every build is started in fm1-emu before it is flashed (RUNNING.md section 4). Checked in fm1-emu with `test_emu\safe.script` (both buttons
-from 0 ms: the screen shows it, a note gives no sound, load 13 %) and `mt.script` (normal start, the packed bank plays). Not yet tried on the FM-1.
+from 0 ms: the screen shows it, a note gives no sound, load 13 %) and `mt.script` (normal start, the packed bank plays). **On the FM-1 (2026-11-08,
+`sf2player_live72.fwsc`):** `SAFE MODE` works, and a normal start plays the packed bank.
 
 ### What the player does with a SoundFont zone
 

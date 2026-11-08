@@ -61,7 +61,9 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   (heap 113 388) boots and plays the packed bank there (`mt.script`), as does the base build. So the SDK needs more than 88 KB of heap at boot; 111 468 booted on the
   device. **Before flashing a build, boot it in fm1-emu** (`start_emu.ps1 -Tap`; check `Running sf2player.fwsc?v=` is the new build: until this date the catalog's
   relative address was not updated and the page could run a kept older package). The emulator did not show the stack crash (that test may have run a kept package).
-  Wanted by the user: a failsafe. **Built:** safe mode, OCT- and OCT+ held at power-on (FIRMWARE.md, "Safe mode"); checked in fm1-emu, not on the FM-1.
+  Wanted by the user: a failsafe. **Built:** safe mode, OCT- and OCT+ held at power-on (FIRMWARE.md, "Safe mode"); checked in fm1-emu and **on the FM-1** (2026-11-08,
+  `sf2player_live72.fwsc`, `-CacheKB 72`): safe mode works, and a normal start plays the packed bank (`gm_32k_packed.fm1b`). Listening on the FM-1, MIDI playback
+  included (the user): "sounds very good", about the same as the unpacked BFP8 bank. Step 3 below (measurements) is next.
   The heap check in `Build.ps1` is now 111 468. `fm1_device_recovery()` exists in the SDK, undocumented and not used (it may enter the loader; try it in fm1-emu first, never first on the FM-1).
 
 ## Not done, in the order I would do it
