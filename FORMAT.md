@@ -76,6 +76,10 @@ The decoder is `fm1_sea_decode`; `index.html` has the encoder (`seaEncode`, bit-
 > has read the marking on the unit this repository is tried on, and one source disagrees, so it is not settled; but until a unit with SDRAM is
 > found, read the rest of this section as a proposal for AC7911BA/BB hardware. On the FM-1 the room is the 466 944 bytes of flash and about
 > 514 KB of SRAM, and "unpack once into SDRAM" has nowhere to go.
+>
+> **Measured 2026-11-08:** the info page's SDRAM test (reads and writes at `0x04000000`) restarted the FM-1: nothing answers there. With
+> `ENABLE_SDRAM` at 0 in the boot configuration that does not fully rule out an SDRAM that is switched off, but it agrees with the B8 marking.
+> The test is removed from the firmware. The live cache (below) decodes into SRAM instead, and plays on the FM-1.
 
 Nothing in the converter, the player or `fm1b_bind()` reads this yet; it is the format a bank would have if the FM-1's SDRAM (the AC7911BA
 has 2 MB, the BB 8 MB, in the package; the AC7911B datasheet, "Package Type Specification") were used to hold the sound set unpacked. The flash
@@ -274,9 +278,9 @@ On the FM-1, in this order, and stop at the first step that fails:
 - Step 5 is built as the info page's SDRAM test (REC, then SAVE twice; `fm1_open/app/sdram_test.c`, `FM1_TEST.md` F). It checks the data
   bus, the address bus (which also gives the size), every cell with a value of its own and with its inverse, and the inverse again after
   3 s, and shows the verdict and the details. `test_sdram.js` runs that code against a model with faults (stuck and shorted data and
-  address lines, nothing there, a bus that holds the last value, a stuck cell, no refresh): 21 checks. It has not been run on a device.
-  The window it tests, `0x04000000` and up to 8 MB, is where JieLi's SDK puts the SDRAM. With the SDRAM off in the boot configuration it
-  is expected to fail, or to restart the FM-1.
+  address lines, nothing there, a bus that holds the last value, a stuck cell, no refresh): 21 checks. The window it tests, `0x04000000` and
+  up to 8 MB, is where JieLi's SDK puts the SDRAM. **Run on the FM-1 on 2026-11-08: it restarted the device (nothing answers there), and the
+  test, `sdram_test.c` and `test_sdram.js` were removed** (in git history before that date).
 - **Is there a flag that says whether this unit has the SDRAM?** None is documented. The datasheet calls the memory letter a different
   chip ("different packages or bindings"), which suggests bonding bits that software can read, but no document says which register or
   which bit. Three read-only registers are worth writing down for each unit, and the info page shows them before any test (the

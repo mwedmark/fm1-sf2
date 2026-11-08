@@ -122,72 +122,13 @@ gränsen. Kanalsidan visar samma CPU-värden på näst sista raden. Skriv gärna
 Täta ackord håller limitern under full skala (topp 0,88 i emulatorn). Hörs ändå distorsion i E3 och E4, notera det: det är nivån och inte CPU:n.
 Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v_32k.fwsc` och upprepa E1-E5 (banken ligger kvar).
 
-## F. SDRAM-test (infosidan, SAVE två gånger)
+## F. SDRAM-test (borttaget 2026-11-08)
 
-**OBS (2026-11-08): troligen finns inget SDRAM att testa på en FM-1.** Offentliga öppningar av FM-1 (aroum, lunar-modulator, modd, cyma-1; foton av minst tre
-enheter) läser chippets markering som `...-11B8`, och enligt databladets typkod är det en **AC7911B8**: 1 MB flash i kapseln, inget SDRAM (`A` och `B` är
-SDRAM-varianterna). Det stämmer med att FM-1 startar från en flash i kapseln och att tillverkarens konfiguration har SDRAM avstängt. En källa säger BA, men visar
-själv markeringen `11B8`. Din egen enhets markering har ingen läst. Därför: **kör inte SDRAM-testet (F1–F7) på din enda enhet utan skäl**. Det kan starta om FM-1 och kan
-inte ge något annat än "inget svar" om minnet inte finns. ID-raden (F0) är ofarlig (stock-firmwaren läser samma register) och behöver ingen skruvmejsel: den kan jämföras
-senare mot en enhet som har SDRAM. Se FORMAT.md, "What is known about the SDRAM so far".
-
-Bakgrund: AC7911BA/BB har 2 respektive 8 MB SDRAM i kapseln enligt databladet, men M-VAVE:s firmware (och bootkonfigurationen i det här
-repot, `fm1_open/sdk/tools/pack/boot-config.bin`) har `ENABLE_SDRAM` och `SDRAM_SIZE` på 0. **Med den konfigurationen förväntas testet
-misslyckas, och det visar inte att kortet saknar SDRAM**, bara att minnet inte är påslaget. Testet säger bara något om minnet slagits på i
-bootkonfigurationen, och det har inte gjorts. Värdena finns nu från JieLis egen SDK (se FORMAT.md, "What is known about the SDRAM so far"):
-`ENABLE_SDRAM=1` och `SDRAM_SIZE=2M` (BA) eller `8M` (BB), allt annat som i dag; men hur `2M` lagras vet vi inte säkert, och vad
-bootladdaren gör om dess SDRAM-test misslyckas vet vi inte. En felaktig bootkonfiguration kan hindra FM-1 från att starta, och reverse engineering-arbetet
-(AL-255/FM-1-RE) hittar ingen bevisad återställning från ROM: ändra den **inte** på enda enheten. Testet skriver till minnet i ett fönster på upp till 8 MB från
-`0x04000000` (där JieLis SDK lägger SDRAM; adressstegen skriver också till adresser utspridda över hela fönstret). Om adressen inte är mappad kan FM-1 starta om; ha därför A (originalfirmware och återställning) till hands först.
-
-| # | Steg | Resultat |
-| --- | --- | --- |
-| F0 | Tryck REC (infosidan) och skriv ned raden `ID ........ SDR ........ PSR ........` under SDRAM-raden, **innan** något test. Det är chippets eget ID-register (`0x10200`) och första registret i SDRAM- och PSRAM-kontrollern (`0x40400`, `0x40500`); stock-firmwaren läser dem också vid varje start. Vad bitarna betyder för SDRAM är inte dokumenterat: värdena kan bara jämföras mellan enheter (BA, BB, chip utan SDRAM). | |
-| F1 | Längst ned står `SDRAM  NOT TESTED  (SAVE TWICE)`. | |
-| F2 | Tryck SAVE **en** gång: `SDRAM  PRESS SAVE AGAIN TO START` och `NO SDRAM CAN RESTART THE FM-1`. Vänta 5 s: det går tillbaka till det som stod. | |
-| F3 | Tryck SAVE **två** gånger inom 5 s. Raden visar fasen och procent: `DATA BUS`, `ADDRESS BUS`, `FILL`, `CHECK`, `CHECK INVERSE`, `WAIT` (3 s), `CHECK LATE`. Noteras: hur lång tid hela testet tar. | |
-| F4 | Under testet: håll en tangent. Ljudet ska gå på utan knaster, skärmen ska uppdateras, och CPU-raden på programsidan (REC tillbaka) ska inte gå upp märkbart. Noteras: ljud och CPU. | |
-| F5 | Utfallet: `PASS` och storlek (2 eller 8 MB), eller `FAIL DATA BUS`, `FAIL ADDRESS BUS`, `FAIL CELLS`, `FAIL RETENTION`, `TOO SMALL`. Andra raden har detaljerna (felaktiga databitar eller adresslinjer som hex, antal fel, första ordet). Skriv ned allt. | |
-| F6 | Startade FM-1 om eller hängde sig? Om ja: under vilken fas (om raden hann visas) och efter hur lång tid? | |
-| F7 | Kör om efter en omstart. Samma resultat varje gång? | |
-
-För varje enhet (i RUNNING.md avsnitt 5): chippets markering (`AC7911BA` eller `BB`, en bild), firmware, utfall i F5, om F6 hände.
-
-### Jämförelse mellan enheter (ID-raden i F0)
-
-Syftet är att se **vilka bitar** i `ID`, `SDR` och `PSR` som skiljer sig mellan en enhet med SDRAM (BA eller BB) och en utan. Ett enskilt värde säger ingenting
-om SDRAM: ingen källa säger vilken bit som betyder "har SDRAM". Bara skillnader mellan enheter kan peka på en kandidat, och bara om chippmarkeringen på varje enhet
-är känd. Skriv hexvärdena exakt som de står (8 siffror) och läs raden **två gånger**, med en omstart emellan: ändras ett värde på samma enhet mellan starterna är det
-tillstånd och inte en egenskap, och de bitarna ska inte användas.
-
-| Enhet | Chippmarkering (bild) | Firmware | `ID` | `SDR` | `PSR` | Samma efter omstart? | F5: utfall och storlek | F6: omstart eller hängning | Datum |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| *Förväntat enligt stock-koden* | | | `0x6F00` (kisel-kontroll i `audio_dac_open`, enligt AL-255/FM-1-RE; **inte verifierat** på din enhet) | | | | | | |
-| 1 (din) | | | | | | | | | |
-| 2 | | | | | | | | | |
-| 3 | | | | | | | | | |
-| 4 | | | | | | | | | |
-
-Räkna ut vilka bitar som skiljer mellan två rader genom att XOR:a värdena, ett register i taget (bit 0 är den lägsta siffran). Exemplet använder påhittade
-värden; byt ut dem mot dina:
-
-```bash
-python3 -c "a,b=0x00006F00,0x00006F08; print(f'{a^b:08X}', bin(a^b))"
-```
-
-| Jämförelse (rad A mot rad B) | Bitar som skiljer i `ID` | i `SDR` | i `PSR` | Samma på två enheter av samma sort? | Slutsats |
-| --- | --- | --- | --- | --- | --- |
-| BA mot BB | | | | | |
-| BA eller BB mot ett chip utan SDRAM | | | | | |
-| Två enheter med samma markering | | | | (ska vara tomt) | |
-
-Hur du läser den:
-
-- Börja med den sista raden: två enheter med **samma** markering ska ge noll skillnad. Om de ger skillnad är registret inte en egenskap hos chippet och kan inte användas.
-- En bit är en kandidat för "har SDRAM" bara om den skiljer mellan en enhet med SDRAM och en utan, **och** är lika på alla enheter av samma sort. Stock-koden läser bit 11 i `SDR` och bit 0 i `PSR`
-  som "chip straps": börja där, men det är en gissning att de har med SDRAM att göra.
-- Med bara din enhet går det inte att dra någon slutsats: skriv ned värdena och spara dem tills du har en andra enhet att jämföra med.
-- Ingen kandidat ersätter chippmarkeringen eller SDRAM-testet i F1–F7. Den är en genväg att kolla före ett test, inte ett bevis.
+**Kört på FM-1 den 2026-11-08** (`sf2player_sdram.fwsc`): SAVE två gånger på infosidan startade om FM-1. Adressen `0x04000000`, där
+JieLis SDK lägger SDRAM, svarar inte. Det stämmer med att chippet är en AC7911B8 utan SDRAM (FORMAT.md, "What is known about the SDRAM
+so far"). Det skiljer inte helt "inget SDRAM" från "SDRAM avstängt i bootkonfigurationen" (`ENABLE_SDRAM` 0); bara chippets märkning
+gör det. Testet, `sdram_test.c` och `test_sdram.js` är borttagna; SAVE nollställer nu bara räknaren för tappade noter. Det som finns är
+de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
 ## G. Avsluta
 
@@ -201,5 +142,4 @@ Hur du läser den:
 - Att workbenchen godtar paketet och att vi kan flasha tillbaka (A).
 - Bankuppladdningen hela vägen (B): emulatorn tar bara MIDI via DIN och svaren försvinner.
 - Skärmen (C, E): emulatorn ritar inte LCD:n.
-- SDRAM (F): om kortet har något och vad testet säger om det. Själva testet är körd mot en modell med fel (`node test_sdram.js`), inte mot minne.
 - Hur mycket flash-läsningar kostar på riktig hårdvara; emulatorn räknar troligen inte med väntetid.

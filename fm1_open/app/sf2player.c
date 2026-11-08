@@ -14,7 +14,6 @@
 #endif
 #include "sf2_upload.h"
 #include "sf2fx.h"
-#include "sdram_test.h"
 #include "sf2out.h"
 #include "song.h"
 #include "tuning_hook.h"
@@ -322,121 +321,6 @@ static char *put_compile_date(char *d)
                              date[4] == ' ' ? '0' : date[4], date[5], ' ', time[0], time[1], ':', time[3], time[4], 0});
     return d;
 }
-#if FM1B_BFP8_ONLY
-/* The build with the live cache has no room for the SDRAM test (the image is at the layout's limit) and the FM-1 most likely has no SDRAM: the page and the SAVE key do without it. */
-static void sdram_button(void) {}
-static void sdram_poll(void) {}
-static void sdram_lines(void) {}
-static int sdram_idle(void) { return 1; }
-#else
-/* ---- the SDRAM test (the info page: SAVE twice) --------------------------------------------------------------------
- * The AC7911BA and BB carry 2 and 8 MB of SDRAM in the package (AC7911B datasheet, "Package Type Specification"), but the firmware's boot
- * configuration has ENABLE_SDRAM and SDRAM_SIZE at 0 and nothing here uses the memory. This finds out whether it answers, and how much:
- * sdram_test.c, a slice every control cycle, so the sound and the screen go on. With the SDRAM off it is expected to fail, or, if the
- * address is not mapped, the FM-1 may restart: that is why it takes SAVE twice. It writes to the whole window of 8 MB. */
-enum { SDRAM_BASE = 0x04000000, SDRAM_WINDOW_WORDS = 1 << 21, SDRAM_REQUIRED_WORDS = 1 << 19, SDRAM_HOLD_MS = 3000, SDRAM_SLICE = 4096, SDRAM_ARM_MS = 5000 };
-enum { TEST_NEVER, TEST_ARMED, TEST_RUNNING, TEST_DONE };
-static unsigned sdram_state;
-static uint32_t sdram_armed_at;
-static struct sdram_test sdram;
-static int sdram_idle(void) { return sdram_state == TEST_NEVER; }   /* the info page's bottom lines are the song's until SAVE arms the test */
-static uint32_t sdram_read(void *context, uint32_t word) { (void)context; return ((volatile uint32_t *)(uintptr_t)SDRAM_BASE)[word]; }
-static void sdram_write(void *context, uint32_t word, uint32_t value) { (void)context; ((volatile uint32_t *)(uintptr_t)SDRAM_BASE)[word] = value; }
-static void sdram_button(void)                            /* SAVE on the info page: the first press asks, the second within 5 s starts */
-{
-    uint32_t now = fm1_millis();
-    if (sdram_state == TEST_RUNNING)
-        return;
-    if (sdram_state == TEST_ARMED && now - sdram_armed_at < SDRAM_ARM_MS) {
-        struct sdram_ops ops = {sdram_read, sdram_write, 0};
-        sdram_test_start(&sdram, &ops, SDRAM_WINDOW_WORDS, SDRAM_REQUIRED_WORDS, SDRAM_HOLD_MS);
-        sdram_state = TEST_RUNNING;
-        return;
-    }
-    sdram_state = TEST_ARMED;
-    sdram_armed_at = now;
-}
-static void sdram_poll(void)                              /* every control cycle */
-{
-    uint32_t now = fm1_millis();
-    if (sdram_state == TEST_RUNNING) {
-        if (!sdram_test_step(&sdram, now, SDRAM_SLICE))
-            sdram_state = TEST_DONE;
-    } else if (sdram_state == TEST_ARMED && now - sdram_armed_at >= SDRAM_ARM_MS)
-        sdram_state = sdram.phase == SDRAM_DONE ? TEST_DONE : TEST_NEVER;   /* nobody pressed again: back to what was shown */
-}
-/* What the chip says about itself, read once when the info page is first shown, before any test: JL_INTEST->CHIP_ID (0x10200), the
- * SDRAM controller's CON0 (0x40400) and the PSRAM controller's CON (0x40500), the addresses of JieLi's WL82.h. M-VAVE's own firmware
- * reads all three (AL-255/FM-1-RE, docs/io/01-boot.md 2.1 and 03-audio-dac.md: the latter two as "chip straps" at every start, the first
- * as a silicon check that gives 0x6F00), so this does nothing the stock firmware does not. What the bits mean for the SDRAM is NOT
- * documented; the line is there to write the values down for each unit and compare a BA, a BB and a chip with no SDRAM. */
-static uint32_t hw_id[3];
-static unsigned hw_id_read;
-static uint32_t sfr_read(uint32_t address) { return *(volatile uint32_t *)(uintptr_t)address; }
-static char *put_size(char *d, uint32_t words)
-{
-    uint32_t bytes = words * 4U;
-    d = put_number(d, (int32_t)(bytes >= 1048576U ? bytes >> 20 : bytes >> 10), 0);
-    return put_text(d, bytes >= 1048576U ? " MB" : " KB");
-}
-static void sdram_lines(void)
-{
-    char line[LINE_CHARS + 1], *d;
-    if (sdram_state == TEST_ARMED) {
-        line_show(13, 206, "SDRAM  PRESS SAVE AGAIN TO START", 1, ORANGE);
-        line_show(14, 217, "NO SDRAM CAN RESTART THE FM-1", 1, GREY);
-    } else if (sdram_state == TEST_RUNNING) {
-        uint32_t now = fm1_millis();
-        d = put_text(line, "SDRAM  ");
-        d = put_text(d, sdram_test_phase_name(sdram.phase));
-        *d++ = ' ';
-        d = put_number(d, (int32_t)sdram_test_percent(&sdram, now), 0);
-        d = put_text(d, "%");
-        *d = 0;
-        line_show(13, 206, line, 1, CYAN);
-        d = put_text(line, "SIZE FOUND ");
-        if (sdram.size_words) d = put_size(d, sdram.size_words);
-        else d = put_text(d, "-");
-        *d = 0;
-        line_show(14, 217, line, 1, GREY);
-    } else if (sdram_state == TEST_DONE) {
-        d = put_text(put_text(line, "SDRAM  "), sdram_test_verdict_name(sdram.verdict));
-        if (sdram.verdict == SDRAM_PASS || sdram.verdict == SDRAM_TOO_SMALL) {
-            *d++ = ' ';
-            *d++ = ' ';
-            d = put_size(d, sdram.size_words);
-        }
-        *d = 0;
-        line_show(13, 206, line, 1, sdram.verdict == SDRAM_PASS ? GREEN : ORANGE);
-        if (sdram.verdict == SDRAM_FAIL_DATA_BUS)
-            d = put_hex(put_text(line, "BAD DATA BITS "), sdram.bit_mask);
-        else if (sdram.verdict == SDRAM_FAIL_ADDRESS_BUS)
-            d = put_hex(put_text(put_text(line, "BAD ADDRESS LINES "), "#"), sdram.address_mask);
-        else if (sdram.verdict == SDRAM_FAIL_CELLS || sdram.verdict == SDRAM_FAIL_RETENTION) {
-            d = put_number(put_text(line, "ERRORS "), (int32_t)sdram.errors, 0);
-            d = put_number(put_text(d, "  FIRST WORD "), (int32_t)sdram.first_error, 0);
-        } else {
-            d = put_text(line, "NO ERRORS  3 S WAIT PASSED");
-            if (sdram.verdict == SDRAM_TOO_SMALL) d = put_text(line, "NO ERRORS  BUT UNDER 2 MB");
-        }
-        *d = 0;
-        line_show(14, 217, line, 1, GREY);
-    } else {
-        line_show(13, 206, "SDRAM  NOT TESTED  (SAVE TWICE)", 1, GREY);
-        if (!hw_id_read) {
-            hw_id[0] = sfr_read(0x10200U);
-            hw_id[1] = sfr_read(0x40400U);
-            hw_id[2] = sfr_read(0x40500U);
-            hw_id_read = 1;
-        }
-        d = put_hex(put_text(line, "ID "), hw_id[0]);
-        d = put_hex(put_text(d, " SDR "), hw_id[1]);
-        d = put_hex(put_text(d, " PSR "), hw_id[2]);
-        *d = 0;
-        line_show(14, 217, line, 1, GREY);
-    }
-}
-#endif
 static void info_update(void)
 {
     char line[LINE_CHARS + 1], *d;
@@ -479,16 +363,13 @@ static void info_update(void)
     }
     upload_line();
 #if FM1_MIDIPLAY
-    if (sdram_idle()) {                                       /* lines 13 and 14: the song until SAVE starts the SDRAM test */
-        song_line(13, 206);
-        d = put_text(line, "FREE RAM ");
-        d = put_number(d, (int32_t)(info_free_ram / 1024U), 0);
-        d = put_text(d, " KB FOR A SONG");
-        *d = 0;
-        line_show(14, 217, line, 1, GREY);
-    } else
+    song_line(13, 206);
+    d = put_text(line, "FREE RAM ");
+    d = put_number(d, (int32_t)(info_free_ram / 1024U), 0);
+    d = put_text(d, " KB FOR A SONG");
+    *d = 0;
+    line_show(14, 217, line, 1, GREY);
 #endif
-    sdram_lines();
     line_show(11, 228, "REC BACK", 1, GREY);
 }
 static void page_clear(void)
@@ -883,7 +764,6 @@ void groove_screen_control(void)
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
     if (safe_start())
         return;
-    sdram_poll();                                            /* the SDRAM test of the info page, one slice */
 #if FM1B_PACKED
     fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
 #endif
@@ -953,12 +833,8 @@ void groove_screen_control(void)
         channels = page == PAGE_CHANNELS;
         page_clear();
     }
-    if (pressed & (1U << BUTTON_SAVE)) {                      /* SAVE: on the info page the SDRAM test (twice), else count the dropped notes from zero */
-        if (page == PAGE_INFO)
-            sdram_button();
-        else
-            fm1b_drops_reset();
-    }
+    if (pressed & (1U << BUTTON_SAVE))                        /* SAVE: count the dropped notes from zero */
+        fm1b_drops_reset();
     if (pressed & (1U << BUTTON_REC)) {                       /* REC: the info page, and back */
         if (page == PAGE_INFO)
             page = info_return;

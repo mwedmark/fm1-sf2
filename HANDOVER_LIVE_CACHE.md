@@ -79,7 +79,7 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
 
 ## Facts about the hardware that the design rests on
 
-The FM-1 is an **AC7911B8**: 1 MB flash in the package, **no SDRAM** (public teardowns; the info page's SDRAM test was removed from the `-LiveCache` build but is in the normal one). SRAM is what there is. See `FORMAT.md`, "Proposal: packed sample data" and the update box.
+The FM-1 is an **AC7911B8**: 1 MB flash in the package, **no SDRAM** (measured 2026-11-08: the SDRAM test restarted the FM-1, nothing answers at 0x04000000; the test is now removed from every build; public teardowns; the info page's SDRAM test was removed from the `-LiveCache` build but is in the normal one). SRAM is what there is. See `FORMAT.md`, "Proposal: packed sample data" and the update box.
 
 ## Working notes
 

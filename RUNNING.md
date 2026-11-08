@@ -30,7 +30,7 @@ copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prin
 `FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
 
 **With the live cache** (2026-11-08, **not built yet**; `-LiveCache` on `build_fw.ps1` or `sdk\Build.ps1`): plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
-The image is at the layout's limit, so this build also plays BFP8 banks only (`FM1B_BFP8_ONLY`: one voice loop in place of ten; the packed bank is BFP8 after decoding; SEA, 8-, 12- and 16-bit banks are refused) and leaves out the SDRAM test of the info page.
+The image is at the layout's limit, so this build also plays BFP8 banks only (`FM1B_BFP8_ONLY`: one voice loop in place of ten; the packed bank is BFP8 after decoding; SEA, 8-, 12- and 16-bit banks are refused). (The SDRAM test of the info page is gone from every build since 2026-11-08: on the FM-1 it restarted the device, there is no SDRAM.)
 It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 96, 16 to 400) in the SRAM, which the link takes from the
 runtime heap; `-CacheFrames` (default 2) is the MP3 frames (1152 samples) decoded in one control cycle. The build prints the heap that is left (`runtime_heap_bytes` in `firmware-report.json`), and stops under 49 152
 bytes, which is how the free SRAM is found: raise `-CacheKB` until it stops. Without the switch the firmware is what it was. What to look at in the first build, none of it known:
@@ -90,7 +90,6 @@ node test_lfo.js              # the zone's LFOs (vibrato, tremolo, delay) and ke
 node test_filter.js           # the low-pass filter and the modulation envelope against the same filter in floating point; 1mgm.sf2
 node test_layers.js           # stacked layers: every zone that covers a key sounds; 1mgm.sf2 at 32 kHz, BFP8
 node test_dropped_presets.js  # the zones and sounds of presets the bank map drops are not written (a bank made by hand, no font)
-node test_sdram.js            # the SDRAM test of the info page (sdram_test.c) against a model of the memory with faults; any clang for wasm32
 python3 test_sdram_config.py  # make_sdram_config.py: boot-config.bin read as its entries, the copy with the SDRAM on differs in two keys only (python3, no packages)
 node pack_bank.js in.fm1b out.fm1b          # the live cache's packed bank from a BFP8 bank (ffmpeg); node test_pack_bank.js [font] unpacks it again with the C decoder
 node test_packed_engine.js [font]            # the engine (fm1b.c, FM1B_PACKED) playing a packed bank against the plain engine, bit for bit; ffmpeg and any clang for wasm32 (1 min with the 4 MB font)
