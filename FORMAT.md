@@ -220,16 +220,43 @@ On the FM-1, in this order, and stop at the first step that fails:
   B 4M×16 SDRAM (8 MB), C and D PSRAM, 2 to 7 flash, 0 none. Which letter the FM-1's chip has is not verified, and the FM-1 has an
   external flash either way.
 - The boot configuration, in M-VAVE's `FM-1_015.fwsc` and in this repo's `sdk/tools/pack/boot-config.bin` (`Package.cs` takes it as 721
-  bytes and works the checksums out), has `ENABLE_SDRAM`, `SDRAM_SIZE`, `SDRAM_MODE` and `SDRAM_COLUM` at 0, and the timing keys filled
-  in (`SDRAM_CL` 2, `TRFC` 60, `TRC` 55, `TRP` and `TRCD` 18, refresh 32 and 4096). So M-VAVE's firmware does not use the memory; that
-  says nothing about whether the chip has it. Turning it on means setting these keys in `boot-config.bin`; the values for a 1M×16 part are
-  not known, and a wrong boot configuration may stop the FM-1 booting, which only M-VAVE's recovery would undo. Not done.
+  bytes and works the checksums out), has `ENABLE_SDRAM` and `SDRAM_SIZE` at 0. The boot loader (the SPL, `uboot.boot`) has the names of
+  these keys among its strings, so it is what reads them, and with `ENABLE_SDRAM` set it sets the SDRAM up before the application starts
+  (inferred, not traced). M-VAVE's firmware does not use the memory; that says nothing about whether the chip has it. JieLi's own generator of this file for the AC791N (`cpu/wl82/tools/isd_config_rule.c` in the AC79 SDK) writes the same
+  file for a build without SDRAM (`CONFIG_NO_SDRAM_ENABLE`: `ENABLE_SDRAM=0`, `SDRAM_SIZE=0M`) and for a build with it, and the two differ
+  in these keys only:
+
+  | Key | M-VAVE's FM-1 (and `boot-config.bin`) | With SDRAM, system clock 320 MHz (JieLi's rule) |
+  | --- | --- | --- |
+  | `ENABLE_SDRAM` | 0 | **1** |
+  | `SDRAM_SIZE` | 0 | **2M** (AC7911BA, 1M×16) or **8M** (AC7911BB, 4M×16) |
+  | `SDRAM_MODE` / `SDRAM_COLUM` | 0 / 0 (SDR SDRAM) | the same |
+  | `SDRAM_REFRESH_TIME` / `_CYCLES` | 32 / 4096 | the same |
+  | `SDRAM_PLL3_EN`, `_NOUSB_EN` | 0, 0 | the same |
+  | `SDRAM_CL`, `SDRAM_DQ_DLY_TRM` | 2, 4 | the same: CL 2 is a 192 MHz SDRAM clock at 320 MHz |
+  | `SDRAM_WLCNT`, `_D_DLY`, `_RLCNT`, `_Q_DLY`, `_PHASE` | 3, 1, 1, 1, 3 | the same (`_D_DLY` 1 is "test the SDRAM" in the SDK's comment) |
+  | `SDRAM_TRFC`, `TRP`, `TRCD`, `TRRD`, `TWTR`, `TRTW`, `TWR`, `TRC` | 60, 18, 18, 12, 20, 60, 60, 55 | the same |
+  | `SDRAM_DQS_DLY_TRM`, `UDQS`, `LDQS`, `DQ_DLY_INNER` | 0, 10, 10, 0 | the same |
+
+  M-VAVE's FM-1 is, in other words, JieLi's standard AC791N configuration with the SDRAM switched off, which is what a build for a chip
+  without SDRAM gets too: it fits a chip without SDRAM as well as a choice not to use one. Things around it that the SDK shows: the
+  SDRAM window starts at `0x4000000` (`cpu/wl82/sdk_ld_sdram.c`: `sdram ORIGIN = 0x4000000, LENGTH = SDRAM_SIZE`, heap end at
+  `0x4000000 + SDRAM_SIZE - 32`; the 0x120 of `0x4000120` is the stock build's overlay window); the entry stays `0x2000120` with the code in
+  the flash and the SDRAM for data (`CONFIG_SFC_ENABLE`); and the clock keys only apply at a system clock of 320 MHz or at most 240 MHz,
+  while `boot-config.bin` has 320 MHz, M-VAVE's package 360 MHz, where the SDK says the SDRAM clock becomes `SYS_CLK * 1.5 / 2`, 270 MHz.
+  Not known: how the tool stores `2M` (the numbers in the file are 32-bit values, `24MHz` is 24 000 000 and `4K` is 4096, so 2 097 152 is
+  the guess), and what the boot loader does when its SDRAM test fails (stop, or go on without). A wrong boot configuration may stop the
+  FM-1 booting; [AL-255's reverse engineering of the FM-1](https://github.com/AL-255/FM-1-RE/blob/main/TODO_aug2.md) finds no proven
+  recovery from the ROM and says not to flash non-stock images to a device that cannot be recovered some other way. Sources: JieLi's AC79
+  SDK as mirrored in [0x0fe/7911b](https://github.com/0x0fe/7911b) (`cpu/wl82/tools/isd_config_rule.c`, the README: 578 KB of SRAM and 2 or 8 MB of
+  SDRAM in some packages) and [jeffreywugz/fw-AC79_AIoT_SDK](https://github.com/jeffreywugz/fw-AC79_AIoT_SDK) (`cpu/wl82/tools/isd_config.ini`,
+  `cpu/wl82/sdk_ld_sdram.c`). `boot-config.bin` is not changed.
 - Step 5 is built as the info page's SDRAM test (REC, then SAVE twice; `fm1_open/app/sdram_test.c`, `FM1_TEST.md` F). It checks the data
   bus, the address bus (which also gives the size), every cell with a value of its own and with its inverse, and the inverse again after
   3 s, and shows the verdict and the details. `test_sdram.js` runs that code against a model with faults (stuck and shorted data and
-  address lines, nothing there, a bus that holds the last value, a stuck cell, no refresh): 21 checks. It has not been run on a device,
-  and the window it tests (`0x04000000`, 8 MB) is the linker's SDRAM region without its 0x120-byte offset, not a verified address.
-  With the SDRAM off in the boot configuration it is expected to fail, or to restart the FM-1.
+  address lines, nothing there, a bus that holds the last value, a stuck cell, no refresh): 21 checks. It has not been run on a device.
+  The window it tests, `0x04000000` and up to 8 MB, is where JieLi's SDK puts the SDRAM. With the SDRAM off in the boot configuration it
+  is expected to fail, or to restart the FM-1.
 
 The firmware is flashed in step 5 and after, and `FIRMWARE.md` has not been run on the device even once, so the stock firmware
 (`sdk/firmware/FM-1_015.fwsc`, as `FIRMWARE.md` says) and M-VAVE's recovery have to be at hand first. The bank itself goes in over SysEx

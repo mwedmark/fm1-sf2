@@ -122,8 +122,11 @@ Om det knastrar eller gränsen ofta sjunker under 32: flasha `dist\sf2player_24v
 Bakgrund: AC7911BA/BB har 2 respektive 8 MB SDRAM i kapseln enligt databladet, men M-VAVE:s firmware (och bootkonfigurationen i det här
 repot, `fm1_open/sdk/tools/pack/boot-config.bin`) har `ENABLE_SDRAM` och `SDRAM_SIZE` på 0. **Med den konfigurationen förväntas testet
 misslyckas, och det visar inte att kortet saknar SDRAM**, bara att minnet inte är påslaget. Testet säger bara något om minnet slagits på i
-bootkonfigurationen, och det har inte gjorts (värdena för en 1M×16-krets är inte kända). Testet skriver till minnet i ett fönster på upp till 8 MB från
-`0x04000000` (adressstegen också till adresser utspridda över hela fönstret). Om adressen inte är mappad kan FM-1 starta om; ha därför A (originalfirmware och återställning) till hands först.
+bootkonfigurationen, och det har inte gjorts. Värdena finns nu från JieLis egen SDK (se FORMAT.md, "What is known about the SDRAM so far"):
+`ENABLE_SDRAM=1` och `SDRAM_SIZE=2M` (BA) eller `8M` (BB), allt annat som i dag; men hur `2M` lagras vet vi inte säkert, och vad
+bootladdaren gör om dess SDRAM-test misslyckas vet vi inte. En felaktig bootkonfiguration kan hindra FM-1 från att starta, och reverse engineering-arbetet
+(AL-255/FM-1-RE) hittar ingen bevisad återställning från ROM: ändra den **inte** på enda enheten. Testet skriver till minnet i ett fönster på upp till 8 MB från
+`0x04000000` (där JieLis SDK lägger SDRAM; adressstegen skriver också till adresser utspridda över hela fönstret). Om adressen inte är mappad kan FM-1 starta om; ha därför A (originalfirmware och återställning) till hands först.
 
 | # | Steg | Resultat |
 | --- | --- | --- |
