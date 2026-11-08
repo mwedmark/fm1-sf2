@@ -422,8 +422,21 @@ five broken versions of the C is caught):
   to silence unless 4 frames of lead-in are decoded first (with 2, 41 of the 165 sounds of `1mgm.sf2` came out silent). Off, one frame of lead-in is enough, every sound decodes, and the quality is
   the same to a quarter of a dB (the whole stream 13.59 dB against 13.36 on, `1mgm.sf2`). The rest of the design assumes this.
 - The stream is 8 014 bytes for each second of audio for the 4 MB font's 448 sounds (323 181 bytes), as budgeted.
-- **Not written:** the converter's writer of the packed bank (the pack table above, the stream, the index of each sound's byte offset and the samples to throw away) and the engine's use of it (a
-  zone points at a cache block or at flash, a voice pins its sound and waits for its first groups). Not tried: the build with JieLi's compiler.
+- **The converter's writer, `pack_bank.js`** (`node pack_bank.js in.fm1b out.fm1b`; needs ffmpeg with libmp3lame; `node test_pack_bank.js`, 8 checks, unpacks every sound of a packed bank with the C
+  decoder from the file alone). It takes a BFP8 bank (`make_bank.js bfp8`) and writes version 2, flags `0x18`: the header grows to 92 bytes (the pack fields), everything after it moves by 12 or 16
+  bytes, the zones' sample offsets move with it and still address the sound as in the unpacked bank; the sample data is the one MP3 stream (64 kbit/s, reservoir off, 288-byte frames from byte 0)
+  and then the lossless sounds, and the pack table ends the file. **One entry is one sound** (the entry fields above, with these meanings): unpacked offset and exact BFP8 size (entries need not touch: up
+  to 3 bytes of alignment lie between them); codec 2: the byte where decoding starts (the frame before the one the sound's first sample is in), the bytes to the end of the frame with its last sample,
+  `delay` = samples of that decode to throw away (the codec's own delay is in it, 1105 + the sound's place in the stream; at most 2303), `xfade` = 256 where the sound loops from 64 or later; codec 0: the
+  BFP8 stored. Lossless: sounds whose loop is under 16 samples (or whose zones disagree about the loop), then the sounds under 12 dB, the worst per byte first, while the file stays within the flash
+  minus 3 KB. `1mgm.sf2`: 464 636 bytes as BFP8, 241 520 packed with 120 sounds as MP3 (mean 16.9 dB against the bank's own BFP8) and 45 lossless; the 4 MB font's 483 sounds (all 138 presets) come to 516 560, 50 KB over
+  (its 128 melodic presets and kit 0, which is what the calculation above used, are not made by `make_bank.js` yet).
+  Two things the test found: **ffmpeg writes an ID3 tag** in front of the stream (45 bytes) unless `-id3v2_version 0`, which moves every frame off its 288-byte grid (the decoder resyncs, so
+  `test_sound_cache.js` passed anyway; it now refuses such a stream), and **the decoder must be given the stream up to the end of the last MP3 entry, not the sample data to the end of the file**: minimp3
+  takes a frame only when the next ones match or the buffer ends, so BFP8 bytes after the stream make the last frames fail. The engine takes `bytes` from the entries (the largest packed offset + packed
+  bytes of a codec 2 entry). The encoder also needs 3 frames of silence after the last sound, or the last sounds have no samples left.
+- **Not written:** the engine's use of it (a zone points at a cache block or at flash, a voice pins its sound and waits for its first groups) and the converter page (the browser has no MP3 encoder
+  here; the page makes the BFP8 bank that `pack_bank.js` takes). Not tried: the build with JieLi's compiler.
 
 What this does not show, and what it needs:
 

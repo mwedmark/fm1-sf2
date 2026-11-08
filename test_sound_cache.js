@@ -38,8 +38,9 @@ for (const z of bank.zones) if (!soundId.has(z.sample)) { soundId.set(z.sample, 
 const offsets = []; let total = 0; for (const s of sounds) { offsets.push(total); total += s.pcm.length; }
 const all = new Int16Array(total); sounds.forEach((s, i) => all.set(s.pcm, offsets[i]));
 const run = (args, input) => execFileSync('ffmpeg', ['-v', 'error', ...args], { input, maxBuffer: 1 << 28 });
-const stream = run(['-f', 's16le', '-ar', '32000', '-ac', '1', '-i', '-', '-c:a', 'libmp3lame', '-b:a', '64k', '-reservoir', '0', '-write_xing', '0', '-f', 'mp3', '-'], Buffer.from(all.buffer));
+const stream = run(['-f', 's16le', '-ar', '32000', '-ac', '1', '-i', '-', '-c:a', 'libmp3lame', '-b:a', '64k', '-reservoir', '0', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', '-'], Buffer.from(all.buffer));
 const ffmpegPcm = (() => { const d = run(['-f', 'mp3', '-i', '-', '-ar', '32000', '-f', 's16le', '-'], stream); return new Int16Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.length)); })();
+if (stream.length % 288 || stream[0] !== 0xff) throw new Error('the stream must be whole 288-byte frames from the first byte (ffmpeg writes an ID3 tag unless -id3v2_version 0)');
 const FRAME_BYTES = 288, FRAME = 1152, LEAD = 1, XFADE = 256;
 console.log(`${path.basename(fontFile)}: ${sounds.length} sounds, ${(total / 32000).toFixed(1)} s, MP3 stream ${stream.length} bytes (${(stream.length / (total / 32000)).toFixed(0)} per second)`);
 mem().set(stream, w.stream_ptr()); w.set_stream_bytes(stream.length);
