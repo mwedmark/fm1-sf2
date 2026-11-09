@@ -1,6 +1,7 @@
 # Builds the FM-1 firmware on a Windows runner (JieLi toolchain 2.5.3, as RUNNING.md section 1) and publishes the emulator page.
 #   plain       the default build
-#   live-cache  the -LiveCache build, the one that is close to the image's limit (the build stops if it does not fit)
+#   live-cache  the -LiveCache build, the one that is close to the image's limit (the build stops if it does not fit). -CacheKB 72:
+#               with 96 the runtime heap is 88 716 bytes and Build.ps1 stops under 111 468 (HANDOVER_LIVE_CACHE.md)
 # Every push and pull request builds both and uploads the .fwsc packages; main also deploys the emulator to GitHub Pages
 # (Settings > Pages > Source: GitHub Actions, once).
 name: firmware
@@ -25,7 +26,7 @@ jobs:
           - variant: plain
             flags: ''
           - variant: live-cache
-            flags: '-LiveCache -CacheKB 96 -CacheFrames 2'
+            flags: '-LiveCache -CacheKB 72 -CacheFrames 2'
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +59,7 @@ jobs:
         working-directory: fm1_open
         run: |
           $env:FM1_PI32_TOOLCHAIN = Join-Path $env:GITHUB_WORKSPACE 'jl-toolchain\pi32'
-          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN ${{ matrix.flags }} 2>&1 | Tee-Object -FilePath ../build.log
+          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN ${{ matrix.flags }} 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
           if (!$?) { throw 'The build failed.' }
 
       - name: Sizes
