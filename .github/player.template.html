@@ -100,6 +100,9 @@ $('bank').onchange = async e => {
   const f = e.target.files[0];
   if (!f) return;
   const bank = new Uint8Array(await f.arrayBuffer());
+  const magic = String.fromCharCode(...bank.subarray(0, 4)), version = bank.length > 5 ? bank[4] | bank[5] << 8 : 0;
+  if (magic !== 'FM1B') { status(f.name + ' is not an FM1B bank (it should start with FM1B)'); return; }
+  if (version !== 1) { status(f.name + ' is an MP3-packed bank (version ' + version + '); the emulator runs the plain firmware, which refuses it'); return; }
   const sectors = Math.ceil(bank.length / SECTOR);
   if (sectors > 256) { status('the emulator takes banks up to 1 MB; this one is ' + bank.length + ' bytes'); return; }
   const out = new Uint8Array(sectors * (4 + SECTOR)).fill(0xff), dv = new DataView(out.buffer);

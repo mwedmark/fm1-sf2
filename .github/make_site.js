@@ -36,6 +36,14 @@ async function get(url) {
     main = main.trimEnd() + '\nwindow.__midi = (bytes) => send({ type: "midi", bytes: Array.from(bytes) });   // local addition: the page plays MIDI into the DIN jack\n';
   fs.writeFileSync(mainPath, main);
 
+  // fm1-emu takes ?flash= only from http(s) addresses on its own origin (web/tryout.js sameOrigin). player.html hands it a blob: address
+  // of the bank the visitor chose; a blob: URL's origin is the page's own, so allow that scheme too (nothing leaves the page).
+  const tryPath = path.join(out, 'tryout.js');
+  const tryCode = fs.readFileSync(tryPath, 'utf8');
+  const allowed = tryCode.replace('/^https?:$/.test(url.protocol)', '/^(https?|blob):$/.test(url.protocol)');
+  if (allowed === tryCode) throw new Error('tryout.js changed upstream: the blob: patch no longer applies');
+  fs.writeFileSync(tryPath, allowed);
+
   // The catalog entry, with the version in the address.
   const catPath = path.join(out, 'firmwares.json');
   const cat = JSON.parse(fs.readFileSync(catPath, 'utf8'));
