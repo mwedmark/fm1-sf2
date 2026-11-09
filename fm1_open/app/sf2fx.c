@@ -25,10 +25,11 @@ static struct {
     int32_t damp[4];
 } fx;
 static uint32_t chorus_phase, quiet_blocks;
-/* Master levels, gain = level * 258 in Q15. They default to full: the channels' sends (fm1b, 30 and 20 by default) set how
- * much there is, so out of the box it sounds as the single global level of 30 and 20 did. */
-static volatile int32_t reverb_gain = 127 * 258, chorus_gain = 127 * 258;
-static volatile unsigned reverb_level = 127, chorus_level = 127;
+/* Master levels, gain = level * 258 in Q15. They default to 30 (reverb) and 30 (chorus), not full; a channel gets master x send
+ * (the channels' sends are fm1b's, 30 and 20 by default, MIDI CC 91 and CC 93). */
+enum { MASTER_REVERB = 30, MASTER_CHORUS = 30 };
+static volatile int32_t reverb_gain = MASTER_REVERB * 258, chorus_gain = MASTER_CHORUS * 258;
+static volatile unsigned reverb_level = MASTER_REVERB, chorus_level = MASTER_CHORUS;
 static volatile int32_t pan_left = 1024, pan_right = 1024;     /* gains of the dry signal, Q10 */
 static volatile unsigned pan_level = 64;
 

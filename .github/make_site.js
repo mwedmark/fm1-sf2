@@ -125,7 +125,7 @@ async function get(url) {
   fs.writeFileSync(path.join(out, 'index.html'), `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FM-1 SF2 player emulator</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:2em auto;padding:0 16px}code{background:#8882;padding:0 .3em}</style></head>
+<style>:root{--room:#18191b;--ink:#e9e6de;--dim:#a9a7a1;--text:#c9c6be;--amber:#f2a33a;--amber-hi:#ffc56e;--well:#232427;--line:#3a3b3f;--bar:#161719;color-scheme:dark}html,body{background:var(--room);color:var(--ink)}a{color:var(--amber)}a:hover{color:var(--amber-hi)}a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}code{background:var(--well);border:1px solid var(--line);border-radius:4px;padding:0 .3em;color:var(--ink)}button,select,input[type=file]{background:var(--well);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 10px}button:hover,select:hover{border-color:var(--dim)}button:active{background:var(--line)}small{color:var(--dim)}body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:2em auto;padding:0 16px}</style></head>
 <body>
 <h1>FM-1 SF2 player in the emulator</h1>
 <p>The firmware of <a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a> (build ${version.slice(0, 7)}) running in

@@ -5,7 +5,7 @@
 #define SF2FX_H
 #include <stdint.h>
 
-/* Master levels 0..127 of reverb and chorus, 127 by default: they scale the channels' sends (MIDI CC 91 and CC 93 are per
+/* Master levels 0..127 of reverb and chorus, 30 and 30 by default: they scale the channels' sends (MIDI CC 91 and CC 93 are per
  * channel, in fm1b). 0 switches the effect off. May be called from any task. */
 void sf2fx_set(unsigned reverb, unsigned chorus);
 unsigned sf2fx_reverb(void);
