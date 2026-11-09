@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FM-1 as a MIDI output</title>
+<style>
+  body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:60em;padding:0 16px 2em}
+  iframe{width:100%;height:70vh;min-height:420px;border:1px solid #8886}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:.6em 0}
+  button,select,input{font:inherit}
+  #status{color:#666}
+</style></head>
+<body>
+<h1>FM-1 as a MIDI output</h1>
+<p>The emulator below receives MIDI on its DIN jack. The files are played with <a href="https://jazz-soft.net/">JZZ.js</a>
+and sent to the emulator, which is also registered in JZZ as the output <code>FM-1 emulator</code>
+(<code>JZZ().openMidiOut('FM-1 emulator')</code> from the console or another script on this page).
+Click in the emulator first, so the browser lets it play sound. The bank is seven sine programs, not General MIDI.</p>
+<div class="row">
+  <label>Test file <select id="file"></select></label>
+  <label>or your own <input id="upload" type="file" accept=".mid,.midi,audio/midi,audio/x-midi"></label>
+</div>
+<div class="row">
+  <button id="play">Play</button><button id="pause">Pause</button><button id="stop">Stop</button>
+  <label><input id="loop" type="checkbox"> loop</label>
+  <span id="status">loading...</span>
+</div>
+<iframe id="emu" src="emulator.html?__QUERY__" title="FM-1 emulator" allow="autoplay"></iframe>
+<p><small>Emulator: <a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a> (MIT). Firmware and files:
+<a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a>.</small></p>
+<script src="JZZ.js"></script>
+<script src="JZZ.midi.SMF.js"></script>
+<script>
+const FILES = __FILES__;
+const $ = id => document.getElementById(id);
+const status = t => { $('status').textContent = t; };
+const emu = $('emu');
+let player = null, current = null;   // current: {name, data} (a binary string)
+
+// The emulator as a JZZ MIDI output. Its main.js has window.__midi (make_site.js); until the emulator has started it does not.
+const sent = { count: 0 };
+const port = JZZ.Widget({ _receive: function (msg) {
+  const f = emu.contentWindow && emu.contentWindow.__midi;
+  if (!f) { status('the emulator has not started yet: wait for its screen, then press Play again'); return; }
+  f(Array.from(msg)); sent.count++;
+} });
+JZZ.addMidiOut('FM-1 emulator', port);
+
+function allNotesOff() {
+  for (let c = 0; c < 16; c++) { port.send([0xb0 | c, 123, 0]); port.send([0xb0 | c, 121, 0]); }
+}
+function binary(buffer) {
+  const u = new Uint8Array(buffer);
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return s;
+}
+function load(name, data) {
+  stop();
+  try {
+    const smf = new JZZ.MIDI.SMF(data);
+    player = smf.player();
+    player.connect(port);
+    player.onEnd = () => { if ($('loop').checked) player.play(); else status(name + ': done'); };
+    current = name;
+    status(name + ' loaded (' + smf.length + ' tracks)');
+  } catch (e) { player = null; status('not a MIDI file: ' + e); }
+}
+function stop() { if (player) { player.stop(); allNotesOff(); } }
+
+for (const f of FILES) { const o = document.createElement('option'); o.value = f; o.textContent = f; $('file').appendChild(o); }
+async function choose() {
+  const r = await fetch('midi/' + $('file').value + '.mid');
+  load($('file').value, binary(await r.arrayBuffer()));
+}
+$('file').onchange = choose;
+$('upload').onchange = async e => {
+  const f = e.target.files[0];
+  if (f) load(f.name, binary(await f.arrayBuffer()));
+};
+$('play').onclick = () => { if (player) { status('playing ' + current); player.play(); } };
+$('pause').onclick = () => { if (player) { player.pause(); allNotesOff(); status('paused'); } };
+$('stop').onclick = () => { stop(); status('stopped'); };
+choose();
+</script>
+</body></html>

@@ -31,6 +31,9 @@ async function get(url) {
   if (kept.test(main))
     main = main.replace(kept, '$1  if (kept && (f.id !== "sf2" || kept.url === f.package)) {   // a new build of sf2 is fetched');
   else console.warn('WARNING: main.js changed upstream: a browser may boot an older sf2 build');
+  // window.__midi(bytes): MIDI into the emulator's DIN jack, for player.html (JZZ). Same line as start_emu.ps1 adds.
+  if (!/window\.__midi/.test(main))
+    main = main.trimEnd() + '\nwindow.__midi = (bytes) => send({ type: "midi", bytes: Array.from(bytes) });   // local addition: the page plays MIDI into the DIN jack\n';
   fs.writeFileSync(mainPath, main);
 
   // The catalog entry, with the version in the address.
@@ -48,6 +51,20 @@ async function get(url) {
   execFileSync('node', [path.join(root, 'make_sine_bank.js'), bank], { stdio: 'inherit' });
   execFileSync('node', [path.join(root, 'make_flash_overlay.js'), bank, path.join(out, 'sine.flash')], { stdio: 'inherit' });
   fs.copyFileSync(path.join(root, 'test_emu', 'sine.script'), path.join(out, 'sine.script'));
+
+  // JZZ.js (MIT, https://github.com/jazz-soft/JZZ) and its SMF player, from .github/site (npm install there first).
+  const nm = path.join(__dirname, 'site', 'node_modules');
+  for (const [pkg, file] of [['jzz', 'JZZ.js'], ['jzz-midi-smf', 'JZZ.midi.SMF.js']]) {
+    fs.copyFileSync(path.join(nm, pkg, 'javascript', file), path.join(out, file));
+    const lic = fs.readdirSync(path.join(nm, pkg)).find(f => /^licen[sc]e/i.test(f));
+    if (lic) fs.copyFileSync(path.join(nm, pkg, lic), path.join(out, `LICENSE-${pkg}.txt`));
+  }
+  // The MIDI files made from this repo's test scripts (make_midi.js); the user can add their own on the page.
+  const MIDI = ['sine', 'sine_filter', 'mt', 'layers', 'drums', 'pan', 'programs', 'release', 'steal40', 'load8', 'load32_plain'];
+  fs.mkdirSync(path.join(out, 'midi'));
+  for (const m of MIDI) fs.copyFileSync(path.join(root, 'test_emu', 'midi', `${m}.mid`), path.join(out, 'midi', `${m}.mid`));
+  fs.writeFileSync(path.join(out, 'player.html'), fs.readFileSync(path.join(__dirname, 'player.template.html'), 'utf8')
+    .replace('__FILES__', JSON.stringify(MIDI)).replace('__QUERY__', 'fw=sf2&flash=sine.flash&mhz=240'));
 
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
@@ -69,10 +86,11 @@ async function get(url) {
 <ul>
 <li><a href="emulator.html?${q}"><b>Open the emulator</b></a> and play it with the keys or a MIDI keyboard (Chrome or Edge, Web MIDI).</li>
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
+<li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the test MIDI files or one of your own.</li>
 <li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>
-<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>.</small></p>
+<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>; JZZ.js and its SMF player are MIT too (<a href="LICENSE-jzz.txt">licence</a>).</small></p>
 </body></html>
 `);
   console.log('site written to', out);

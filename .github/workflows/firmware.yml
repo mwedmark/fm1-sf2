@@ -102,6 +102,8 @@ jobs:
         with:
           name: firmware-plain
           path: fw
+      - name: JZZ.js (pinned in .github/site/package-lock.json)
+        run: npm ci --ignore-scripts --prefix .github/site
       - name: Make the site
         run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}"
       - uses: actions/upload-artifact@v4
