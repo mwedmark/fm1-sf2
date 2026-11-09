@@ -13,14 +13,14 @@
 <p>The emulator below receives MIDI on its DIN jack. The files are played with <a href="https://jazz-soft.net/">JZZ.js</a>
 and sent to the emulator, which is also registered in JZZ as the output <code>FM-1 emulator</code>
 (<code>JZZ().openMidiOut('FM-1 emulator')</code> from the console or another script on this page).
-Click in the emulator first, so the browser lets it play sound. The bank is seven sine programs, not General MIDI.</p>
+Click in the emulator first, so the browser lets it play sound. The bank list has the General MIDI bank of the repo and a sine test bank.</p>
 <div class="row">
   <label>Bank <select id="hosted"></select></label>
   <label>or your own <input id="bank" type="file" accept=".fm1b,application/octet-stream"></label>
   <span id="bankinfo"></span>
 </div>
 <div class="row">
-  <label>Test file <select id="file"></select></label>
+  <label>MIDI file <select id="file"></select></label>
   <label>or your own <input id="upload" type="file" accept=".mid,.midi,audio/midi,audio/x-midi"></label>
 </div>
 <div class="row">
@@ -72,10 +72,16 @@ function load(name, data) {
 }
 function stop() { if (player) { player.stop(); allNotesOff(); } }
 
-for (const f of FILES) { const o = document.createElement('option'); o.value = f; o.textContent = f; $('file').appendChild(o); }
+const groups = {};
+FILES.forEach((f, i) => {
+  let g = groups[f.group];
+  if (!g) { g = groups[f.group] = document.createElement('optgroup'); g.label = f.group; $('file').appendChild(g); }
+  const o = document.createElement('option'); o.value = i; o.textContent = f.label; o.selected = !!f.selected; g.appendChild(o);
+});
 async function choose() {
-  const r = await fetch('midi/' + $('file').value + '.mid');
-  load($('file').value, binary(await r.arrayBuffer()));
+  const f = FILES[$('file').value];
+  const r = await fetch(f.file.split('/').map(encodeURIComponent).join('/'));
+  load(f.label, binary(await r.arrayBuffer()));
 }
 $('file').onchange = choose;
 $('upload').onchange = async e => {

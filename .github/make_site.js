@@ -79,7 +79,7 @@ async function get(url) {
     seen.add(id);
     fs.writeFileSync(path.join(out, `${id}.flash`), overlay(bytes));
     fs.copyFileSync(path.join(root, dir, f), path.join(out, f));
-    banks.push({ flash: `${id}.flash`, label: `${id} (${(bytes.length / 1024).toFixed(0)} KB)` });
+    banks.push({ flash: `${id}.flash`, label: `${id === 'default' ? 'Default bank' : id} (${(bytes.length / 1024).toFixed(0)} KB)` });
     console.log(`bank ${dir}/${f}: ${bytes.length} bytes`);
   }
 
@@ -98,12 +98,21 @@ async function get(url) {
     const lic = fs.readdirSync(path.join(nm, pkg)).find(f => /^licen[sc]e/i.test(f));
     if (lic) fs.copyFileSync(path.join(nm, pkg, lic), path.join(out, `LICENSE-${pkg}.txt`));
   }
-  // The MIDI files made from this repo's test scripts (make_midi.js); the user can add their own on the page.
-  const MIDI = ['sine', 'sine_filter', 'mt', 'layers', 'drums', 'pan', 'programs', 'release', 'steal40', 'load8', 'load32_plain'];
-  fs.mkdirSync(path.join(out, 'midi'));
-  for (const m of MIDI) fs.copyFileSync(path.join(root, 'test_emu', 'midi', `${m}.mid`), path.join(out, 'midi', `${m}.mid`));
+  // Every MIDI file of the repo: MIDIs/ (songs; Rick Astley is selected at the start) and test_emu/midi/ (made from the test scripts by make_midi.js).
+  const midi = [];
+  for (const [dir, group, sub] of [['MIDIs', 'Songs', 'songs'], ['test_emu/midi', 'Test files', 'test']]) {
+    const d = path.join(root, dir);
+    if (!fs.existsSync(d)) continue;
+    fs.mkdirSync(path.join(out, 'midi', sub), { recursive: true });
+    for (const f of fs.readdirSync(d).filter(f => /\.midi?$/i.test(f)).sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))) {
+      fs.copyFileSync(path.join(d, f), path.join(out, 'midi', sub, f));
+      midi.push({ file: `midi/${sub}/${f}`, label: f.replace(/\.midi?$/i, '').replace(/_/g, ' '), group, selected: /astley/i.test(f) });
+    }
+  }
+  if (!midi.some(m => m.selected) && midi.length) midi[0].selected = true;
+  console.log(`${midi.length} MIDI files`);
   fs.writeFileSync(path.join(out, 'player.html'), fs.readFileSync(path.join(__dirname, 'player.template.html'), 'utf8')
-    .replace('__FILES__', JSON.stringify(MIDI)).replace('__BANKS__', JSON.stringify(banks)));
+    .replace('__FILES__', JSON.stringify(midi)).replace('__BANKS__', JSON.stringify(banks)));
 
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
@@ -125,7 +134,7 @@ The sine test bank has seven programs (plain, vibrato, tremolo, delayed vibrato,
 <ul>
 <li><a href="emulator.html?${q}"><b>Open the emulator</b></a> and play it with the keys or a MIDI keyboard (Chrome or Edge, Web MIDI).</li>
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
-<li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the test MIDI files or one of your own.</li>
+<li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the MIDI files of the repo or one of your own.</li>
 <li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>

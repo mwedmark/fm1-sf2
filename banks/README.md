@@ -9,7 +9,7 @@ and listed on the MIDI player page. **`default.fm1b` is selected when the site s
 
 ## Made by the workflow instead of committed
 
-The `bank` job of `.github/workflows/firmware.yml` can make `default.fm1b` itself: it takes the SoundFont `soundfonts/1mgm.sf2` of this repo (or, if that is not there, fetches one from the repository secret `SF2_URL`:
+The `bank` job of `.github/workflows/firmware.yml` can make `default.fm1b` itself: it takes the SoundFont `soundfonts/1mgm.sf2` of this repo (its result is the site's default bank) (or, if that is not there, fetches one from the repository secret `SF2_URL`:
 Settings > Secrets and variables > Actions), converts it with `make_bank.js <format> 32000` (format: the repository variable `BANK_FORMAT`, or `bfp8`;
 "Run workflow" takes it as an input too), stores it as the artifact `bank`, and the site build puts it in this folder before building. A bank made
 that way replaces a committed `default.fm1b`. Without the secret nothing is made.
