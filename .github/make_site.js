@@ -53,11 +53,37 @@ async function get(url) {
   fs.writeFileSync(catPath, JSON.stringify(cat, null, 2));
   fs.copyFileSync(fwsc, path.join(out, 'sf2player.fwsc'));
 
+  // Flash overlay as make_flash_overlay.js writes it: records of a little-endian u32 flash offset and 4096 bytes.
+  const overlay = bank => {
+    const SECTOR = 4096, start = 0x7C000 + 69632, sectors = Math.ceil(bank.length / SECTOR);
+    if (sectors > 256) throw new Error(`the emulator takes banks up to 1 MB, this one is ${bank.length} bytes`);
+    const o = Buffer.alloc(sectors * (4 + SECTOR), 0xff);
+    for (let i = 0; i < sectors; i++) {
+      o.writeUInt32LE(start + i * SECTOR, i * (4 + SECTOR));
+      bank.copy(o, i * (4 + SECTOR) + 4, i * SECTOR, Math.min(bank.length, (i + 1) * SECTOR));
+    }
+    return o;
+  };
+  // The banks the site hosts: banks/*.fm1b of this repo (default.fm1b first and selected at the start), then the sine test bank.
+  const banks = [];
+  const bankDir = path.join(root, 'banks');
+  const names = fs.existsSync(bankDir) ? fs.readdirSync(bankDir).filter(f => /\.fm1b$/i.test(f)).sort((a, b) => (b === 'default.fm1b') - (a === 'default.fm1b') || a.localeCompare(b)) : [];
+  for (const f of names) {
+    const bytes = fs.readFileSync(path.join(bankDir, f));
+    if (bytes.toString('latin1', 0, 4) !== 'FM1B' || bytes.readUInt16LE(4) !== 1) throw new Error(`banks/${f} is not a plain FM1B bank (the site runs the plain firmware; MP3-packed banks are refused)`);
+    const id = f.replace(/\.fm1b$/i, '');
+    fs.writeFileSync(path.join(out, `${id}.flash`), overlay(bytes));
+    fs.copyFileSync(path.join(bankDir, f), path.join(out, f));
+    banks.push({ flash: `${id}.flash`, label: `${id} (${(bytes.length / 1024).toFixed(0)} KB)` });
+    console.log(`bank ${f}: ${bytes.length} bytes`);
+  }
+
   // The bank: make_sine_bank.js (seven programs of one looped sine, no soundfont needed), laid where the firmware looks for it.
   const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'bank-'));
   const bank = path.join(tmp, 'sine.fm1b');
   execFileSync('node', [path.join(root, 'make_sine_bank.js'), bank], { stdio: 'inherit' });
-  execFileSync('node', [path.join(root, 'make_flash_overlay.js'), bank, path.join(out, 'sine.flash')], { stdio: 'inherit' });
+  fs.writeFileSync(path.join(out, 'sine.flash'), overlay(fs.readFileSync(bank)));
+  banks.push({ flash: 'sine.flash', label: 'sine test bank' });
   fs.copyFileSync(path.join(root, 'test_emu', 'sine.script'), path.join(out, 'sine.script'));
 
   // JZZ.js (MIT, https://github.com/jazz-soft/JZZ) and its SMF player, from .github/site (npm install there first).
@@ -72,7 +98,7 @@ async function get(url) {
   fs.mkdirSync(path.join(out, 'midi'));
   for (const m of MIDI) fs.copyFileSync(path.join(root, 'test_emu', 'midi', `${m}.mid`), path.join(out, 'midi', `${m}.mid`));
   fs.writeFileSync(path.join(out, 'player.html'), fs.readFileSync(path.join(__dirname, 'player.template.html'), 'utf8')
-    .replace('__FILES__', JSON.stringify(MIDI)));
+    .replace('__FILES__', JSON.stringify(MIDI)).replace('__BANKS__', JSON.stringify(banks)));
 
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
@@ -81,7 +107,7 @@ async function get(url) {
   }
   fs.writeFileSync(path.join(out, 'LICENSE-fm1-emu.txt'), licence || 'fm1-emu is MIT licensed: https://github.com/joakimeriksson/fm1-emu\n');
 
-  const q = 'fw=sf2&flash=sine.flash&mhz=240';
+  const q = `fw=sf2&flash=${banks[0].flash}&mhz=240`;
   fs.writeFileSync(path.join(out, 'index.html'), `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FM-1 SF2 player emulator</title>
@@ -89,8 +115,8 @@ async function get(url) {
 <body>
 <h1>FM-1 SF2 player in the emulator</h1>
 <p>The firmware of <a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a> (build ${version.slice(0, 7)}) running in
-<a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a>, in your browser, with a test bank of seven sine programs
-(plain, vibrato, tremolo, delayed vibrato, filter sweep, two low-passes). It is not a General MIDI bank.</p>
+<a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a>, in your browser, with ${banks[0].label}. Other banks: the list on the MIDI player page, or your own FM1B file.
+The sine test bank has seven programs (plain, vibrato, tremolo, delayed vibrato, filter sweep, two low-passes).</p>
 <ul>
 <li><a href="emulator.html?${q}"><b>Open the emulator</b></a> and play it with the keys or a MIDI keyboard (Chrome or Edge, Web MIDI).</li>
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
