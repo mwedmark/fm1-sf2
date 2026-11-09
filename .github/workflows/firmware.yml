@@ -1,0 +1,131 @@
+# Builds the FM-1 firmware on a Windows runner (JieLi toolchain 2.5.3, as RUNNING.md section 1) and publishes the emulator page.
+#   plain       the default build
+#   live-cache  the -LiveCache build, the one that is close to the image's limit (the build stops if it does not fit). -CacheKB 72:
+#               with 96 the runtime heap is 88 716 bytes and Build.ps1 stops under 111 468 (HANDOVER_LIVE_CACHE.md)
+# Every push and pull request builds both and uploads the .fwsc packages; main also deploys the emulator to GitHub Pages
+# (Settings > Pages > Source: GitHub Actions, once).
+name: firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.variant }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: plain
+            flags: ''
+          - variant: live-cache
+            flags: '-LiveCache -CacheKB 72 -CacheFrames 2'
+    steps:
+      - uses: actions/checkout@v4
+
+      # JieLi's installer refuses to run without CodeBlocks, so only its pi32 folder is unpacked (FIRMWARE.md). Sdk/Build.ps1 then checks
+      # all 22 toolchain files against sdk/manifest.json, so a wrong download fails there.
+      - name: Cache the toolchain
+        id: toolchain
+        uses: actions/cache@v4
+        with:
+          path: jl-toolchain
+          key: jieli-pi32-2.5.3
+
+      - name: Download and unpack the toolchain
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          choco install innoextract -y --no-progress
+          curl.exe -fL --retry 3 -o 2.5.3.exe https://jl-update.oss-cn-shenzhen.aliyuncs.com/2.5.3.exe
+          $size = (Get-Item 2.5.3.exe).Length
+          if ($size -ne 52860672) { throw "2.5.3.exe is $size bytes, expected 52860672" }
+          innoextract --silent -d jl-extract 2.5.3.exe
+          $clang = Get-ChildItem jl-extract -Recurse -Filter clang.exe | Where-Object { $_.Directory.Name -eq 'bin' -and $_.Directory.Parent.Name -eq 'pi32' } | Select-Object -First 1
+          if (!$clang) { throw 'No pi32/bin/clang.exe in the installer' }
+          New-Item -ItemType Directory -Force jl-toolchain | Out-Null
+          Move-Item $clang.Directory.Parent.FullName jl-toolchain/pi32
+          Remove-Item 2.5.3.exe, jl-extract -Recurse -Force
+
+      - name: Build the firmware
+        shell: powershell
+        working-directory: fm1_open
+        run: |
+          $env:FM1_PI32_TOOLCHAIN = Join-Path $env:GITHUB_WORKSPACE 'jl-toolchain\pi32'
+          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN ${{ matrix.flags }} 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
+          if (!$?) { throw 'The build failed.' }
+
+      - name: Sizes
+        if: always()
+        shell: pwsh
+        run: |
+          "### firmware (${{ matrix.variant }})" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          if (Test-Path build.log) {
+            $lines = Select-String -Path build.log -Pattern 'app image|fits|does not fit|runtime_heap|heap' | ForEach-Object { $_.Line }
+            '```' + "`n" + ($lines -join "`n") + "`n" + '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+          $report = 'fm1_open/build/dx7/firmware-report.json'
+          if (Test-Path $report) { '```json' + "`n" + (Get-Content $report -Raw) + "`n" + '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append }
+
+      - name: Collect the package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item fm1_open/build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc "out/sf2player_${{ matrix.variant }}.fwsc"
+          Copy-Item fm1_open/build/dx7/firmware-report.json "out/firmware-report_${{ matrix.variant }}.json"
+          Copy-Item build.log "out/build_${{ matrix.variant }}.log"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.variant }}
+          path: out/
+          if-no-files-found: error
+
+  # The emulator (github.com/joakimeriksson/fm1-emu, MIT) with this build and a small test bank. Pages is the same origin for the
+  # page, the firmware and the bank, so the emulator can fetch them (RUNNING.md section 4).
+  site:
+    needs: build
+    if: ${{ !cancelled() }}   # the site needs only the plain package; a live-cache failure must not hide it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-plain
+          path: fw
+      - name: JZZ.js (pinned in .github/site/package-lock.json)
+        run: npm ci --ignore-scripts --prefix .github/site
+      - name: Make the site
+        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emulator-site
+          path: site/
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: site/
+
+  deploy:
+    needs: site
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

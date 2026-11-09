@@ -1,0 +1,9 @@
+{
+  "name": "fm1-sf2-site",
+  "private": true,
+  "description": "What the GitHub Pages site (make_site.js) hosts: JZZ.js and its SMF player, MIT",
+  "dependencies": {
+    "jzz": "1.9.6",
+    "jzz-midi-smf": "1.9.9"
+  }
+}

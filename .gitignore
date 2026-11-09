@@ -28,3 +28,4 @@ soundfonts/win-gm.sf2
 soundfonts/Yamaha DB50XG Presets.sf2
 *.sf2
 test_emu/lan_cert.pem*
+node_modules/

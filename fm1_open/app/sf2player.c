@@ -87,6 +87,28 @@ void sf2player_channel_bend(unsigned channel, unsigned value)
     fm1_device_irq_restore(flags);
 }
 
+/* ---- ARM: layering. The channel page's EDIT arms the row under the cursor, GLO steps the MIDI channel it listens on (1..16, then 1).
+ * Armed rows all play the FM-1's keys, and a note that comes in on MIDI channel m also plays on every armed row listening on m.
+ * Not saved: a restart starts with nothing armed. The control task writes, the routing task reads; both are 16-bit/8-bit words. */
+static uint16_t armed;                                    /* bit r: row r (MIDI channel r+1's row) is armed */
+static uint8_t arm_midi[16];                               /* the MIDI channel (0..15) an armed row listens on; 0 = MIDI channel 1 */
+__attribute__((noinline)) static void row_play(unsigned row, unsigned note, unsigned velocity)
+{
+    if (row == 9U)
+        sf2player_channel_drum(row, note, velocity);
+    else
+        sf2player_channel_play(row, note, velocity);
+}
+/* MIDI input (transfer.c): the channel's own row as always, and the armed rows that listen on this channel. */
+void sf2player_midi_note(unsigned channel, unsigned note, unsigned velocity)
+{
+    row_play(channel, note, velocity);
+    unsigned mask = armed;
+    for (unsigned r = 0; mask; ++r, mask >>= 1)
+        if ((mask & 1U) && r != channel && arm_midi[r] == channel)
+            row_play(r, note, velocity);
+}
+
 /* ---- the panel: F3..G5 are 27 keys, bit 0 = F3 (MIDI 53) -------------------------------------------------- */
 enum { FIRST_NOTE = 53, KEYS = 27, BACKGROUND = 0x0210 /* dark teal */ };
 static unsigned drum_mode;                                /* SCL: the keys play the percussion kit */
@@ -456,7 +478,8 @@ static void channels_update(const struct fm1b_status *st)
             channel_hit[c] = now;
         }
         d = put_number(line, (int32_t)c + 1, 2);
-        *d++ = ' ';
+        /* an armed row shows the MIDI channel it listens on after its number: 1..9, then A..G for 10..16 */
+        *d++ = (armed >> c) & 1U ? (char)(arm_midi[c] + (arm_midi[c] < 9U ? '1' : 'A' - 9)) : ' ';
         uint16_t color;
         if (c == 9U) {                                        /* transfer.c: channel 10 always plays the kit */
             d = put_text(d, "KIT ");
@@ -494,6 +517,8 @@ static void channels_update(const struct fm1b_status *st)
             color = playing ? DARK_GREEN : DIM;
         else if (playing)
             color = GREEN;
+        else if ((armed >> c) & 1U)
+            color = CYAN;                                     /* armed and idle */
         line_back = c == cursor ? CURSOR_BACK : BACKGROUND;
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
@@ -683,7 +708,7 @@ static void channel_program_step(unsigned channel, int clicks)
 
 static uint32_t previous_keys, previous_buttons;
 static unsigned leds_shown = 0xffU;                       /* what the ARP and SEQ LEDs show (bit 0 mute, bit 1 solo); 0xff: unknown */
-static uint8_t sounding_channel[KEYS];                     /* per key: the MIDI channel it started a note on, 255: the panel's */
+static uint16_t sounding_rows[KEYS];                       /* per key: the rows (bit per channel) it started a note on, 0: the panel's */
 static uint8_t sounding[KEYS];                           /* the note each key started, so a release stops that one */
 static unsigned program;
 
@@ -700,6 +725,8 @@ void groove_screen_init(void)
     page = PAGE_PROGRAM;
     info_return = PAGE_PROGRAM;
     cursor = 0;
+    armed = 0;
+    memset(arm_midi, 0, sizeof arm_midi);
     leds_shown = 0xffU;
     memset(shown, 0, sizeof shown);
     memset(shown_color, 0, sizeof shown_color);
@@ -707,14 +734,14 @@ void groove_screen_init(void)
     bar_drawn = 1000;
 }
 /* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only), PLAY while a song plays. */
-enum { BUTTON_SAVE = 9, BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_PLAY = 12, BUTTON_REC = 13 };
+enum { BUTTON_EDIT = 6, BUTTON_GLO = 7, BUTTON_SAVE = 9, BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_PLAY = 12, BUTTON_REC = 13 };
 static void leds_update(void)
 {
     struct fm1b_channel info;
     unsigned leds = 0;
     if (page == PAGE_CHANNELS) {
         fm1b_channel_info(cursor, &info);
-        leds = info.muted | info.solo << 1;
+        leds = info.muted | info.solo << 1 | ((armed >> cursor) & 1U) << 3 | (armed != 0) << 4;
     }
 #if FM1_MIDIPLAY
     struct song_state so;
@@ -726,7 +753,9 @@ static void leds_update(void)
     leds_shown = leds;
     fm1_led_set(BUTTON_ARP, (int)(leds & 1U));
     fm1_led_set(BUTTON_SEQ, (int)((leds >> 1) & 1U));
-    fm1_led_set(BUTTON_PLAY, (int)(leds >> 2));
+    fm1_led_set(BUTTON_PLAY, (int)((leds >> 2) & 1U));
+    fm1_led_set(BUTTON_EDIT, (int)((leds >> 3) & 1U));        /* EDIT: the selected row is armed; GLO: some row is */
+    fm1_led_set(BUTTON_GLO, (int)((leds >> 4) & 1U));
 }
 /* Safe mode: OCT- and OCT+ (buttons 0 and 1) held while the FM-1 starts, as the stock firmware's update mode. The bank is then not bound
  * and the live cache does nothing, so a bank or a code path that crashes cannot keep the FM-1 from starting; USB-MIDI, the firmware update
@@ -863,6 +892,12 @@ void groove_screen_control(void)
         fm1b_channel_info(cursor, &info);
         sf2player_channel_solo(info.solo ? -1 : (int)cursor);
     }
+    if (channels && (pressed & (1U << BUTTON_EDIT))) {            /* EDIT: arm or disarm the selected row (MIDI channel 1 when armed) */
+        armed ^= (uint16_t)(1U << cursor);
+        arm_midi[cursor] = 0;
+    }
+    if (channels && (pressed & (1U << BUTTON_GLO)) && ((armed >> cursor) & 1U))   /* GLO: the armed row's MIDI channel up one, 16 to 1 */
+        arm_midi[cursor] = (uint8_t)((arm_midi[cursor] + 1U) & 15U);
     leds_update();
     if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */
         octave += (int)((pressed >> 1) & 1U) - (int)(pressed & 1U);
@@ -877,13 +912,13 @@ void groove_screen_control(void)
             int note = FIRST_NOTE + (int)key + 12 * octave;
             sounding[key] = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
             sounding_drum = (sounding_drum & ~(1U << key)) | (drum_mode << key);
-            sounding_channel[key] = (uint8_t)(channels ? cursor : 255U);   /* the channel page: the keys play the selected channel */
+            /* the channel page: the keys play every armed row, or the selected channel when none is armed */
+            sounding_rows[key] = (uint16_t)(channels ? (armed ? armed : 1U << cursor) : 0U);
         }
-        if (sounding_channel[key] != 255U) {
-            if (sounding_channel[key] == 9U)
-                sf2player_channel_drum(9U, sounding[key], on ? 100U : 0U);
-            else
-                sf2player_channel_play(sounding_channel[key], sounding[key], on ? 100U : 0U);
+        if (sounding_rows[key]) {
+            for (unsigned r = 0; r < FM1B_CHANNELS; ++r)
+                if ((sounding_rows[key] >> r) & 1U)
+                    row_play(r, sounding[key], on ? 100U : 0U);
         } else if ((sounding_drum >> key) & 1U)
             sf2player_drum(sounding[key], on ? 100U : 0U);
         else

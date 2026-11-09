@@ -146,6 +146,8 @@ recomputes the step of the channel's voices when it arrives; the wheel adds a tr
 pedal up releases those. `fm1b_channel_info()` gives the panel's channel page (HOME) each channel's program, levels, bend, wheel, pedal,
 voices, a note counter and its mute / solo state. The sample loop itself is unchanged.
 
+**ARM, layering** (issue 9): on the channel page EDIT arms or disarms the row under the cursor (an armed row shows the MIDI channel it listens on after its row number, 1..9 then A..G for 10..16, and is cyan when idle). An armed row listens on MIDI channel 1 at first; GLO steps that up one (16 wraps to 1). The keys play every armed row (none armed: the selected row, as before), a key-up stops exactly the rows it started. A note on MIDI channel m plays on its own row as always and also on every armed row listening on m (`sf2player_midi_note`, called from `transfer.c`). Not saved: a restart starts with nothing armed. Not yet run on the FM-1 or in fm1-emu.
+
 **Mute and solo** (2026-11-04): on the channel page ARP mutes / unmutes the selected channel and SEQ solos it (again: no solo), while
 it plays; the row's last column shows `M` / `S`, a silent row is dark grey, the title says `SOLO`, and the ARP / SEQ LEDs show the
 selected channel's state. `fm1b_channel_mute()` / `fm1b_channel_solo()` set a mask and a channel the audio side reads once a block;
