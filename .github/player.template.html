@@ -15,6 +15,11 @@ and sent to the emulator, which is also registered in JZZ as the output <code>FM
 (<code>JZZ().openMidiOut('FM-1 emulator')</code> from the console or another script on this page).
 Click in the emulator first, so the browser lets it play sound. The bank is seven sine programs, not General MIDI.</p>
 <div class="row">
+  <label>Bank <input id="bank" type="file" accept=".fm1b,application/octet-stream"></label>
+  <button id="sine">Sine test bank</button>
+  <span id="bankinfo">sine test bank</span>
+</div>
+<div class="row">
   <label>Test file <select id="file"></select></label>
   <label>or your own <input id="upload" type="file" accept=".mid,.midi,audio/midi,audio/x-midi"></label>
 </div>
@@ -23,7 +28,7 @@ Click in the emulator first, so the browser lets it play sound. The bank is seve
   <label><input id="loop" type="checkbox"> loop</label>
   <span id="status">loading...</span>
 </div>
-<iframe id="emu" src="emulator.html?__QUERY__" title="FM-1 emulator" allow="autoplay"></iframe>
+<iframe id="emu" src="emulator.html?fw=sf2&flash=sine.flash&mhz=240" title="FM-1 emulator" allow="autoplay"></iframe>
 <p><small>Emulator: <a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a> (MIT). Firmware and files:
 <a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a>.</small></p>
 <script src="JZZ.js"></script>
@@ -80,5 +85,33 @@ $('play').onclick = () => { if (player) { status('playing ' + current); player.p
 $('pause').onclick = () => { if (player) { player.pause(); allNotesOff(); status('paused'); } };
 $('stop').onclick = () => { stop(); status('stopped'); };
 choose();
+
+// Your own bank: an FM1B file (make_bank.js / the converter, not an MP3-packed one: this is the plain firmware) is laid in the emulator's
+// user flash as make_flash_overlay.js does (records of a little-endian u32 flash offset and 4096 bytes), and the emulator restarts with it.
+const SECTOR = 4096, START = 0x7C000 + 69632;       // fm1b_config.h: FM1B_FLASH_OFFSET in the user partition
+let blobUrl = null;
+function boot(flash, label) {
+  stop();
+  emu.src = 'emulator.html?fw=sf2&flash=' + encodeURIComponent(flash) + '&mhz=240';
+  $('bankinfo').textContent = label;
+  status('restarting the emulator with ' + label + ': click in it, then press Play');
+}
+$('bank').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const bank = new Uint8Array(await f.arrayBuffer());
+  const sectors = Math.ceil(bank.length / SECTOR);
+  if (sectors > 256) { status('the emulator takes banks up to 1 MB; this one is ' + bank.length + ' bytes'); return; }
+  const out = new Uint8Array(sectors * (4 + SECTOR)).fill(0xff), dv = new DataView(out.buffer);
+  for (let i = 0; i < sectors; i++) {
+    const o = i * (4 + SECTOR);
+    dv.setUint32(o, START + i * SECTOR, true);
+    out.set(bank.subarray(i * SECTOR, Math.min(bank.length, (i + 1) * SECTOR)), o + 4);
+  }
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(new Blob([out]));
+  boot(blobUrl, f.name + ' (' + bank.length + ' bytes)');
+};
+$('sine').onclick = () => boot('sine.flash', 'sine test bank');
 </script>
 </body></html>

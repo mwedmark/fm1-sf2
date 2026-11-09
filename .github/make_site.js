@@ -64,7 +64,7 @@ async function get(url) {
   fs.mkdirSync(path.join(out, 'midi'));
   for (const m of MIDI) fs.copyFileSync(path.join(root, 'test_emu', 'midi', `${m}.mid`), path.join(out, 'midi', `${m}.mid`));
   fs.writeFileSync(path.join(out, 'player.html'), fs.readFileSync(path.join(__dirname, 'player.template.html'), 'utf8')
-    .replace('__FILES__', JSON.stringify(MIDI)).replace('__QUERY__', 'fw=sf2&flash=sine.flash&mhz=240'));
+    .replace('__FILES__', JSON.stringify(MIDI)));
 
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
