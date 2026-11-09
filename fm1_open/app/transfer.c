@@ -365,8 +365,7 @@ discard:
 #include "sf2_upload.h"
 #include <stddef.h>
 
-void sf2player_channel_play(unsigned channel, unsigned note, unsigned velocity);
-void sf2player_channel_drum(unsigned channel, unsigned note, unsigned velocity);
+void sf2player_midi_note(unsigned channel, unsigned note, unsigned velocity);
 void sf2player_channel_program(unsigned channel, unsigned program_bank, unsigned program);
 void sf2player_channel_control(unsigned channel, unsigned controller, unsigned value);
 void sf2player_channel_bend(unsigned channel, unsigned value);
@@ -385,10 +384,7 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
     unsigned type = message[0] & 0xf0U, channel = message[0] & 0x0fU;
     if (bytes == 3 && (type == 0x80U || type == 0x90U)) {
         unsigned velocity = type == 0x90U ? message[2] : 0U;
-        if (channel == 9U)                                    /* MIDI channel 10: the percussion kit */
-            sf2player_channel_drum(channel, message[1], velocity);
-        else
-            sf2player_channel_play(channel, message[1], velocity);
+        sf2player_midi_note(channel, message[1], velocity);   /* channel 10 is the percussion kit; armed rows layer on top (sf2player.c) */
     }
     else if (bytes == 2 && type == 0xc0U) {                   /* program change; the kit of channel 10 is the bank's first */
         /* 120 (General MIDI 2) or the 14-bit bank 128 is the percussion bank; any other bank is the melodic one. */
