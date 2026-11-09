@@ -4,6 +4,9 @@ This firmware turns the M-VAVE FM-1 into a 32-voice, 16-channel General MIDI sou
 from a SoundFont (`.sf2`). You convert the bank in the browser, install the firmware and the bank over USB from another page in
 the browser, and then play it from the FM-1's keys or over MIDI (USB, DIN or Bluetooth).
 
+**Install it:** <https://mwedmark.github.io/fm1-sf2/install.html> puts the firmware and a General MIDI bank on your FM-1 over USB
+(Chrome or Edge; the first time needs M-VAVE's Workbench, see [section 5](#5-installing-firmware-and-bank)).
+
 **Try it without a device:** <https://mwedmark.github.io/fm1-sf2/> runs the firmware in the [fm1-emu](https://github.com/joakimeriksson/fm1-emu)
 emulator in your browser, and its [MIDI player](https://mwedmark.github.io/fm1-sf2/player.html?song=astley&play=1) plays MIDI files through it.
 
@@ -133,8 +136,10 @@ After that, use the install page for every update. The original firmware (`FM-1_
 **Every time after that:**
 
 1. Connect the FM-1 with USB and close every other program that uses its MIDI port (a DAW, MIDIberry, the Workbench).
-2. Start the page: `.\start_web.ps1` opens <http://localhost:8765/install.html>. (From another computer on the network: `.\start_web.ps1 -Lan`
-   and the HTTPS address it prints.)
+2. Open the install page. **Hosted:** <https://mwedmark.github.io/fm1-sf2/install.html> installs the latest firmware built on GitHub
+   (the plain SF2 player) with the default General MIDI bank, nothing to set up. **Local:** `.\start_web.ps1` opens
+   <http://localhost:8765/install.html> with the firmware and bank you packed yourself (`build_install.ps1`); from another computer on the
+   network, `.\start_web.ps1 -Lan` and the HTTPS address it prints.
 3. **What gets installed** shows the firmware package (its name, version, voices, size and build) and the bank (its name, size, share of the
    flash, programs, codec and rate). To install another bank, open *Choose another bank* and pick a `.bin` or `.fm1b` file.
 4. Tick what to do: **Install firmware**, **Send the sound bank**, or both.

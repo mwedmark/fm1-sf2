@@ -82,6 +82,7 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item fm1_open/build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc "out/sf2player_${{ matrix.variant }}.fwsc"
           Copy-Item fm1_open/build/dx7/firmware-report.json "out/firmware-report_${{ matrix.variant }}.json"
+          Copy-Item fm1_open/build/dx7/build-identity.json "out/build-identity_${{ matrix.variant }}.json"   # the install page's manifest needs the build id
           Copy-Item build.log "out/build_${{ matrix.variant }}.log"
 
       - uses: actions/upload-artifact@v4
@@ -144,7 +145,7 @@ jobs:
       - name: JZZ.js (pinned in .github/site/package-lock.json)
         run: npm ci --ignore-scripts --prefix .github/site
       - name: Make the site
-        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}"
+        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}" fw/build-identity_plain.json
       - uses: actions/upload-artifact@v4
         with:
           name: emulator-site

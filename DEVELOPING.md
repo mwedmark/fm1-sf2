@@ -15,7 +15,8 @@ with the paths on the build machine.
 ```
 
 The GitHub workflow (`.github/workflows/firmware.yml`) runs only when started by hand (Actions > firmware > Run workflow). It builds
-both firmwares and, on `main`, publishes the emulator site with the MIDI player.
+both firmwares and, on `main`, publishes the emulator site with the MIDI player and the install page (`install.html` with the plain
+firmware and `banks/default.fm1b`, packed by `make_install.js --fwsc --identity --out`).
 
 ## What is where
 

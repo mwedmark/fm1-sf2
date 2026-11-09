@@ -1,9 +1,10 @@
 // Makes the GitHub Pages site: the fm1-emu emulator (MIT, https://github.com/joakimeriksson/fm1-emu) fetched from its own site,
 // this repo's firmware package registered in its catalog as "sf2", and the sine test bank as a flash overlay.
-//   node .github/make_site.js <outdir> <firmware.fwsc> [version]
-// The same steps as start_emu.ps1 (RUNNING.md section 4), for a Pages site instead of a local server.
+//   node .github/make_site.js <outdir> <firmware.fwsc> [version] [build-identity.json]
+// The same steps as start_emu.ps1 (RUNNING.md section 4), for a Pages site instead of a local server. With the build's
+// build-identity.json the site also gets install.html, which installs that firmware and the first bank on an FM-1 (make_install.js).
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
-const [out, fwsc, version = String(Date.now())] = process.argv.slice(2);
+const [out, fwsc, version = String(Date.now()), identity] = process.argv.slice(2);
 if (!out || !fwsc) throw new Error('usage: node .github/make_site.js <outdir> <firmware.fwsc> [version]');
 const root = path.join(__dirname, '..');
 const SITE = 'https://joakimeriksson.github.io/fm1-emu/';
@@ -79,7 +80,7 @@ async function get(url) {
     seen.add(id);
     fs.writeFileSync(path.join(out, `${id}.flash`), overlay(bytes));
     fs.copyFileSync(path.join(root, dir, f), path.join(out, f));
-    banks.push({ flash: `${id}.flash`, label: `${id === 'default' ? 'Default bank' : id} (${(bytes.length / 1024).toFixed(0)} KB)` });
+    banks.push({ flash: `${id}.flash`, label: `${id === 'default' ? 'Default bank' : id} (${(bytes.length / 1024).toFixed(0)} KB)`, file: path.join(root, dir, f) });
     console.log(`bank ${dir}/${f}: ${bytes.length} bytes`);
   }
 
@@ -112,7 +113,19 @@ async function get(url) {
   if (!midi.some(m => m.selected) && midi.length) midi[0].selected = true;
   console.log(`${midi.length} MIDI files`);
   fs.writeFileSync(path.join(out, 'player.html'), fs.readFileSync(path.join(__dirname, 'player.template.html'), 'utf8')
-    .replace('__FILES__', JSON.stringify(midi)).replace('__BANKS__', JSON.stringify(banks)));
+    .replace('__FILES__', JSON.stringify(midi)).replace('__BANKS__', JSON.stringify(banks.map(({ flash, label }) => ({ flash, label })))));
+
+  // The install page: this firmware and the first bank (default.fm1b), at the same paths as in the repo (dist/install/,
+  // fm1_open/sdk/WebUpdate.js). Pages serves HTTPS, so Chrome and Edge give it Web MIDI.
+  const installBank = banks.find(b => b.file);
+  const install = !!(identity && fs.existsSync(identity) && installBank);
+  if (install) {
+    execFileSync('node', [path.join(root, 'make_install.js'), installBank.file, `--fwsc=${fwsc}`, `--identity=${identity}`,
+      `--out=${path.join(out, 'dist', 'install')}`, `--name=sf2player (build ${version.slice(0, 7)})`], { stdio: 'inherit' });
+    fs.copyFileSync(path.join(root, 'install.html'), path.join(out, 'install.html'));
+    fs.mkdirSync(path.join(out, 'fm1_open', 'sdk'), { recursive: true });
+    fs.copyFileSync(path.join(root, 'fm1_open', 'sdk', 'WebUpdate.js'), path.join(out, 'fm1_open', 'sdk', 'WebUpdate.js'));
+  } else console.warn('No install page: it needs the build-identity.json of the firmware and a bank in banks/ or soundfonts/');
 
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
@@ -140,7 +153,7 @@ The sine test bank has seven programs (plain, vibrato, tremolo, delayed vibrato,
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
 <li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the MIDI files of the repo or one of your own.
 Its <b>Copy link</b> gives a link to a bank and song that plays at the first click, e.g. <a href="player.html?song=astley&amp;play=1">player.html?song=astley&amp;play=1</a>.</li>
-<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
+${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). The first time, install the firmware with M-VAVE's <a href="https://open.m-vave.com/fm1-workbench">FM-1 Workbench</a>; after that this page updates it.</li>\n` : ''}<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>
 ${beer}<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>; JZZ.js and its SMF player are MIT too (<a href="LICENSE-jzz.txt">licence</a>).</small></p>
