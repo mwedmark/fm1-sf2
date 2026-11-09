@@ -135,7 +135,7 @@ static const uint8_t punctuation[][6] = {
     {'.', 0, 0x60, 0x60, 0, 0}, {':', 0, 0x36, 0x36, 0, 0}, {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'(', 0, 0x1c, 0x22, 0x41, 0},
     {')', 0, 0x41, 0x22, 0x1c, 0}, {'_', 0x40, 0x40, 0x40, 0x40, 0x40}};
 enum { WHITE = 0xffff, GREY = 0x8410, DIM = 0x4208, DARK_GREEN = 0x0300, YELLOW = 0xffe0, GREEN = 0x07e0, ORANGE = 0xfd20, CYAN = 0x07ff, BAR_BACK = 0x2104,
-       LINE_CHARS = 41, LINES = 21, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
+       LINE_CHARS = 41, LINES = 20, MAX_ROW_PIXELS = FM1_SCREEN_WIDTH * 14 };
 static uint16_t row_pixels[MAX_ROW_PIXELS];
 static char shown[LINES][LINE_CHARS + 1];
 static uint16_t shown_color[LINES], shown_back[LINES];
@@ -478,7 +478,8 @@ static void channels_update(const struct fm1b_status *st)
             channel_hit[c] = now;
         }
         d = put_number(line, (int32_t)c + 1, 2);
-        *d++ = (armed >> c) & 1U ? '>' : ' ';                 /* '>' : armed */
+        /* an armed row shows the MIDI channel it listens on after its number: 1..9, then A..G for 10..16 */
+        *d++ = (armed >> c) & 1U ? (char)(arm_midi[c] + (arm_midi[c] < 9U ? '1' : 'A' - 9)) : ' ';
         uint16_t color;
         if (c == 9U) {                                        /* transfer.c: channel 10 always plays the kit */
             d = put_text(d, "KIT ");
@@ -522,17 +523,10 @@ static void channels_update(const struct fm1b_status *st)
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
     }
-    d = put_text(line, "ARM MIDI ");                          /* the selected row's MIDI channel when armed (EDIT arms, GLO steps) */
-    if ((armed >> cursor) & 1U)
-        d = put_number(d, arm_midi[cursor] + 1, 0);
-    else
-        *d++ = '-';
-    *d = 0;
-    line_show(20, 214, line, 1, armed ? CYAN : GREY);
     d = put_cpu(put_text(line, "ARP MUTE SEQ SOLO  "));
     *d = 0;
-    line_show(19, 223, line, 1, st->voice_limit < FM1B_VOICES ? ORANGE : GREY);   /* orange: the guard holds the limit down */
-    line_show(18, 232, "K1 CH SEL PRG ALG VOL K2 PAN K3/4 FX", 1, GREY);
+    line_show(19, 218, line, 1, st->voice_limit < FM1B_VOICES ? ORANGE : GREY);   /* orange: the guard holds the limit down */
+    line_show(18, 228, "K1 CH SEL PRG ALG VOL K2 PAN K3/4 FX", 1, GREY);
 }
 
 static void screen_update(void)

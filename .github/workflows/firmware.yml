@@ -92,6 +92,7 @@ jobs:
   # page, the firmware and the bank, so the emulator can fetch them (RUNNING.md section 4).
   site:
     needs: build
+    if: ${{ !cancelled() }}   # the site needs only the plain package; a live-cache failure must not hide it
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
