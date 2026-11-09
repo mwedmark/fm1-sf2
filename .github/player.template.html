@@ -15,14 +15,19 @@
   iframe{width:100%;height:70vh;min-height:420px;border:1px solid var(--line);border-radius:8px;background:var(--room)}
   .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:.6em 0}
   button,select,input{font:inherit}
-  #status{color:var(--dim)}
+  #status{color:var(--dim);overflow-wrap:anywhere}
+  .stage{position:relative}
+  #go{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(24,25,27,.82);border-radius:8px}
+  #go[hidden]{display:none}
+  #go button{font-size:1.4em;padding:.6em 1.4em;border-color:var(--amber);color:var(--amber-hi);max-width:90%}
 </style></head>
 <body>
 <h1>FM-1 as a MIDI output</h1>
 <p>The emulator below receives MIDI on its DIN jack. The files are played with <a href="https://jazz-soft.net/">JZZ.js</a>
 and sent to the emulator, which is also registered in JZZ as the output <code>FM-1 emulator</code>
 (<code>JZZ().openMidiOut('FM-1 emulator')</code> from the console or another script on this page).
-Click in the emulator first, so the browser lets it play sound. The bank list has the General MIDI bank of the repo and a sine test bank.</p>
+The bank list has the General MIDI bank of the repo and a sine test bank. <b>Copy link</b> gives a link that opens this page
+with the bank and song chosen and plays it at the first click.</p>
 <div class="row">
   <label>Bank <select id="hosted"></select></label>
   <label>or your own <input id="bank" type="file" accept=".fm1b,application/octet-stream"></label>
@@ -35,9 +40,17 @@ Click in the emulator first, so the browser lets it play sound. The bank list ha
 <div class="row">
   <button id="play">Play</button><button id="pause">Pause</button><button id="stop">Stop</button>
   <label><input id="loop" type="checkbox"> loop</label>
+  <button id="copy" title="A link that opens this page with this bank and song and plays it">Copy link</button>
   <span id="status">loading...</span>
 </div>
-<iframe id="emu" title="FM-1 emulator" allow="autoplay"></iframe>
+<div class="stage">
+  <iframe id="emu" title="FM-1 emulator" allow="autoplay"></iframe>
+  <div id="go" hidden><button id="gobtn">&#9654; Play</button></div>
+</div>
+<p><small>Link options: <code>?bank=&lt;bank&gt;&amp;song=&lt;song&gt;&amp;play=1&amp;loop=1</code>. The bank is a name from the bank list
+(<code>default</code>, <code>sine</code>, ...), the song a name from the MIDI list in lower case with dashes
+(<code>abba-dancing-queen</code>; a part of the name works too, <code>song=astley</code>). A browser plays sound only after a click on the page,
+so a link shows one big Play button first.</small></p>
 <p><small>Emulator: <a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a> (MIT). Firmware and files:
 <a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a>.</small></p>
 <script src="JZZ.js"></script>
@@ -46,16 +59,25 @@ Click in the emulator first, so the browser lets it play sound. The bank list ha
 const FILES = __FILES__;
 const BANKS = __BANKS__;     // the banks the site hosts: the first is selected at the start
 const $ = id => document.getElementById(id);
-const status = t => { $('status').textContent = t; };
+let notice = '';                     // a link's bank or song that is not on the site: kept after every status until the visitor chooses
+const status = t => { $('status').textContent = t + (notice ? ' (' + notice + ')' : ''); };
 const emu = $('emu');
-let player = null, current = null;   // current: {name, data} (a binary string)
+let player = null, current = null;   // current: the name of the loaded song
+let song = null, bank = null;        // the FILES and BANKS entries chosen; null for the visitor's own file
+let emuReady = false;                // the emulator has booted and runs (its try-out said "playing")
+const params = new URLSearchParams(location.search);
+let wantPlay = params.get('play') === '1';   // play as soon as the song is loaded and the emulator runs
+
+// Names for links: a song is its label in lower case with dashes, a bank its flash file's name without .flash.
+const slug = s => s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const taken = new Set();
+for (const f of FILES) { let id = slug(f.label) || 'song', n = 2; while (taken.has(id)) id = slug(f.label) + '-' + n++; f.id = id; taken.add(id); }
+for (const b of BANKS) b.id = b.flash.replace(/\.flash$/, '');
 
 // The emulator as a JZZ MIDI output. Its main.js has window.__midi (make_site.js); until the emulator has started it does not.
-const sent = { count: 0 };
 const port = JZZ.Widget({ _receive: function (msg) {
   const f = emu.contentWindow && emu.contentWindow.__midi;
-  if (!f) { status('the emulator has not started yet: wait for its screen, then press Play again'); return; }
-  f(Array.from(msg)); sent.count++;
+  if (f) f(Array.from(msg));
 } });
 JZZ.addMidiOut('FM-1 emulator', port);
 
@@ -76,30 +98,88 @@ function load(name, data) {
     player.connect(port);
     player.onEnd = () => { if ($('loop').checked) player.play(); else status(name + ': done'); };
     current = name;
-    status(name + ' loaded (' + smf.length + ' tracks)');
+    status(name + ' loaded (' + smf.length + ' tracks)' + (emuReady ? '' : ', the emulator is starting'));
+    $('gobtn').textContent = '▶ Play ' + name;
+    tryPlay();
   } catch (e) { player = null; status('not a MIDI file: ' + e); }
 }
 function stop() { if (player) { player.stop(); allNotesOff(); } }
+function play() {
+  wantPlay = false;
+  $('go').hidden = true;
+  if (player.paused) player.resume(); else player.play();
+  status('playing ' + current);
+}
+function tryPlay() { if (wantPlay && player && emuReady) play(); }
 
+// The emulator starts by itself where the browser lets the page play sound; else it waits for its Start button. A click on this
+// page counts for it too (the frame has allow="autoplay"), so the big Play button presses its Start.
+function startEmu() {
+  const d = emu.contentDocument, b = d && d.getElementById('start');
+  if (b && !b.hidden && !b.disabled) b.click();
+}
+addEventListener('message', e => {
+  if (e.source !== emu.contentWindow || !e.data || e.data.source !== 'fm1-emu') return;
+  const s = e.data.state;
+  if (s === 'start') { emuReady = false; $('go').hidden = false; status(current ? 'click Play to hear ' + current : 'click Play to start the emulator'); }
+  else if (s === 'loading' || s === 'booting') { emuReady = false; status('the emulator is starting...'); }
+  else if (s === 'error') { emuReady = false; status('the emulator: ' + e.data.text); }
+  else if (s === 'playing') {
+    emuReady = true;
+    $('go').hidden = true;
+    if (wantPlay) tryPlay(); else status('the emulator runs' + (current ? ': press Play for ' + current : ''));
+  }
+});
+$('gobtn').onclick = () => { wantPlay = !!player; $('go').hidden = true; status('starting the emulator...'); startEmu(); };
+
+// The address bar follows the choices (without play=1); Copy link adds play=1.
+function query(withPlay) {
+  const q = new URLSearchParams();
+  if (bank) q.set('bank', bank.id);
+  if (song) q.set('song', song.id);
+  if ($('loop').checked) q.set('loop', '1');
+  if (withPlay) q.set('play', '1');
+  return q.toString();
+}
+function syncUrl() { const q = query(false); history.replaceState(null, '', location.pathname + (q ? '?' + q : '')); }
+$('copy').onclick = async () => {
+  const url = location.origin + location.pathname + '?' + query(true);
+  const own = [!bank && 'bank', !song && 'MIDI file'].filter(Boolean);
+  const note = own.length ? ' (your own ' + own.join(' and ') + ' is not on the site, so the link has the default)' : '';
+  try { await navigator.clipboard.writeText(url); status('link copied: ' + url + note); }
+  catch (e) { status('copy this link: ' + url + note); }
+};
+$('loop').onchange = syncUrl;
+$('loop').checked = params.get('loop') === '1';
+
+// The MIDI files, and the song the link asks for (its name, or a part of it).
 const groups = {};
+const want = slug(params.get('song') || '');
+const asked = want && (FILES.find(f => f.id === want) || FILES.find(f => f.id.includes(want)));
+if (want && !asked) notice = 'no song "' + params.get('song') + '" on this site, so the default';
 FILES.forEach((f, i) => {
   let g = groups[f.group];
   if (!g) { g = groups[f.group] = document.createElement('optgroup'); g.label = f.group; $('file').appendChild(g); }
-  const o = document.createElement('option'); o.value = i; o.textContent = f.label; o.selected = !!f.selected; g.appendChild(o);
+  const o = document.createElement('option'); o.value = i; o.textContent = f.label; o.selected = asked ? f === asked : !!f.selected; g.appendChild(o);
 });
 async function choose() {
   const f = FILES[$('file').value];
+  song = f; syncUrl();
   const r = await fetch(f.file.split('/').map(encodeURIComponent).join('/'));
   load(f.label, binary(await r.arrayBuffer()));
 }
-$('file').onchange = choose;
+$('file').onchange = () => { notice = ''; choose(); };
 $('upload').onchange = async e => {
   const f = e.target.files[0];
-  if (f) load(f.name, binary(await f.arrayBuffer()));
+  if (f) { song = null; syncUrl(); load(f.name, binary(await f.arrayBuffer())); }
 };
-$('play').onclick = () => { if (player) { status('playing ' + current); player.play(); } };
-$('pause').onclick = () => { if (player) { player.pause(); allNotesOff(); status('paused'); } };
-$('stop').onclick = () => { stop(); status('stopped'); };
+$('play').onclick = () => {
+  if (!player) return;
+  if (emuReady) play();
+  else { wantPlay = true; $('go').hidden = true; status('starting the emulator...'); startEmu(); }
+};
+$('pause').onclick = () => { if (player && player.playing) { player.pause(); allNotesOff(); status('paused'); } };
+$('stop').onclick = () => { wantPlay = false; stop(); status('stopped'); };
 choose();
 
 // Your own bank: an FM1B file (make_bank.js / the converter, not an MP3-packed one: this is the plain firmware) is laid in the emulator's
@@ -108,31 +188,42 @@ const SECTOR = 4096, START = 0x7C000 + 69632;       // fm1b_config.h: FM1B_FLASH
 let blobUrl = null;
 function boot(flash, label) {
   stop();
+  emuReady = false;
   emu.src = 'emulator.html?fw=sf2&flash=' + encodeURIComponent(flash) + '&mhz=240';
   $('bankinfo').textContent = label;
-  status('restarting the emulator with ' + label + ': click in it, then press Play');
+  status('starting the emulator with ' + label + '...');
 }
 $('bank').onchange = async e => {
   const f = e.target.files[0];
   if (!f) return;
-  const bank = new Uint8Array(await f.arrayBuffer());
-  const magic = String.fromCharCode(...bank.subarray(0, 4)), version = bank.length > 5 ? bank[4] | bank[5] << 8 : 0;
+  const data = new Uint8Array(await f.arrayBuffer());
+  const magic = String.fromCharCode(...data.subarray(0, 4)), version = data.length > 5 ? data[4] | data[5] << 8 : 0;
   if (magic !== 'FM1B') { status(f.name + ' is not an FM1B bank (it should start with FM1B)'); return; }
   if (version !== 1) { status(f.name + ' is an MP3-packed bank (version ' + version + '); the emulator runs the plain firmware, which refuses it'); return; }
-  const sectors = Math.ceil(bank.length / SECTOR);
-  if (sectors > 256) { status('the emulator takes banks up to 1 MB; this one is ' + bank.length + ' bytes'); return; }
+  const sectors = Math.ceil(data.length / SECTOR);
+  if (sectors > 256) { status('the emulator takes banks up to 1 MB; this one is ' + data.length + ' bytes'); return; }
   const out = new Uint8Array(sectors * (4 + SECTOR)).fill(0xff), dv = new DataView(out.buffer);
   for (let i = 0; i < sectors; i++) {
     const o = i * (4 + SECTOR);
     dv.setUint32(o, START + i * SECTOR, true);
-    out.set(bank.subarray(i * SECTOR, Math.min(bank.length, (i + 1) * SECTOR)), o + 4);
+    out.set(data.subarray(i * SECTOR, Math.min(data.length, (i + 1) * SECTOR)), o + 4);
   }
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = URL.createObjectURL(new Blob([out]));
-  boot(blobUrl, f.name + ' (' + bank.length + ' bytes)');
+  bank = null; syncUrl();
+  boot(blobUrl, f.name + ' (' + data.length + ' bytes)');
 };
 for (const b of BANKS) { const o = document.createElement('option'); o.value = b.flash; o.textContent = b.label; $('hosted').appendChild(o); }
-$('hosted').onchange = () => boot($('hosted').value, $('hosted').selectedOptions[0].textContent);
+const askedBank = params.get('bank') && BANKS.find(b => b.id === slug(params.get('bank')) || b.id === params.get('bank'));
+if (params.get('bank') && !askedBank) notice = (notice ? notice + '; ' : '') + 'no bank "' + params.get('bank') + '" on this site, so the default';
+if (askedBank) $('hosted').value = askedBank.flash;
+let bankChosen = false;
+$('hosted').onchange = () => {
+  if (bankChosen) notice = '';   // (the first call, at the start, keeps the link's notice)
+  bankChosen = true;
+  bank = BANKS.find(b => b.flash === $('hosted').value); syncUrl();
+  boot($('hosted').value, $('hosted').selectedOptions[0].textContent);
+};
 $('hosted').onchange();
 </script>
 </body></html>
