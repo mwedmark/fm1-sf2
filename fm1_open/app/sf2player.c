@@ -92,7 +92,7 @@ void sf2player_channel_bend(unsigned channel, unsigned value)
  * Not saved: a restart starts with nothing armed. The control task writes, the routing task reads; both are 16-bit/8-bit words. */
 static uint16_t armed;                                    /* bit r: row r (MIDI channel r+1's row) is armed */
 static uint8_t arm_midi[16];                               /* the MIDI channel (0..15) an armed row listens on; 0 = MIDI channel 1 */
-static void row_play(unsigned row, unsigned note, unsigned velocity)
+__attribute__((noinline)) static void row_play(unsigned row, unsigned note, unsigned velocity)
 {
     if (row == 9U)
         sf2player_channel_drum(row, note, velocity);
@@ -522,11 +522,11 @@ static void channels_update(const struct fm1b_status *st)
         line_show(2 + c, 40 + c * 11, line, 1, color);
         line_back = BACKGROUND;
     }
-    if ((armed >> cursor) & 1U) {                             /* the selected row's MIDI channel, and how to change it */
-        d = put_text(line, "EDIT OFF  GLO MIDI ");
+    d = put_text(line, "ARM MIDI ");                          /* the selected row's MIDI channel when armed (EDIT arms, GLO steps) */
+    if ((armed >> cursor) & 1U)
         d = put_number(d, arm_midi[cursor] + 1, 0);
-    } else
-        d = put_text(line, "EDIT ARM  KEYS PLAY ARMED ROWS");
+    else
+        *d++ = '-';
     *d = 0;
     line_show(20, 214, line, 1, armed ? CYAN : GREY);
     d = put_cpu(put_text(line, "ARP MUTE SEQ SOLO  "));
