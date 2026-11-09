@@ -92,7 +92,7 @@ jobs:
           path: out/
           if-no-files-found: error
 
-  # The hosted bank: the SoundFont is fetched from the repository secret SF2_URL (an https address; the file is not kept in the repo),
+  # The hosted bank: the SoundFont is soundfonts/1mgm.sf2 of the repo, or else fetched from the repository secret SF2_URL (an https address),
   # converted with make_bank.js and stored as the artifact "bank" (default.fm1b), which the site then hosts and selects at the start.
   # Without the secret this job does nothing and the site keeps whatever banks/ holds (or the sine test bank).
   bank:
@@ -107,8 +107,9 @@ jobs:
           SF2_URL: ${{ secrets.SF2_URL }}
           FORMAT: ${{ inputs.bank_format || vars.BANK_FORMAT || 'bfp8' }}
         run: |
-          if [ -z "$SF2_URL" ]; then echo "No SF2_URL secret: no bank is made." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
-          curl -fsSL --retry 3 -o font.sf2 "$SF2_URL"
+          if [ -f soundfonts/1mgm.sf2 ]; then cp soundfonts/1mgm.sf2 font.sf2
+          elif [ -n "$SF2_URL" ]; then curl -fsSL --retry 3 -o font.sf2 "$SF2_URL"
+          else echo "No soundfonts/1mgm.sf2 and no SF2_URL secret: no bank is made." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
           mkdir -p out
           node make_bank.js "$FORMAT" 32000 font.sf2 out/default.fm1b | tee bank.log
           echo "### bank ($FORMAT, 32 kHz)" >> "$GITHUB_STEP_SUMMARY"
