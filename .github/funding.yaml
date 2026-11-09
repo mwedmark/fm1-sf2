@@ -1,0 +1,5 @@
+# GitHub har direkt stöd för Buy Me a Coffee:
+buy_me_a_coffee: DITT_ANVÄNDARNAMN
+
+# Eller om du vill länka till en helt valfri sida (t.ex. PayPal, Ko-fi eller donatr.ee):
+custom: ["https://paypal.me", "https://ko-fi.com"]
