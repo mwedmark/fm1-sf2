@@ -390,7 +390,7 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 | CC1 modulation wheel | Per channel: vibrato, 5.5 Hz, up to +-50 cents at 127 |
 | CC64 sustain pedal | Per channel: a note released while it is down sounds on until the pedal goes up |
 | CC120 / CC121 / CC123 | All sound off / reset volume, expression, pan, bend, wheel and pedal / all notes off, **for that channel only** |
-| CC91 / CC93 | Reverb and chorus send **per channel**, 30 and 20 until set. The panel's KNOB3/KNOB4 master levels (127 by default) scale them |
+| CC91 / CC93 | Reverb and chorus send **per channel**, 30 and 20 until set. The panel's KNOB3/KNOB4 master levels (30 for reverb and 30 for chorus by default, since 2026-11-09; they were 127) scale them |
 | CC10 pan | **Per channel**, live on sounding notes. Added to each zone's own pan from the SoundFont (generator 17), as an SF2 player does: at 64 (the default) the SoundFont's pan is heard as it is (the drum kit is spread), 0 moves the channel all the way left, 127 all the way right |
 
 Panel: the line `MULTI n CH   LAST CH.. PRG...` appears once a program change has been received. **HOME** switches to the channel page:
@@ -432,8 +432,8 @@ clicks down; MASTER to 300), RMS from the tap: both 0.067, channel 1 muted 0.041
 0.068, ALGORITHM -64 on channel 1 0.043, MASTER down 0.014. The emulator draws no LCD, so the screen and the LEDs are for the device
 (FM1_TEST.md C8-C13). Image 435 068 bytes (+576).
 
-What a channel gets of an effect is master x send. The defaults (master 127, sends 30 and 20) sound bit for bit as the single global
-level of 30 and 20 did before (`test_fx.js` checks it). On the channel page the panel's keys play the selected channel.
+What a channel gets of an effect is master x send. Until 2026-11-09 the defaults (master 127, sends 30 and 20) sounded bit for bit as the single global
+level of 30 and 20 did before; the master levels now default to 30 and 30, so a channel gets about a quarter of that (`test_fx.js` checks it). On the channel page the panel's keys play the selected channel.
 
 Cost of the sends: while all sounding channels have the same sends the effects are fed from the dry mix as before; only when they differ
 does each voice also go to a reverb and a chorus bus. In fm1-emu at 240 MHz, 8 flute voices on two channels: same sends
