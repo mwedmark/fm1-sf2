@@ -15,9 +15,9 @@ and sent to the emulator, which is also registered in JZZ as the output <code>FM
 (<code>JZZ().openMidiOut('FM-1 emulator')</code> from the console or another script on this page).
 Click in the emulator first, so the browser lets it play sound. The bank is seven sine programs, not General MIDI.</p>
 <div class="row">
-  <label>Bank <input id="bank" type="file" accept=".fm1b,application/octet-stream"></label>
-  <button id="sine">Sine test bank</button>
-  <span id="bankinfo">sine test bank</span>
+  <label>Bank <select id="hosted"></select></label>
+  <label>or your own <input id="bank" type="file" accept=".fm1b,application/octet-stream"></label>
+  <span id="bankinfo"></span>
 </div>
 <div class="row">
   <label>Test file <select id="file"></select></label>
@@ -28,13 +28,14 @@ Click in the emulator first, so the browser lets it play sound. The bank is seve
   <label><input id="loop" type="checkbox"> loop</label>
   <span id="status">loading...</span>
 </div>
-<iframe id="emu" src="emulator.html?fw=sf2&flash=sine.flash&mhz=240" title="FM-1 emulator" allow="autoplay"></iframe>
+<iframe id="emu" title="FM-1 emulator" allow="autoplay"></iframe>
 <p><small>Emulator: <a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a> (MIT). Firmware and files:
 <a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a>.</small></p>
 <script src="JZZ.js"></script>
 <script src="JZZ.midi.SMF.js"></script>
 <script>
 const FILES = __FILES__;
+const BANKS = __BANKS__;     // the banks the site hosts: the first is selected at the start
 const $ = id => document.getElementById(id);
 const status = t => { $('status').textContent = t; };
 const emu = $('emu');
@@ -115,6 +116,8 @@ $('bank').onchange = async e => {
   blobUrl = URL.createObjectURL(new Blob([out]));
   boot(blobUrl, f.name + ' (' + bank.length + ' bytes)');
 };
-$('sine').onclick = () => boot('sine.flash', 'sine test bank');
+for (const b of BANKS) { const o = document.createElement('option'); o.value = b.flash; o.textContent = b.label; $('hosted').appendChild(o); }
+$('hosted').onchange = () => boot($('hosted').value, $('hosted').selectedOptions[0].textContent);
+$('hosted').onchange();
 </script>
 </body></html>
