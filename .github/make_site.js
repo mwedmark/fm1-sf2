@@ -64,18 +64,23 @@ async function get(url) {
     }
     return o;
   };
-  // The banks the site hosts: banks/*.fm1b of this repo (default.fm1b first and selected at the start), then the sine test bank.
-  const banks = [];
-  const bankDir = path.join(root, 'banks');
-  const names = fs.existsSync(bankDir) ? fs.readdirSync(bankDir).filter(f => /\.fm1b$/i.test(f)).sort((a, b) => (b === 'default.fm1b') - (a === 'default.fm1b') || a.localeCompare(b)) : [];
-  for (const f of names) {
-    const bytes = fs.readFileSync(path.join(bankDir, f));
-    if (bytes.toString('latin1', 0, 4) !== 'FM1B' || bytes.readUInt16LE(4) !== 1) throw new Error(`banks/${f} is not a plain FM1B bank (the site runs the plain firmware; MP3-packed banks are refused)`);
+  // The banks the site hosts: banks/*.fm1b (default.fm1b first), then soundfonts/*.fm1b, then the sine test bank. The first is selected at the start.
+  const banks = [], seen = new Set();
+  const found = [];
+  for (const dir of ['banks', 'soundfonts']) {
+    const d = path.join(root, dir);
+    if (fs.existsSync(d)) for (const f of fs.readdirSync(d).filter(f => /\.fm1b$/i.test(f)).sort((a, b) => (b === 'default.fm1b') - (a === 'default.fm1b') || a.localeCompare(b))) found.push({ dir, f });
+  }
+  for (const { dir, f } of found) {
     const id = f.replace(/\.fm1b$/i, '');
+    if (seen.has(id) || id === 'sine') { console.warn(`${dir}/${f}: the name ${id} is taken, skipped`); continue; }
+    const bytes = fs.readFileSync(path.join(root, dir, f));
+    if (bytes.toString('latin1', 0, 4) !== 'FM1B' || bytes.readUInt16LE(4) !== 1) throw new Error(`${dir}/${f} is not a plain FM1B bank (the site runs the plain firmware; MP3-packed banks are refused)`);
+    seen.add(id);
     fs.writeFileSync(path.join(out, `${id}.flash`), overlay(bytes));
-    fs.copyFileSync(path.join(bankDir, f), path.join(out, f));
+    fs.copyFileSync(path.join(root, dir, f), path.join(out, f));
     banks.push({ flash: `${id}.flash`, label: `${id} (${(bytes.length / 1024).toFixed(0)} KB)` });
-    console.log(`bank ${f}: ${bytes.length} bytes`);
+    console.log(`bank ${dir}/${f}: ${bytes.length} bytes`);
   }
 
   // The bank: make_sine_bank.js (seven programs of one looped sine, no soundfont needed), laid where the firmware looks for it.
