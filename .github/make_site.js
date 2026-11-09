@@ -122,6 +122,10 @@ async function get(url) {
   fs.writeFileSync(path.join(out, 'LICENSE-fm1-emu.txt'), licence || 'fm1-emu is MIT licensed: https://github.com/joakimeriksson/fm1-emu\n');
 
   const q = `fw=sf2&flash=${banks[0].flash}&mhz=240`;
+  // "Buy me a beer": the first custom link of .github/FUNDING.yml (GitHub's Sponsor button), none if the file has none.
+  const fundingPath = path.join(__dirname, 'FUNDING.yml');
+  const funding = fs.existsSync(fundingPath) && (fs.readFileSync(fundingPath, 'utf8').match(/^custom:\s*\[?\s*["']?(https:\/\/[^"'\],\s]+)/m) || [])[1];
+  const beer = funding ? `<p><a href="${funding}"><b>&#127866; Buy me a beer</b></a></p>\n` : '';
   fs.writeFileSync(path.join(out, 'index.html'), `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FM-1 SF2 player emulator</title>
@@ -139,7 +143,7 @@ Its <b>Copy link</b> gives a link to a bank and song that plays at the first cli
 <li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>
-<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>; JZZ.js and its SMF player are MIT too (<a href="LICENSE-jzz.txt">licence</a>).</small></p>
+${beer}<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>; JZZ.js and its SMF player are MIT too (<a href="LICENSE-jzz.txt">licence</a>).</small></p>
 </body></html>
 `);
   console.log('site written to', out);
