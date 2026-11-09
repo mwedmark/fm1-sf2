@@ -1,0 +1,79 @@
+// Makes the GitHub Pages site: the fm1-emu emulator (MIT, https://github.com/joakimeriksson/fm1-emu) fetched from its own site,
+// this repo's firmware package registered in its catalog as "sf2", and the sine test bank as a flash overlay.
+//   node .github/make_site.js <outdir> <firmware.fwsc> [version]
+// The same steps as start_emu.ps1 (RUNNING.md section 4), for a Pages site instead of a local server.
+const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
+const [out, fwsc, version = String(Date.now())] = process.argv.slice(2);
+if (!out || !fwsc) throw new Error('usage: node .github/make_site.js <outdir> <firmware.fwsc> [version]');
+const root = path.join(__dirname, '..');
+const SITE = 'https://joakimeriksson.github.io/fm1-emu/';
+const FILES = ['main.js', 'index.html', 'worklet.js', 'persistence.js', 'fwsc.js', 'tryout.js', 'style.css', 'firmwares.json', 'fm1_web.wasm'];
+
+async function get(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+(async () => {
+  fs.rmSync(out, { recursive: true, force: true });
+  fs.mkdirSync(out, { recursive: true });
+  for (const f of FILES) fs.writeFileSync(path.join(out, f), await get(SITE + f));
+
+  // The emulator's own page becomes emulator.html; index.html is ours.
+  fs.renameSync(path.join(out, 'index.html'), path.join(out, 'emulator.html'));
+
+  // A browser keeps the first package it ran under the id sf2 and boots those bytes again: take a kept copy only while the address
+  // (?v= below) is the same, so a new build is fetched (start_emu.ps1, 1b).
+  const mainPath = path.join(out, 'main.js');
+  let main = fs.readFileSync(mainPath, 'utf8');
+  const kept = /(  const kept = await keptEntry\(f\.id\);\r?\n)  if \(kept\) \{/;
+  if (kept.test(main))
+    main = main.replace(kept, '$1  if (kept && (f.id !== "sf2" || kept.url === f.package)) {   // a new build of sf2 is fetched');
+  else console.warn('WARNING: main.js changed upstream: a browser may boot an older sf2 build');
+  fs.writeFileSync(mainPath, main);
+
+  // The catalog entry, with the version in the address.
+  const catPath = path.join(out, 'firmwares.json');
+  const cat = JSON.parse(fs.readFileSync(catPath, 'utf8'));
+  cat.firmwares = (cat.firmwares || []).filter(e => e.id !== 'sf2');
+  cat.firmwares.unshift({ id: 'sf2', name: 'sf2player', version: version.slice(0, 7), author: 'mwedmark', license: 'GPL-3.0',
+    about: 'SoundFont player for the FM-1', repo: 'https://github.com/mwedmark/fm1-sf2', package: `sf2player.fwsc?v=${version}` });
+  fs.writeFileSync(catPath, JSON.stringify(cat, null, 2));
+  fs.copyFileSync(fwsc, path.join(out, 'sf2player.fwsc'));
+
+  // The bank: make_sine_bank.js (seven programs of one looped sine, no soundfont needed), laid where the firmware looks for it.
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'bank-'));
+  const bank = path.join(tmp, 'sine.fm1b');
+  execFileSync('node', [path.join(root, 'make_sine_bank.js'), bank], { stdio: 'inherit' });
+  execFileSync('node', [path.join(root, 'make_flash_overlay.js'), bank, path.join(out, 'sine.flash')], { stdio: 'inherit' });
+  fs.copyFileSync(path.join(root, 'test_emu', 'sine.script'), path.join(out, 'sine.script'));
+
+  // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
+  let licence = null;
+  for (const branch of ['main', 'master']) {
+    try { licence = await get(`https://raw.githubusercontent.com/joakimeriksson/fm1-emu/${branch}/LICENSE`); break; } catch (e) { /* next */ }
+  }
+  fs.writeFileSync(path.join(out, 'LICENSE-fm1-emu.txt'), licence || 'fm1-emu is MIT licensed: https://github.com/joakimeriksson/fm1-emu\n');
+
+  const q = 'fw=sf2&flash=sine.flash&mhz=240';
+  fs.writeFileSync(path.join(out, 'index.html'), `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FM-1 SF2 player emulator</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:2em auto;padding:0 16px}code{background:#8882;padding:0 .3em}</style></head>
+<body>
+<h1>FM-1 SF2 player in the emulator</h1>
+<p>The firmware of <a href="https://github.com/mwedmark/fm1-sf2">mwedmark/fm1-sf2</a> (build ${version.slice(0, 7)}) running in
+<a href="https://github.com/joakimeriksson/fm1-emu">fm1-emu</a>, in your browser, with a test bank of seven sine programs
+(plain, vibrato, tremolo, delayed vibrato, filter sweep, two low-passes). It is not a General MIDI bank.</p>
+<ul>
+<li><a href="emulator.html?${q}"><b>Open the emulator</b></a> and play it with the keys or a MIDI keyboard (Chrome or Edge, Web MIDI).</li>
+<li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
+<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
+</ul>
+<p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>
+<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>.</small></p>
+</body></html>
+`);
+  console.log('site written to', out);
+})().catch(e => { console.error(e); process.exit(1); });
