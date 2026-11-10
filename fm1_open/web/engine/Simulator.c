@@ -417,14 +417,25 @@ EXPORT("sim_sample_bank") int sim_sample_bank(unsigned bytes)
     while (groove_samples_status() == 1) groove_samples_poll();
     return groove_samples_status() == 2 ? 0 : -1;
 }
-/* Melodic FM1B bank: the browser writes the image into sim_melodic_buffer(), then loads it. */
-static uint8_t melodic_store[1U << 20];
-EXPORT("sim_melodic_buffer") uint8_t *sim_melodic_buffer(void) { return melodic_store; }
-EXPORT("sim_melodic_capacity") unsigned sim_melodic_capacity(void) { return sizeof melodic_store; }
+/* Melodic FM1B bank: the browser asks for room with sim_melodic_reserve() (or uses sim_melodic_buffer(), 1 MB), writes the
+ * image there, then loads it. The room is not bound by the FM-1's flash, so a bank too large for the device can still be heard. */
+static uint8_t *melodic_store;
+static unsigned melodic_size;
+EXPORT("sim_melodic_reserve") uint8_t *sim_melodic_reserve(unsigned bytes)
+{
+    if (bytes <= melodic_size) return melodic_store;
+    sampledrum_melodic_bind(NULL, 0);                         /* the old bank goes with its memory */
+    free(melodic_store);
+    melodic_store = malloc(bytes ? bytes : 1U);
+    melodic_size = melodic_store ? bytes : 0U;
+    return melodic_store;
+}
+EXPORT("sim_melodic_buffer") uint8_t *sim_melodic_buffer(void) { return sim_melodic_reserve(1U << 20); }
+EXPORT("sim_melodic_capacity") unsigned sim_melodic_capacity(void) { return melodic_size > 1U << 20 ? melodic_size : 1U << 20; }   /* what sim_melodic_buffer() holds */
 EXPORT("sim_melodic_load") int sim_melodic_load(unsigned bytes)
 {
     if (!bytes) return sampledrum_melodic_bind(NULL, 0);
-    return bytes <= sizeof melodic_store ? sampledrum_melodic_bind(melodic_store, bytes) : -1;
+    return melodic_store && bytes <= melodic_size ? sampledrum_melodic_bind(melodic_store, bytes) : -1;
 }
 EXPORT("sim_melodic_program") int sim_melodic_program(unsigned bank, unsigned program)
 { return sampledrum_melodic_program(bank, program); }

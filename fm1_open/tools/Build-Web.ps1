@@ -81,7 +81,7 @@ function Build-Simulator {
         '-Wno-unused-function','-Wno-array-parameter','-mexec-model=reactor')
     foreach ($name in @('web/engine','web/synth','third_party/synth','sdk/include','app/synth','app')) { $options += '-I' + (Join-Path $root $name) }
     foreach ($name in $names) { if ($name.EndsWith('.c') -and !$name.StartsWith('sdk/')) { $options += Join-Path $root $name } }
-    $options += @('-Wl,--strip-all','-Wl,-z,stack-size=131072','-Wl,--initial-memory=4194304','-Wl,--max-memory=33554432','-o',$wasm)
+    $options += @('-Wl,--strip-all','-Wl,-z,stack-size=131072','-Wl,--initial-memory=4194304','-Wl,--max-memory=268435456','-o',$wasm)
     Write-Host 'Compile the browser application'
     try {
         Run $compiler $options

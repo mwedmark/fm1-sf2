@@ -47,6 +47,16 @@
   .ok { color: var(--ok); }
   [hidden] { display: none !important; }
   .tablewrap { max-height: 280px; overflow: auto; margin-top: 8px; }
+  .pickbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .pickbar button { padding: 5px 10px; font-size: 14px; }
+  .pickbar input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+  .picklist { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 14px;
+              display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 16px; align-content: start; }
+  .picklist label { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; cursor: pointer; min-width: 0; }
+  .picklist label.off { color: var(--muted); cursor: default; }
+  .picklist .num { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 4.5em; }
+  .picklist h4 { grid-column: 1 / -1; margin: 6px 0 2px; font-size: 13px; color: var(--muted); }
+  #pickSum { margin: 8px 0 12px; }
   .keys { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0; }
   .keys button { min-width: 38px; padding: 14px 4px 6px; font-size: 11px; background: var(--panel); color: var(--ink); border-radius: 4px; }
   .keys button.black { background: var(--ink); color: var(--bg); padding-top: 6px; }
@@ -67,6 +77,15 @@
   <section id="opts" class="panel" hidden>
     <p class="meta" id="info"></p>
     <label class="f"><span>Preset</span><select id="preset"></select></label>
+    <div id="pick" hidden>
+      <div class="pickbar">
+        <button type="button" data-pick="all">All</button><button type="button" data-pick="none">None</button>
+        <button type="button" data-pick="melodic">Melodic only</button><button type="button" data-pick="drums">Drums only</button>
+        <input id="pickFilter" type="search" placeholder="Filter by name or number" aria-label="Filter the instruments">
+      </div>
+      <div id="pickList" class="picklist" role="group" aria-label="Instruments to put in the bank"></div>
+      <p class="meta" id="pickSum"></p>
+    </div>
     <div class="row">
       <label class="f"><span>Encoding</span>
         <select id="codec">
@@ -619,6 +638,10 @@ function writeFm1(bank, info) {
   const zones = [];
   bank.zones.forEach((z, i) => { if (!gone[i]) { newIndex[i] = zones.length; zones.push(z); } });
   const presets = bank.presets.filter(p => written.has(p)).map(p => Object.assign({}, p, { first: newIndex[p.first] }));
+  // bank.emptySlots: bank map slots (0..255) of instruments left out on purpose. They all get one preset without zones, so a
+  // program change to one of them makes the channel silent; a slot the bank has no preset for leaves the channel as it was.
+  const emptySlots = (bank.emptySlots || []).filter(s => s >= 0 && s < 256);
+  if (emptySlots.length) presets.push({ name: '(empty)', bank: -1, preset: -1, first: 0, count: 0, emptySlots });
   const usedSounds = new Set(zones.map(z => z.sample)), sounds = bank.samples.filter(s => usedSounds.has(s));
   bank.zonesWritten = zones.length; bank.soundsWritten = sounds.length;      // what the file holds, for the page's summary
   const np = presets.length, nz = zones.length;
@@ -688,8 +711,8 @@ function writeFm1(bank, info) {
   for (let i = 0; i < 256; i++) dv.setUint16(offBank + i * 2, 0xffff, true);
 
   presets.forEach((p, pi) => {
-    const sl = slot(p);
-    if (dv.getUint16(offBank + sl * 2, true) === 0xffff) dv.setUint16(offBank + sl * 2, pi, true);
+    for (const sl of p.emptySlots || [slot(p)])             // the empty preset is last: a slot a chosen preset has keeps it
+      if (dv.getUint16(offBank + sl * 2, true) === 0xffff) dv.setUint16(offBank + sl * 2, pi, true);
     const o = offPre + pi * FM1B_PRESET;
     dv.setUint16(o, p.first, true); dv.setUint16(o + 2, p.count, true);
     putName(out, o + 4, p.name);
@@ -916,6 +939,10 @@ function writeSf2(bank, name) {
     const allP = document.createElement('option');
     allP.value = -2; allP.textContent = 'All presets with key mapping (' + sf.presets.length + ' instruments)';
     sel.appendChild(allP);
+    const chosenP = document.createElement('option');
+    chosenP.value = 'pick'; chosenP.textContent = 'Chosen instruments (tick them below; the rest are silent)';
+    sel.appendChild(chosenP);
+    drawPick();
     let pick = 0;
     sf.presets.forEach((p, i) => {
       const o = document.createElement('option');
@@ -924,8 +951,68 @@ function writeSf2(bank, name) {
       if (p.bank === 0 && p.preset === 0 && !pick) pick = i;   // option 0 is "all", presets follow
     });
     sel.value = -2;
+    $('pick').hidden = true;
     $('opts').hidden = false;
   }
+
+  // ---- Choosing the instruments: a tick per preset of bank 0 (melodic) and 128 (drums). Each keeps its program number; the
+  // bank's other programs get an empty preset (writeFm1's emptySlots), so they are silent rather than playing what came before.
+  const slotOf = p => p.bank === 0 ? p.preset : p.bank === 128 ? 128 + p.preset : -1;
+  function drawPick() {
+    const box = $('pickList'); box.textContent = '';
+    $('pickFilter').value = '';
+    const order = sf.presets.map((p, i) => i).sort((a, b) => {
+      const sa = slotOf(sf.presets[a]), sb = slotOf(sf.presets[b]);
+      return (sa < 0) - (sb < 0) || (sa < 0 ? sf.presets[a].bank - sf.presets[b].bank || sf.presets[a].preset - sf.presets[b].preset : sa - sb);
+    });
+    let group = null;
+    for (const i of order) {
+      const p = sf.presets[i], s = slotOf(p), g = s < 0 ? 'other' : s < 128 ? 'melodic' : 'drums';
+      if (g !== group) {
+        group = g; const h = document.createElement('h4');
+        h.textContent = g === 'melodic' ? 'Melodic (bank 0)' : g === 'drums' ? 'Drum kits (bank 128)' : 'Other banks (not in an FM1B bank: only banks 0 and 128 have program numbers)';
+        box.appendChild(h);
+      }
+      const l = document.createElement('label'), c = document.createElement('input'), n = document.createElement('span'), t = document.createElement('span');
+      c.type = 'checkbox'; c.value = i; c.dataset.group = g; c.checked = s >= 0; c.disabled = s < 0;
+      n.className = 'num'; n.textContent = (g === 'other' ? p.bank + '/' : g === 'drums' ? 'kit ' : '') + String(p.preset).padStart(3, '0');
+      t.textContent = p.name;
+      if (s < 0) l.className = 'off';
+      l.dataset.find = (String(p.preset).padStart(3, '0') + ' ' + p.preset + ' ' + p.name).toLowerCase();
+      l.append(c, n, t); box.appendChild(l);
+    }
+    pickSum();
+  }
+  const pickBoxes = () => [...$('pickList').querySelectorAll('input:not(:disabled)')];
+  const chosen = () => pickBoxes().filter(c => c.checked).map(c => +c.value);
+  // About how many bytes the ticked instruments' sounds take in the codec chosen (the sounds they share counted once; loops,
+  // which are unrolled to a whole number of frames, and the tables are left out), to see what fits before converting.
+  function pickSum() {
+    const list = chosen(), kbit = mp3Kbit(), codec = $('codec').value, rate = kbit ? 32000 : +$('rate').value;
+    const perSample = kbit ? 33 / 32 : codec === 'sea' ? 228 / 320 : codec === 'sea6' ? 268 / 320 : codec === 'bfp8' ? 33 / 32 : +$('bits').value / 8;
+    const seen = new Set(); let bytes = 0;
+    for (const i of list) for (const z of presetZones(sf, i)) {
+      if (seen.has(z.sample)) continue; seen.add(z.sample);
+      const sh = sf.shdr[z.sample]; bytes += Math.max(0, sh.end - sh.start) * rate / (sh.rate > 0 ? sh.rate : 44100) * perSample;
+    }
+    const melodic = list.filter(i => slotOf(sf.presets[i]) < 128).length;
+    $('pickSum').innerHTML = list.length + ' of ' + pickBoxes().length + ' ticked (' + melodic + ' melodic, ' + (list.length - melodic) + ' drum kits): sounds about ' +
+      fmtBytes(bytes) + (kbit ? ' as BFP8 (the MP3 packing makes that about half at 64 kbit/s)' : '') + ', against the device\'s ' + fmtBytes(FM1_SAMPLE_BANK) +
+      (bytes > FM1_SAMPLE_BANK ? ' <span class="warn">(too much' + (kbit ? ' before packing' : '') + ')</span>' : '') + '. Tables and loops add a little.';
+  }
+  $('preset').addEventListener('change', () => { $('pick').hidden = $('preset').value !== 'pick'; if (!$('pick').hidden) pickSum(); });
+  $('pickList').addEventListener('change', pickSum);
+  for (const id of ['codec', 'rate', 'bits']) $(id).addEventListener('change', () => { if (sf && !$('pick').hidden) pickSum(); });
+  $('opts').querySelector('.pickbar').addEventListener('click', e => {
+    const how = e.target.dataset && e.target.dataset.pick; if (!how) return;
+    // the buttons act on the instruments the filter shows
+    for (const c of pickBoxes()) if (!c.parentElement.hidden) c.checked = how === 'all' || how === c.dataset.group;
+    pickSum();
+  });
+  $('pickFilter').addEventListener('input', () => {
+    const q = $('pickFilter').value.trim().toLowerCase();
+    for (const l of $('pickList').querySelectorAll('label')) l.hidden = !!q && !l.dataset.find.includes(q);
+  });
 
   // MP3: the codec menu's kbit/s, else 0. The bank is made as BFP8 at 32 kHz and then packed by pack_bank.js (the live-cache firmware's format).
   const mp3Kbit = () => +($('codec').value.match(/^mp3_(\d+)$/) || [0, 0])[1];
@@ -938,11 +1025,17 @@ function writeSf2(bank, name) {
     showErr('');
     const kbit = mp3Kbit();
     if (kbit && (typeof lamejs === 'undefined' || typeof MP3_DECODER === 'undefined' || typeof FM1_PACK === 'undefined')) { showErr('MP3 needs third_party/lamejs/lame.min.js, mp3_decoder_wasm.js and pack_bank.js next to this page.'); return; }
+    const picking = $('preset').value === 'pick', list = picking ? chosen() : null;
+    if (picking && !list.length) { $('result').hidden = true; showErr('Tick at least one instrument.'); return; }
     try {
-      bank = buildBank(sf, +$('preset').value, kbit ? { rate: 32000, bits: 8, sea: false, seaBits: 5, bfp: true } :
+      bank = buildBank(sf, picking ? list : +$('preset').value, kbit ? { rate: 32000, bits: 8, sea: false, seaBits: 5, bfp: true } :
         { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
     } catch (e) { showErr('The conversion failed: ' + e.message); return; }
     if (!bank.zones.length) { $('result').hidden = true; showErr('The preset has no playable sounds.'); return; }
+    if (picking) {                                           // the font's instruments not ticked: silent at their program numbers
+      const kept = new Set(bank.presets.map(slotOf));
+      bank.emptySlots = [...new Set(sf.presets.map(slotOf).filter(s => s >= 0 && !kept.has(s)))];
+    }
     bank.info = bankInfo(bankFileName(kbit));                // one name and time a conversion: the file sent and the one saved are the same
     const bin = writeFm1(bank, bank.info);
     let play = bin;
@@ -962,6 +1055,7 @@ function writeSf2(bank, name) {
       '. <strong>' + (p ? '.fm1b ' : '.bin ') + fmtBytes(file.length) + '</strong>' +
       (file.length > FM1_SAMPLE_BANK ? ' <span class="warn">(more than the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (fits in the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
       (p ? '. <strong>It plays only on the live-cache firmware</strong> (<a href="install.html?firmware=live">the install page</a> installs it); the simulator below plays the MP3 sounds as that firmware decodes them' : '') +
+      (bank.emptySlots && bank.emptySlots.length ? '. ' + (bank.emptySlots.length === 1 ? 'The instrument not ticked is silent at its program number' : 'The ' + bank.emptySlots.length + ' instruments not ticked are silent at their program numbers') : '') +
       (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets outside bank 0/128 are not in the .bin)</span>' : '');
     const tb = $('zones'); tb.textContent = '';
     for (const z of bank.zones) {
@@ -1021,7 +1115,7 @@ function writeSf2(bank, name) {
       const bankMap = dv.getUint32(20, true), presets = dv.getUint32(24, true), out = [];
       for (let slot = 0; slot < 256; slot++) {
         const p = dv.getUint16(bankMap + slot * 2, true);
-        if (p === 0xffff) continue;
+        if (p === 0xffff || !dv.getUint16(presets + p * 24 + 2, true)) continue;   // no preset, or the empty one
         let name = ''; for (let i = 0; i < 20 && bin[presets + p * 24 + 4 + i]; i++) name += String.fromCharCode(bin[presets + p * 24 + 4 + i]);
         out.push({ slot, label: (slot < 128 ? 'Bank 0 / ' : 'Drums ') + String(slot % 128).padStart(3, '0') + '  ' + name.trim() });
       }
@@ -1032,8 +1126,10 @@ function writeSf2(bank, name) {
       if (!has) return;
       try {
         await start();
-        if (bin.length > c.sim_melodic_capacity()) throw new Error('The bank is too large for the simulator.');
-        new Uint8Array(c.memory.buffer, c.sim_melodic_buffer(), bin.length).set(bin);
+        // the simulator takes a bank of any size (older builds: up to 1 MB), so a bank too large for the FM-1 can still be heard
+        const at = c.sim_melodic_reserve ? c.sim_melodic_reserve(bin.length) : bin.length <= c.sim_melodic_capacity() ? c.sim_melodic_buffer() : 0;
+        if (!at) throw new Error('The bank is too large for the simulator.');
+        new Uint8Array(c.memory.buffer, at, bin.length).set(bin);
         if (c.sim_melodic_load(bin.length) !== 0) throw new Error('The simulator rejected the bank.');
         const sel = $('program'); sel.textContent = '';
         for (const p of programs(bin)) { const o = document.createElement('option'); o.value = p.slot; o.textContent = p.label; sel.appendChild(o); }

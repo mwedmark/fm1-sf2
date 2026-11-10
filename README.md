@@ -73,7 +73,11 @@ The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (
 
 1. **Drop an `.sf2` file** on the page. It shows its size, presets and samples.
 2. **Preset**: *All presets with key mapping* makes a full General MIDI bank (program numbers, drum kits, every zone). A single preset
-   makes a small bank of just that instrument.
+   makes a small bank of just that instrument. *Chosen instruments* shows a tick box for every melodic preset and drum kit (with
+   *All*, *None*, *Melodic only*, *Drums only* and a filter by name or number) and how many bytes the ticked ones' sounds take,
+   to see what fits before converting. Each ticked instrument keeps its program number; the font's other programs point at one
+   empty preset, so a program change to one of them makes the channel silent (a program the bank has no preset for leaves the
+   channel playing what it played).
 3. **Encoding**: the codec of the samples, see [section 4](#4-codecs). BFP8 is the default and the one to use. **MP3 64, 128 or 256 kbit/s**
    makes a packed bank for the live-cache firmware: BFP8 at 32,000 Hz with the sounds as one MP3 stream (the sample rate is then fixed).
 4. **Sample rate**: 32,000 Hz is the default and the rate the player works at. Lower rates make the bank smaller and duller
@@ -84,8 +88,8 @@ The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (
 7. **Download .bin** saves the bank as `<name>_fm1.bin` (an MP3 bank as `<name>_fm1_mp3_<kbit>.fm1b`). (*Download .sf2* saves the simplified SoundFont, to listen to in any SF2 player.)
    *Send to FM-1* writes the bank straight to an FM-1 that runs the SF2 firmware; the install page does the same.
 
-Below that, *Try it in the FM-1 simulator* plays the converted bank on an on-screen keyboard. For an MP3 bank it plays the MP3 sounds
-as the live-cache firmware decodes them.
+Below that, *Try it in the FM-1 simulator* plays the converted bank on an on-screen keyboard: every instrument in it, also when the
+bank is too large for the FM-1. For an MP3 bank it plays the MP3 sounds as the live-cache firmware decodes them.
 
 **MP3 banks (live-cache firmware only).** The page codes the sounds with LAME in JavaScript ([lamejs](third_party/lamejs/README.md),
 LGPL-3.0) and checks them with the firmware's own MP3 decoder. Sounds that MP3 handles badly (under 12 dB) stay BFP8 as long as the bank
