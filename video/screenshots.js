@@ -30,5 +30,23 @@ const path = require('path');
     }
   });
   await install.screenshot({ path: path.join(out, 'install.png'), clip: { x: 0, y: 0, width: 820, height: 560 } });
+
+  // Switching firmware: what the page shows when it finds M-VAVE's original firmware V15 (the texts install.html sets for
+  // FM-1_015, with the box ticked), and its section for going back to V15.
+  const sw = await browser.newPage({ viewport: { width: 820, height: 1000 }, deviceScaleFactor: 2, colorScheme: 'dark' });
+  await sw.goto('http://127.0.0.1:8765/install.html');
+  await sw.waitForTimeout(1200);
+  await sw.evaluate(() => {
+    const $ = id => document.getElementById(id);
+    $('replaceId').textContent = $('replaceId2').textContent = 'FM-1_015';
+    $('replaceHow').textContent = 'This is M-VAVE\'s original firmware: the page installs the SF2 player from it directly. ';
+    $('replaceBox').hidden = false;
+    $('replaceOk').checked = true;
+    $('replace').disabled = false;
+    $('leaveOk').checked = true;
+    $('leaveBtn').disabled = false;
+  });
+  await (await sw.$('#replaceBox')).screenshot({ path: path.join(out, 'switch_in.png') });
+  await (await sw.$('#leave')).screenshot({ path: path.join(out, 'switch_out.png') });
   await browser.close();
 })();

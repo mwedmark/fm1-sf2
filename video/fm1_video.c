@@ -11,6 +11,7 @@
  * The script is one action per line, `<ms> <action> <arg> [count]`:
  *   press <button>        hold a button (0..13) for 120 ms           key <key> <ms>     hold a key (0..26) for <ms>
  *   turn <encoder> <n>    n detents (negative: left), one each 70 ms  master <adc>       the MASTER knob (0..1023)
+ *   hold <button> <ms>    hold a button for <ms> (OCT- and OCT+ held from 0 ms start the FM-1 in safe mode)
  *
  * The CPU load the panel shows comes from a model of the FM-1's audio interrupt (a base load and a share per voice, measured from
  * the device's own screen); the PC renders far faster than the FM-1, so its own time would say nothing. */
@@ -107,6 +108,7 @@ static void load_script(const char *path)
     while (fgets(line, sizeof line, f)) {
         struct action a = {0};
         if (line[0] == '#' || sscanf(line, "%u %7s %d %d", &a.ms, a.what, &a.a, &a.b) < 3) continue;
+        if (!a.ms) a.ms = 1;                                /* the first control cycle runs at 1 ms */
         actions = realloc(actions, (n_actions + 1) * sizeof *actions);
         actions[n_actions++] = a;
     }
@@ -125,6 +127,7 @@ static void run_script(void)
         struct action *a = &actions[i];
         if (a->ms != now_ms) continue;
         if (!strcmp(a->what, "press")) start(0, a->a, now_ms, PRESS_MS);
+        else if (!strcmp(a->what, "hold")) start(0, a->a, now_ms, (uint32_t)a->b);
         else if (!strcmp(a->what, "key")) start(1, a->a, now_ms, a->b ? (uint32_t)a->b : 300U);
         else if (!strcmp(a->what, "master")) held.knob = (uint16_t)a->a;
         else if (!strcmp(a->what, "turn") && a->a >= 0 && a->a < 7 && a->b) {
