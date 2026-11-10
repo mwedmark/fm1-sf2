@@ -153,7 +153,7 @@ The sine test bank has seven programs (plain, vibrato, tremolo, delayed vibrato,
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
 <li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the MIDI files of the repo or one of your own.
 Its <b>Copy link</b> gives a link to a bank and song that plays at the first click, e.g. <a href="player.html?song=astley&amp;play=1">player.html?song=astley&amp;play=1</a>.</li>
-${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). The first time, install the firmware with M-VAVE's <a href="https://open.m-vave.com/fm1-workbench">FM-1 Workbench</a>; after that this page updates it.</li>\n` : ''}<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
+${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). It also replaces M-VAVE's original firmware and other firmware such as Felucca, after asking.</li>\n` : ''}<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>
 ${beer}<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>; JZZ.js and its SMF player are MIT too (<a href="LICENSE-jzz.txt">licence</a>).</small></p>

@@ -97,8 +97,8 @@
     <p id="message" role="status"></p>
     <div id="replaceBox" hidden>
       <h3>The FM-1 runs other firmware: <span id="replaceId"></span></h3>
-      <p>This page can replace it with the SF2 player, the same way Workbench installs over other firmware (its "Force flash"):
-        M-VAVE's own update loader writes the new firmware. The voices, projects and settings of the old firmware are not kept.</p>
+      <p><span id="replaceHow"></span>It is the same route as Workbench's "Force flash", through M-VAVE's update loader.
+        The voices, projects and settings of the old firmware are not kept.</p>
       <p class="muted">If the old firmware does not speak the USB-MIDI update protocol, nothing is written and the page says so.
         To go back to the original firmware later, use Workbench ("Restore original V15").</p>
       <label class="check"><input type="checkbox" id="replaceOk"> Replace <span id="replaceId2"></span> with the SF2 player firmware</label>
@@ -117,6 +117,7 @@
     <ul class="muted">
       <li>The firmware is written by M-VAVE's own update loader, the same route Workbench uses. If it is interrupted, plug in again and run the page once more; it continues from where the FM-1 is.</li>
       <li>If the FM-1 runs the original firmware or another firmware, the page shows what it runs and asks before it replaces it. If that does not work, install the SF2 firmware with <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> (Recovery &amp; force update &gt; Force flash) the first time.</li>
+      <li>From other firmware than M-VAVE's original, the page goes through the original firmware V15 first (M-VAVE's own package from <a href="https://github.com/m-vave/fm1_open">fm1_open</a>, Apache-2.0): some firmware, such as Felucca, brings an update loader that takes only packages of the original layout. Stopped in between, the FM-1 stays in that loader or on V15; run the page again.</li>
       <li>If the FM-1 plays a bank that makes it restart or freeze: hold OCT&minus; and OCT+ while you switch it on, until the screen shows <code>SAFE MODE</code>. It then starts without the bank, and this page can install firmware and a new bank. (It cannot help when the firmware itself does not start: then the FM-1 shows no USB device at all.)</li>
       <li>The bank lives in the sample flash and stays there when the firmware is updated. It only needs to be sent when it has changed.</li>
       <li>During the bank transfer the FM-1 shows <code>UPLOAD n Rx</code>; <code>R0</code> is good, <code>R3</code> is a flash error.</li>
@@ -130,13 +131,16 @@
   const $ = id => document.getElementById(id);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const kb = n => (n / 1024).toFixed(0) + ' KB';
-  let manifest, pkg, bank, bankName = '', busy = false;
-  let replaceFor = null;   // the identity of other firmware the user agreed to replace (the SDK's force route)
+  let manifest, pkg, stockPkg, bank, bankName = '', busy = false;
+  let replaceFor = null;   // {identity, viaStock}: the other firmware the user agreed to replace (the SDK's force route)
+  // M-VAVE's V15 and the vendor loader (ours too) take the SF2 player directly; anything else goes through V15 first
+  const needsStock = identity => !/^(FM-1_015|ota-FM-1_015|ota-FM1C_[0-9a-f]{16})$/.test(identity);
   class OtherFirmware extends Error { constructor(identity) { super('The FM-1 runs ' + identity + ', not the SF2 player firmware.'); this.identity = identity; } }
 
   // The SDK's updater reports its phases in Chinese; these are the ones a normal update passes.
   const PHASES = { '准备升级程序': 'Starting update mode', '等待升级设备重新连接': 'Waiting for the FM-1 to restart in update mode',
-    '写入固件': 'Writing the firmware', '重启并核对新版本': 'Restarting and checking the version', '更新完成': 'The firmware is installed' };
+    '写入固件': 'Writing the firmware', '重启并核对新版本': 'Restarting and checking the version',
+    '正在恢复四个原厂音色库': 'Restoring V15\'s four factory voice banks','更新完成': 'The firmware is installed' };
   const ERRORS = [
     [/USB 连接已断开|USB 意外断开/, 'The USB connection was lost. Plug the FM-1 in again and run the page once more.'],
     [/打开 MIDI 端口超时/, 'The MIDI port could not be opened. Close other MIDI programs and tabs and try again.'],
@@ -239,13 +243,13 @@
     step('bank', 'done', bankName + ' is on the FM-1 (' + kb(bank.length) + ', ' + Math.round((Date.now() - started) / 1000) + ' s).', 100);
   }
 
-  async function installFirmware(access) {
-    step('firmware', 'run', 'Connecting …');
+  // An updater for the package p, with the page's log and two changes to the SDK's waits (below). label: the step's prefix.
+  function makeUpdater(access, p, label) {
     let lastPhase = '';
     // reconnect: the SDK waits 40 s; give Windows time to install the update loader's USB device the first time
-    const updater = new FM1Web.Updater(access, pkg, (phase, pct) => {
-      if (phase !== lastPhase) { log('updater: ' + phase + ' (' + (PHASES[phase] || phase) + ')'); lastPhase = phase; }
-      step('firmware', 'run', PHASES[phase] || phase, pct);
+    const updater = new FM1Web.Updater(access, p, (phase, pct) => {
+      if (phase !== lastPhase) { log('updater: ' + label + (PHASES[phase] || phase) + ' (' + phase + ')'); lastPhase = phase; }
+      step('firmware', 'run', label + (PHASES[phase] || phase), pct);
     }, { reconnect: 120000 });
     const discover = updater.discover.bind(updater);
     updater.discover = async (...args) => {                    // log each identity reply and each port that does not answer
@@ -263,8 +267,8 @@
     // that loader answers "ota-FM1C_" + the first 16 hex digits of the build instead. Accept both names.
     const waitFor = updater.waitFor.bind(updater);
     updater.waitFor = async (identity, legacyLoader) => {
-      if (identity !== pkg.loaderIdentity || legacyLoader) return waitFor(identity, legacyLoader);
-      const names = [identity, 'ota-FM1C_' + pkg.build_id.slice(0, 16)];
+      if (identity !== p.loaderIdentity || legacyLoader) return waitFor(identity, legacyLoader);
+      const names = [identity, 'ota-FM1C_' + p.build_id.slice(0, 16)];
       const end = Date.now() + updater.timing.reconnect;
       while (Date.now() < end) {
         let device = null;
@@ -277,23 +281,45 @@
       }
       throw new Error('等待设备重连超时；请保留这个更新网页，重新连接同一台设备后重试');
     };
-    // force: only for the identity the user agreed to replace. Then the SDK also takes firmware without the capability query
-    // (the "legacy" route: the vendor's request-driven updater) and a loader of any name that is already running.
-    const force = replaceFor !== null;
+    return updater;
+  }
+
+  // Writes the package p. force: only for the identity `expect` the user agreed to replace (the SDK's force route: firmware
+  // without the capability reply goes through the vendor's request-driven updater, and a running loader of any name is resumed).
+  // Returns false when the FM-1 already runs p.
+  async function flash(access, p, force, expect, label) {
+    const updater = makeUpdater(access, p, label);
     let device;
     try { device = await updater.connect({ force }); }
     catch (e) { await updater.disconnect().catch(() => {}); throw e; }
     step('connect', 'done', 'Found FM-1: ' + device.identity + '.');
     log('connected: ' + device.identity + ' (' + updater.mode + (force ? ', force' : '') + ')');
     if (device.migration) { await updater.disconnect(); throw new OtherFirmware(device.identity); }
-    if (force && !device.resume && device.identity !== replaceFor && device.identity !== pkg.product) {
-      await updater.disconnect(); replaceFor = null;
+    if (force && !device.resume && device.identity !== expect && device.identity !== p.product) {
+      await updater.disconnect();
       throw new OtherFirmware(device.identity);                // another device or firmware than the one agreed to: ask again
     }
-    if (device.same) { await updater.disconnect(); step('firmware', 'skip', 'Already installed, same version.'); return; }
+    if (device.same) { await updater.disconnect(); return false; }
     progress(0);
-    if (force) step('firmware', 'run', 'Replacing ' + device.identity + ' …');
+    step('firmware', 'run', label + 'starting …');
     await updater.install({ force });                          // writes, restarts, and checks the version the FM-1 reports
+    return true;
+  }
+
+  async function installFirmware(access) {
+    step('firmware', 'run', 'Connecting …');
+    const r = replaceFor;
+    if (!r) {
+      if (!await flash(access, pkg, false, null, '')) { step('firmware', 'skip', 'Already installed, same version.'); return; }
+    } else if (!r.viaStock) {
+      await flash(access, pkg, true, r.identity, '');
+    } else {
+      // Other firmware may bring its own update loader that takes only packages of the stock layout (Felucca's refuses any
+      // flash.bin but 0x93000 bytes, ours is 0x70000): put back M-VAVE's original V15 first, then the SDK's route from V15.
+      await flash(access, stockPkg, true, r.identity, 'Step 1 of 2, original firmware V15: ');
+      log('V15 is installed');
+      await flash(access, pkg, true, 'FM-1_015', 'Step 2 of 2, SF2 player: ');
+    }
     step('firmware', 'done', 'Installed and checked (' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices).', 100);
   }
 
@@ -331,6 +357,13 @@
         step('firmware', 'fail', e.message + ' Nothing was written.');
         log('other firmware: ' + e.identity);
         $('replaceId').textContent = $('replaceId2').textContent = e.identity;
+        const viaStock = needsStock(e.identity);
+        $('replaceHow').textContent = viaStock
+          ? 'This firmware, or its own update loader, may take only packages of its own kind. So the page installs in two steps: '
+            + 'first M-VAVE\'s original firmware V15, then the SF2 player from V15. That takes a few minutes. '
+          : e.identity === 'FM-1_015' ? 'This is M-VAVE\'s original firmware: the page installs the SF2 player from it directly. '
+          : 'The FM-1 waits in M-VAVE\'s update loader: the page writes the SF2 player. ';
+        if (viaStock && !stockPkg) { message('The original firmware V15 could not be loaded, so this page cannot replace ' + e.identity + '. Use Workbench.', 'bad'); return; }
         $('replaceOk').checked = false; $('replace').disabled = true; $('replaceBox').hidden = false;
         $('replaceBox').dataset.identity = e.identity;
         message('Confirm below to replace it.', 'bad');
@@ -363,7 +396,8 @@
   $('replace').addEventListener('click', () => {
     if (!$('replaceOk').checked || busy) return;
     $('doFirmware').checked = true;
-    replaceFor = $('replaceBox').dataset.identity;
+    const identity = $('replaceBox').dataset.identity;
+    replaceFor = { identity, viaStock: needsStock(identity) };
     install();
   });
 
@@ -373,6 +407,7 @@
       if (!r.ok) throw new Error('dist/install/manifest.json is missing. Run node make_install.js after building the firmware.');
       manifest = await r.json();
       pkg = await FM1Web.prepare(manifest.firmware);            // fetches the package and checks its SHA-256, header and loader
+      if (manifest.stock) FM1Web.prepare(manifest.stock).then(p => { stockPkg = p; }, e => log('original V15: ' + e.message));
       $('fwInfo').textContent = (manifest.name ? manifest.name + ': ' : '') + 'SF2 player ' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices, ' + kb(pkg.bytes) + ', build ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
       const b = await fetch(manifest.bank.url, { cache: 'no-store' });
       const bytes = new Uint8Array(await b.arrayBuffer());

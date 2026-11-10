@@ -21,7 +21,7 @@ firmware and `banks/default.fm1b`, packed by `make_install.js --fwsc --identity 
 ## What is where
 
 - `index.html`: the converter. Drop an `.sf2`, pick the encoding (SEA5, SEA6, BFP8 or raw PCM) and the sample rate, download a simplified `.sf2` or an FM1B `.bin`, and play the result on a keyboard in the simulator. Serve it (`python -m http.server`) rather than opening the file.
-- `install.html`: firmware and bank to an FM-1 that runs the SF2 player firmware, over USB-MIDI. `make_install.js` (or `build_install.ps1`) fills `dist/install/`.
+- `install.html`: firmware and bank to an FM-1 over USB-MIDI; from other firmware after a confirmation (through V15 when it is not V15). `make_install.js` (or `build_install.ps1`) fills `dist/install/`.
 - `song.html`: a MIDI file into the RAM of an FM-1 that runs the plain firmware (`fm1_song.js` makes the song).
 - `FORMAT.md`: the FM1B bank format, made to be used in place by the FM-1's CPU. Samples are raw PCM, SEA5/SEA6 (the FM-1's own codec) or BFP8.
 - `fm1_open/`: a copy of [m-vave/fm1_open](https://github.com/m-vave/fm1_open) (upstream commit `4c7496d`, GPLv3 with the FM1 SDK linking exception, see `fm1_open/LICENSE.md`) with the SF2 player added. The player is `app/fm1b.c`, the panel `app/sf2player.c`, the bank upload `app/sf2_upload.c`, MIDI input `app/transfer.c`; `web/synth/sampledrum.c`, `web/engine/sound.c` and `web/engine/Simulator.c` only feed the browser simulator.

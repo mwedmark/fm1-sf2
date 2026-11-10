@@ -194,7 +194,7 @@ The simulator plays on one sampler track through the panel slot only. **MIDI cha
 ```powershell
 cd D:\git\fm1-sf2
 cd fm1_open; .\sdk\Build.ps1 -FirmwareOnly -Toolchain 'D:\JL\pi32'; cd ..   # the build of section 1
-node make_install.js [bank.fm1b]     # dist/install/: the last build's package, the bank (default dist/gm_32k.fm1b), manifest.json
+node make_install.js [bank.fm1b]     # dist/install/: the last build's package, the bank (default dist/gm_32k.fm1b), V15, manifest.json
 ```
 
 Open <http://localhost:8765/install.html> (the same server as section 3) in Chrome or Edge and click **Installera**. It finds the FM-1
@@ -203,7 +203,11 @@ build id), installs the firmware through the vendor loader unless the FM-1 alrea
 the build id it reports, then sends the bank with the player's SysEx upload (as `index.html` does, on the port the updater found and
 checked). Either step can be left out. An FM-1 on the stock V15 or another firmware (the SDK says "migration") gets nothing written; the page
 shows its identity and a confirmation, and only then connects again with the SDK's `force` (the workbench's "Force flash": firmware without
-the capability reply goes the "legacy" route through the vendor loader). The force is only used for the identity the user confirmed. `make_install.js` must run after the build it packs: the build id it
+the capability reply goes the "legacy" route through the vendor loader). The force is only used for the identity the user confirmed. From
+any other firmware than V15 (and other than a vendor loader) the page first installs V15 (`dist/install/stock.fwsc`, from
+`fm1_open/sdk/firmware/FM-1_015.fwsc`, the SDK's `kind: 'stock'` with its voice restore), then the SF2 player from V15: Felucca's own loader
+(`ota-FM-1_900`) takes only a `flash.bin` of exactly 0x93000 bytes (its `ldr_core.c`, error -14), ours is 0x70000 (`package-report.json`
+`FLASH_BIN_SIZE`). Checked against a fake Felucca the same way (2026-11-10): FM-1_918, and an FM-1 left in Felucca's loader. `make_install.js` must run after the build it packs: the build id it
 writes is `build/dx7/build-identity.json`'s, and the device's must match it after the update. Checked in the browser pane against a fake
 FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank arrives (1 040 frames, CRC right), bank only, the stock
 V15 refused, no FM-1 found; and (2026-11-10) "FM-1_918" with no capability reply: the confirmation, then legacy route, loader,

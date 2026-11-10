@@ -132,7 +132,11 @@ The install page (`install.html`) writes the firmware and the bank over USB-MIDI
 **The first time**, the FM-1 runs M-VAVE's own firmware (or another one). The install page then writes nothing and shows what the
 FM-1 runs, for example `FM-1_918`. Tick **Replace … with the SF2 player firmware** and click **Replace and install**: the page takes
 the same route as the "Force flash" of M-VAVE's [FM-1 Workbench](https://open.m-vave.com/fm1-workbench), through M-VAVE's own update
-loader. The voices and settings of the old firmware are not kept. If that firmware does not speak the USB-MIDI update protocol, use the
+loader. The voices and settings of the old firmware are not kept. From M-VAVE's original firmware (`FM-1_015`) this is one step.
+From any other firmware it is two: first the original V15 (from fm1_open, published by M-VAVE), then the SF2 player. Some firmware
+brings its own update loader that takes only packages of its own layout: Felucca's (`FM-1_9xx`, its loader `ota-FM-1_900`, "Felucca
+Update") refuses the SF2 player's package but takes V15. An FM-1 left in such a loader (it comes back there after power-off) is
+picked up the same way. If that firmware does not speak the USB-MIDI update protocol, use the
 Workbench (Recovery & force update > Force flash) once instead. The original firmware can be put back with the Workbench
 ("Restore original V15") at any time.
 
