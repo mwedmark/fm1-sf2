@@ -77,7 +77,7 @@ The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (
    *All*, *None*, *Melodic only*, *Drums only* and a filter by name or number) and how many bytes the ticked ones' sounds take,
    to see what fits before converting. Each ticked instrument keeps its program number; the font's other programs point at one
    empty preset, so a program change to one of them makes the channel silent (a program the bank has no preset for leaves the
-   channel playing what it played).
+   channel playing what it played). The FM-1's panel steps over the empty programs and starts on the first one that has sounds.
 3. **Encoding**: the codec of the samples, see [section 4](#4-codecs). BFP8 is the default and the one to use. **MP3 64, 128 or 256 kbit/s**
    makes a packed bank for the live-cache firmware: BFP8 at 32,000 Hz with the sounds as one MP3 stream (the sample rate is then fixed).
 4. **Sample rate**: 32,000 Hz is the default and the rate the player works at. Lower rates make the bank smaller and duller

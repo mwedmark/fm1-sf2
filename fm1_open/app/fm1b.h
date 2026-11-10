@@ -37,7 +37,7 @@
  * quantizer table (512 entries); the engine has the SEA6 one. Returns 0, or -1 for a bank that is not FM1B version 1, does
  * not fit its size, or has a SEA code size the engine has no table for. */
 int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt);
-/* Select the preset a note plays: bank 0 melodic or 128 percussion, program 0..127. Returns -1 if there is none. */
+/* Select the preset a note plays: bank 0 melodic or 128 percussion, program 0..127. Returns -1 if there is none, or only one without zones (the empty preset of a program left out). */
 int fm1b_program(unsigned bank, unsigned program);
 unsigned fm1b_ready(void);
 /* Note on (velocity 1..127) or off (velocity 0) for `owner`, any pointer the caller keeps rendering with.
@@ -63,7 +63,7 @@ void fm1b_channel_drum_note(unsigned channel, unsigned note, unsigned velocity, 
 void fm1b_channel_program(unsigned channel, unsigned program_bank, unsigned program);
 /* Forget the channel's program change: it follows the preset fm1b_program() selected again. */
 void fm1b_channel_follow(unsigned channel);
-/* 1 if the bank has a preset for program_bank 0 or 128, program 0..127. */
+/* 1 if the bank has a preset with zones for program_bank 0 or 128, program 0..127 (the panel steps over the rest). */
 unsigned fm1b_has_program(unsigned program_bank, unsigned program);
 /* Controllers for one channel: 1 (modulation wheel: vibrato, 5.5 Hz, up to +-50 cents), 6/38 with 101/100 (RPN 0: the
  * pitch bend range, 2 semitones until set, at most 24), 7 (volume), 11 (expression; both follow the General MIDI curve,

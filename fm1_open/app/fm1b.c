@@ -86,6 +86,7 @@ static struct {
     uint32_t mod_size;         /* their bytes: 40, or 20 in a 64-byte header (no filter) */
     uint32_t layers, layer_count;   /* stacked layers: (first, count) a preset, then the entries; 0: none (a header under 76 bytes) */
     int32_t preset; /* -1: none selected */
+    uint32_t program; /* its program number, for the panel */
     int32_t drum_preset; /* the percussion kit, -1: none */
     uint32_t age;
     int32_t last_note, last_zone, last_voice, last_drum;   /* the latest note that sounded: for the panel */
@@ -423,6 +424,7 @@ static void interp4_make(void)
     }
 }
 #endif
+static FM1_DSP_CODE int32_t preset_of(unsigned program_bank, unsigned program, unsigned sounding);
 int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
 {
     fm1b_panic();
@@ -515,32 +517,30 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     }
 #endif
     bank.image = image;
-    for (unsigned slot = 0; slot < 256 && bank.preset < 0; ++slot) {
-        uint32_t p = rd16(image + bank.bankmap + slot * 2U);
-        if (p < bank.preset_count)
-            bank.preset = (int32_t)p;
-    }
-    for (unsigned slot = 128; slot < 256 && bank.drum_preset < 0; ++slot) {   /* the first percussion kit the bank has */
-        uint32_t p = rd16(image + bank.bankmap + slot * 2U);
-        if (p < bank.preset_count)
-            bank.drum_preset = (int32_t)p;
-    }
+    for (unsigned slot = 0; slot < 256 && bank.preset < 0; ++slot)   /* the first preset with sounds (not the empty one) */
+        if ((bank.preset = preset_of(slot & 128U, slot & 127U, 1)) >= 0)
+            bank.program = slot & 127U;
+    for (unsigned slot = 0; slot < 128 && bank.drum_preset < 0; ++slot)   /* the first percussion kit the bank has */
+        bank.drum_preset = preset_of(128, slot, 0);
     return 0;
 }
-/* The preset the bank maps bank 0 or 128, program 0..127 to, or -1. */
-static FM1_DSP_CODE int32_t preset_of(unsigned program_bank, unsigned program)
+/* The preset the bank maps bank 0 or 128, program 0..127 to, or -1. With sounding, -1 also for a preset without zones: the empty
+ * preset the converter gives the programs left out, which a MIDI program change selects (the channel is then silent) and the panel
+ * steps over. */
+static FM1_DSP_CODE int32_t preset_of(unsigned program_bank, unsigned program, unsigned sounding)
 {
     if (!bank.image || program > 127 || (program_bank != 0 && program_bank != 128))
         return -1;
-    uint32_t p = rd16(bank.image + bank.bankmap + ((program_bank ? 128U : 0U) + program) * 2U);
-    return p < bank.preset_count ? (int32_t)p : -1;
+    uint32_t p = rd16(bank.image + bank.bankmap + (program_bank + program) * 2U);
+    return p < bank.preset_count && (!sounding || rd16(bank.image + bank.presets + p * 24U + 2)) ? (int32_t)p : -1;
 }
 int fm1b_program(unsigned program_bank, unsigned program)
 {
-    int32_t p = preset_of(program_bank, program);
+    int32_t p = preset_of(program_bank, program, 1);
     if (p < 0)
         return -1;
     bank.preset = p;
+    bank.program = program;
     bank.last_note = -1;
     bank.last_zone_record = NULL;
     return 0;
@@ -577,11 +577,7 @@ void fm1b_status(struct fm1b_status *status)
     const uint8_t *preset = bank.image + bank.presets + (uint32_t)bank.preset * 24U;
     memcpy(status->name, preset + 4, 20);
     status->zones = (uint8_t)rd16(preset + 2);
-    for (unsigned slot = 0; slot < 128; ++slot)
-        if (rd16(bank.image + bank.bankmap + slot * 2U) == (uint32_t)bank.preset) {
-            status->program = (uint8_t)slot;
-            break;
-        }
+    status->program = (uint8_t)bank.program;
     for (unsigned i = 0; i < FM1B_VOICES; ++i)
         status->voices += voices[i].active;
     status->voice_limit = (uint8_t)voice_limit;
@@ -1249,7 +1245,7 @@ void fm1b_channel_follow(unsigned channel)
     if (channel < FM1B_CHANNELS)
         queue_event(EVENT_PROGRAM, NULL, channel, 0, PROGRAM_FOLLOW, 0, 0);
 }
-unsigned fm1b_has_program(unsigned program_bank, unsigned program) { return preset_of(program_bank, program) >= 0; }
+unsigned fm1b_has_program(unsigned program_bank, unsigned program) { return preset_of(program_bank, program, 1) >= 0; }
 void fm1b_channel_control(unsigned channel, unsigned controller, unsigned value)
 {
     if (channel < FM1B_CHANNELS)
@@ -1322,7 +1318,7 @@ static FM1_DSP_CODE void program_apply(unsigned channel, unsigned program_bank, 
         channel_program[channel] = 0;
         return;
     }
-    int32_t p = preset_of(program_bank ? 128U : 0U, program);
+    int32_t p = preset_of(program_bank ? 128U : 0U, program, 0);
     if (p < 0)
         return;
     channel_preset[channel] = p;

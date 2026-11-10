@@ -31,11 +31,11 @@ EXPORT unsigned mt_voices(void)
     fm1b_status(&st);
     return st.voices;
 }
-EXPORT unsigned mt_status(unsigned field)                /* 0 channels, 1 program channel, 2 program number */
+EXPORT unsigned mt_status(unsigned field)                /* 0 channels, 1 program channel, 2 program number, 3 the panel's program */
 {
     struct fm1b_status st;
     fm1b_status(&st);
-    return field == 0 ? st.channels : field == 1 ? st.program_channel : st.program_number;
+    return field == 0 ? st.channels : field == 1 ? st.program_channel : field == 2 ? st.program_number : st.program;
 }
 EXPORT void mt_panel_drum(unsigned note, unsigned velocity) { fm1b_drum_note(0, note, velocity, 100); }
 EXPORT unsigned mt_has_drums(void) { return fm1b_has_drums(); }

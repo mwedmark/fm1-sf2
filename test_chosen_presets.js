@@ -63,5 +63,13 @@ check(piano > 0 && after > 0, `program 0 and 40 sound (${piano}, ${after})`);
 check(silent === 0, `program 1, not ticked, is silent after program 0 (${silent}); before this the channel kept program 0`);
 check(play(0) === piano, 'program 0 again sounds as it did');
 check(play(0, true) > 0, 'kit 0 on the percussion channel sounds');
-check(w.mt_program(0, 1) === 0 && (w.mt_panel_note(60, 100), level(40)) === 0, 'the panel on program 1 is silent too');
+// the panel (SELECT) steps over the programs left out, and shows the number of the program it is on
+check(w.mt_program(0, 40) === 0 && w.mt_status(3) === 40, 'the panel on program 40 shows 40');
+check(w.mt_program(0, 1) === -1 && w.mt_status(3) === 40 && (w.mt_panel_note(60, 100), level(40)) > 0, 'the panel cannot select program 1: it stays on 40 and plays it');
+// a bank without program 0: the panel starts on the first program that has sounds, not on the empty one
+const later = A.buildBank(sf, [at(40), at(128)].sort((x, y) => x - y), { rate: 32000, bfp: true });
+later.emptySlots = [...new Set(sf.presets.map(slotOf).filter(s => s >= 0 && s !== 40 && s !== 128))];
+const bin2 = A.writeFm1(later);
+new Uint8Array(w.memory.buffer, w.mt_bank(), bin2.length).set(bin2);
+check(w.mt_bind(bin2.length) === 0 && w.mt_status(3) === 40, `without program 0 the panel starts on program 40 (got ${w.mt_status(3)})`);
 console.log(failed ? `${failed} FAILED` : 'all passed'); process.exit(failed ? 1 : 0);
