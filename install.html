@@ -206,9 +206,10 @@
 
   // The FM-1 running the SF2 player, found and checked with the updater's own identity query; its ports for the bank.
   async function findPlayer(access, waitMs) {
-    const end = Date.now() + waitMs;
+    const end = Date.now() + waitMs, view = portView(access);
     for (;;) {
-      const probe = new FM1Web.Updater(access, pkg, () => {});
+      view.turn++;
+      const probe = new FM1Web.Updater(view, pkg, () => {});
       let device = null;
       try { device = await probe.discover(); } catch (e) { if (e.code === 'AMBIGUOUS') throw e; }
       if (device) {
@@ -244,23 +245,51 @@
   }
 
   // An updater for the package p, with the page's log and two changes to the SDK's waits (below). label: the step's prefix.
+  // Ports that answered the update query wrongly or not at all while the FM-1 answered on another (a loopback such as loopMIDI
+  // echoes the query, a network session, the GS synth): left out of later searches, so that they neither slow the wait for the
+  // restarted FM-1 nor hide it (the SDK reports such an error instead of "not found"). Several connected ports of one name (the SDK pairs only a
+  // name it finds once): one of them, another one on each search (view.turn).
+  const notFm1 = new Set();
+  function portView(access) {
+    const view = { turn: 0, get sysexEnabled() { return access.sysexEnabled; } };
+    const pick = map => {
+      const groups = new Map();
+      for (const port of map.values())
+        if (port.state === 'connected' && !notFm1.has(port.name)) groups.set(port.name, [...(groups.get(port.name) || []), port]);
+      return new Map([...groups.values()].map(g => { const port = g[view.turn % g.length]; return [port.id, port]; }));
+    };
+    Object.defineProperties(view, { inputs: { get: () => pick(access.inputs) }, outputs: { get: () => pick(access.outputs) } });
+    return view;
+  }
+
+  // An updater for the package p, with the page's log and two changes to the SDK's waits (below). label: the step's prefix.
   function makeUpdater(access, p, label) {
     let lastPhase = '';
     // reconnect: the SDK waits 40 s; give Windows time to install the update loader's USB device the first time
-    const updater = new FM1Web.Updater(access, p, (phase, pct) => {
+    const view = portView(access);
+    const updater = new FM1Web.Updater(view, p, (phase, pct) => {
       if (phase !== lastPhase) { log('updater: ' + label + (PHASES[phase] || phase) + ' (' + phase + ')'); lastPhase = phase; }
       step('firmware', 'run', label + (PHASES[phase] || phase), pct);
     }, { reconnect: 120000 });
     const discover = updater.discover.bind(updater);
-    updater.discover = async (...args) => {                    // log each identity reply and each port that does not answer
-      const device = await discover(...args);
-      const d = updater.diagnostics, seen = JSON.stringify([d && d.attempts, device && device.identity]);
-      if (seen !== updater.lastSeen) {
-        updater.lastSeen = seen;
+    let lastBeat = Date.now();
+    updater.discover = async (...args) => {                    // log each identity reply, each port that does not answer, each error
+      let device = null, error = null;
+      view.turn++;
+      try { device = await discover(...args); } catch (e) { error = e; }
+      const d = updater.diagnostics;
+      const seen = JSON.stringify([d && d.attempts, device && device.identity, error && error.message, d && d.inputs, d && d.outputs]);
+      if (seen !== updater.lastSeen || Date.now() - lastBeat > 15000) {
+        updater.lastSeen = seen; lastBeat = Date.now();
         if (device) log('reply: "' + device.identity + '"');
         for (const a of (d && d.attempts) || []) log('no reply from "' + a.input + '" / "' + a.output + '": ' + a.error);
-        if (!device && d && !d.attempts.length) log('no FM-1 ports; inputs: ' + (d.inputs.join(', ') || 'none') + '; outputs: ' + (d.outputs.join(', ') || 'none'));
+        if (error) log('search: ' + error.message);
+        if (!device && d) log('looking for the FM-1; inputs: ' + (d.inputs.join(', ') || 'none') + '; outputs: ' + (d.outputs.join(', ') || 'none'));
       }
+      if (device && d) for (const a of d.attempts) if (a.input !== '?' && !notFm1.has(a.input)) {
+        notFm1.add(a.input); notFm1.add(a.output); log('not the FM-1, left out from now on: "' + a.input + '"');
+      }
+      if (error) throw error;
       return device;
     };
     // The package names the vendor loader, so the SDK waits for "ota-FM-1_015". Started from a tagged update,

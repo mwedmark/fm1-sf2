@@ -207,7 +207,11 @@ the capability reply goes the "legacy" route through the vendor loader). The for
 any other firmware than V15 (and other than a vendor loader) the page first installs V15 (`dist/install/stock.fwsc`, from
 `fm1_open/sdk/firmware/FM-1_015.fwsc`, the SDK's `kind: 'stock'` with its voice restore), then the SF2 player from V15: Felucca's own loader
 (`ota-FM-1_900`) takes only a `flash.bin` of exactly 0x93000 bytes (its `ldr_core.c`, error -14), ours is 0x70000 (`package-report.json`
-`FLASH_BIN_SIZE`). Checked against a fake Felucca the same way (2026-11-10): FM-1_918, and an FM-1 left in Felucca's loader. `make_install.js` must run after the build it packs: the build id it
+`FLASH_BIN_SIZE`). Checked against a fake Felucca the same way (2026-11-10): FM-1_918, and an FM-1 left in Felucca's loader. On the FM-1 the
+first try hung after the restart into Felucca's loader ("USB-Midi", its input listed twice): the SDK pairs only a port name it finds
+once, and with `force` it also asks every other port (a loopMIDI echo answers with a malformed identity, which the SDK reports
+instead of "not found"). The page now leaves out the ports that did not answer while the FM-1 did, takes one port of a name at a
+time (another on each search), and logs each search. `make_install.js` must run after the build it packs: the build id it
 writes is `build/dx7/build-identity.json`'s, and the device's must match it after the update. Checked in the browser pane against a fake
 FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank arrives (1 040 frames, CRC right), bank only, the stock
 V15 refused, no FM-1 found; and (2026-11-10) "FM-1_918" with no capability reply: the confirmation, then legacy route, loader,
