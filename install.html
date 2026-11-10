@@ -57,6 +57,9 @@
   details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   #log { font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 8px 0 0; }
   input[type=file] { max-width: 100%; }
+  #replaceBox { border: 1px solid var(--warn); border-radius: 8px; padding: 12px; margin-top: 12px; }
+  #replaceBox h3 { font-size: 14px; margin: 0 0 6px; color: var(--warn); }
+  #replaceBox p { margin: 0 0 8px; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -92,6 +95,15 @@
       <span class="muted" id="duration"></span>
     </div>
     <p id="message" role="status"></p>
+    <div id="replaceBox" hidden>
+      <h3>The FM-1 runs other firmware: <span id="replaceId"></span></h3>
+      <p>This page can replace it with the SF2 player, the same way Workbench installs over other firmware (its "Force flash"):
+        M-VAVE's own update loader writes the new firmware. The voices, projects and settings of the old firmware are not kept.</p>
+      <p class="muted">If the old firmware does not speak the USB-MIDI update protocol, nothing is written and the page says so.
+        To go back to the original firmware later, use Workbench ("Restore original V15").</p>
+      <label class="check"><input type="checkbox" id="replaceOk"> Replace <span id="replaceId2"></span> with the SF2 player firmware</label>
+      <div class="actions"><button class="primary" id="replace" disabled>Replace and install</button><button id="replaceCancel">Cancel</button></div>
+    </div>
     <p class="warn">Do not unplug the cable, and keep the FM-1 powered until the page says it is done. Close other programs and tabs that use the FM-1's MIDI port (Workbench, DAW, MIDIberry).</p>
   </section>
 
@@ -104,7 +116,7 @@
     <summary>If something goes wrong</summary>
     <ul class="muted">
       <li>The firmware is written by M-VAVE's own update loader, the same route Workbench uses. If it is interrupted, plug in again and run the page once more; it continues from where the FM-1 is.</li>
-      <li>If the FM-1 runs the original firmware (V15) or another firmware, install the SF2 firmware with <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> the first time. This page only flashes over the SF2 player's own firmware.</li>
+      <li>If the FM-1 runs the original firmware or another firmware, the page shows what it runs and asks before it replaces it. If that does not work, install the SF2 firmware with <a href="https://open.m-vave.com/fm1-workbench">Workbench</a> (Recovery &amp; force update &gt; Force flash) the first time.</li>
       <li>If the FM-1 plays a bank that makes it restart or freeze: hold OCT&minus; and OCT+ while you switch it on, until the screen shows <code>SAFE MODE</code>. It then starts without the bank, and this page can install firmware and a new bank. (It cannot help when the firmware itself does not start: then the FM-1 shows no USB device at all.)</li>
       <li>The bank lives in the sample flash and stays there when the firmware is updated. It only needs to be sent when it has changed.</li>
       <li>During the bank transfer the FM-1 shows <code>UPLOAD n Rx</code>; <code>R0</code> is good, <code>R3</code> is a flash error.</li>
@@ -119,6 +131,8 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const kb = n => (n / 1024).toFixed(0) + ' KB';
   let manifest, pkg, bank, bankName = '', busy = false;
+  let replaceFor = null;   // the identity of other firmware the user agreed to replace (the SDK's force route)
+  class OtherFirmware extends Error { constructor(identity) { super('The FM-1 runs ' + identity + ', not the SF2 player firmware.'); this.identity = identity; } }
 
   // The SDK's updater reports its phases in Chinese; these are the ones a normal update passes.
   const PHASES = { '准备升级程序': 'Starting update mode', '等待升级设备重新连接': 'Waiting for the FM-1 to restart in update mode',
@@ -263,17 +277,23 @@
       }
       throw new Error('等待设备重连超时；请保留这个更新网页，重新连接同一台设备后重试');
     };
+    // force: only for the identity the user agreed to replace. Then the SDK also takes firmware without the capability query
+    // (the "legacy" route: the vendor's request-driven updater) and a loader of any name that is already running.
+    const force = replaceFor !== null;
     let device;
-    try { device = await updater.connect(); }
+    try { device = await updater.connect({ force }); }
     catch (e) { await updater.disconnect().catch(() => {}); throw e; }
     step('connect', 'done', 'Found FM-1: ' + device.identity + '.');
-    if (device.migration || device.legacy) {
-      await updater.disconnect();
-      throw new Error('The FM-1 runs ' + device.identity + ', not the SF2 player firmware. Install it with Workbench the first time; after that this page works.');
+    log('connected: ' + device.identity + ' (' + updater.mode + (force ? ', force' : '') + ')');
+    if (device.migration) { await updater.disconnect(); throw new OtherFirmware(device.identity); }
+    if (force && !device.resume && device.identity !== replaceFor && device.identity !== pkg.product) {
+      await updater.disconnect(); replaceFor = null;
+      throw new OtherFirmware(device.identity);                // another device or firmware than the one agreed to: ask again
     }
     if (device.same) { await updater.disconnect(); step('firmware', 'skip', 'Already installed, same version.'); return; }
     progress(0);
-    await updater.install();                                   // writes, restarts, and checks the version the FM-1 reports
+    if (force) step('firmware', 'run', 'Replacing ' + device.identity + ' …');
+    await updater.install({ force });                          // writes, restarts, and checks the version the FM-1 reports
     step('firmware', 'done', 'Installed and checked (' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices).', 100);
   }
 
@@ -282,7 +302,7 @@
     const doFw = $('doFirmware').checked, doBank = $('doBank').checked;
     if (!doFw && !doBank) { message('Choose firmware, sound bank or both.', 'bad'); return; }
     if (!navigator.requestMIDIAccess) { message('This browser has no Web MIDI. Use Chrome or Edge.', 'bad'); return; }
-    busy = true; $('install').disabled = true; message(''); progress(null);
+    busy = true; $('install').disabled = true; message(''); progress(null); $('replaceBox').hidden = true;
     for (const s of ['connect', 'firmware', 'bank']) step(s, '', undefined);
     const started = Date.now();
     let current = 'connect';
@@ -307,12 +327,21 @@
       message('Done. The FM-1 plays the bank right away; it stays when you switch off.', 'ok');
       $('duration').textContent = 'Took ' + Math.round((Date.now() - started) / 1000) + ' s.';
     } catch (e) {
+      if (e instanceof OtherFirmware) {                          // nothing written: ask before the force route
+        step('firmware', 'fail', e.message + ' Nothing was written.');
+        log('other firmware: ' + e.identity);
+        $('replaceId').textContent = $('replaceId2').textContent = e.identity;
+        $('replaceOk').checked = false; $('replace').disabled = true; $('replaceBox').hidden = false;
+        $('replaceBox').dataset.identity = e.identity;
+        message('Confirm below to replace it.', 'bad');
+        return;
+      }
       if (current === 'firmware' && $('s-connect').dataset.state === 'run') { current = 'connect'; step('firmware', ''); }
       step(current, 'fail', explain(e));
       log('error: ' + (e && e.message || e));
       $('logBox').open = true;
       message('The installation stopped. See the step above.', 'bad');
-    } finally { busy = false; $('install').disabled = false; }
+    } finally { busy = false; $('install').disabled = false; replaceFor = null; }
   }
   window.addEventListener('beforeunload', e => { if (busy) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -329,6 +358,14 @@
     try { showBank(new Uint8Array(await f.arrayBuffer()), f.name); message(''); } catch (e) { message(e.message, 'bad'); }
   });
   $('install').addEventListener('click', install);
+  $('replaceOk').addEventListener('change', () => { $('replace').disabled = !$('replaceOk').checked; });
+  $('replaceCancel').addEventListener('click', () => { $('replaceBox').hidden = true; message(''); });
+  $('replace').addEventListener('click', () => {
+    if (!$('replaceOk').checked || busy) return;
+    $('doFirmware').checked = true;
+    replaceFor = $('replaceBox').dataset.identity;
+    install();
+  });
 
   (async () => {
     try {

@@ -201,11 +201,13 @@ Open <http://localhost:8765/install.html> (the same server as section 3) in Chro
 with the SDK's own browser updater (`fm1_open/sdk/WebUpdate.js`, the protocol M-VAVE's workbench uses: identity query, capability with the
 build id), installs the firmware through the vendor loader unless the FM-1 already reports this build, waits for it to come back and checks
 the build id it reports, then sends the bank with the player's SysEx upload (as `index.html` does, on the port the updater found and
-checked). Either step can be left out. It only updates over the SF2 player's own firmware (`FM-1_8000014`): an FM-1 on the stock V15 or
-another firmware is told to use the workbench the first time. `make_install.js` must run after the build it packs: the build id it
+checked). Either step can be left out. An FM-1 on the stock V15 or another firmware (the SDK says "migration") gets nothing written; the page
+shows its identity and a confirmation, and only then connects again with the SDK's `force` (the workbench's "Force flash": firmware without
+the capability reply goes the "legacy" route through the vendor loader). The force is only used for the identity the user confirmed. `make_install.js` must run after the build it packs: the build id it
 writes is `build/dx7/build-identity.json`'s, and the device's must match it after the update. Checked in the browser pane against a fake
 FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank arrives (1 040 frames, CRC right), bank only, the stock
-V15 refused, no FM-1 found. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
+V15 refused, no FM-1 found; and (2026-11-10) "FM-1_918" with no capability reply: the confirmation, then legacy route, loader,
+firmware, the SF2 player back with the right build, then the bank. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
 not been run from this page yet.
 
 **From another computer on the same network (2026-11-05).** `.\start_web.ps1 -Lan` also serves this folder over HTTPS on port 8766

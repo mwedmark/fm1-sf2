@@ -5,7 +5,7 @@ from a SoundFont (`.sf2`). You convert the bank in the browser, install the firm
 the browser, and then play it from the FM-1's keys or over MIDI (USB, DIN or Bluetooth).
 
 **Install it:** <https://mwedmark.github.io/fm1-sf2/install.html> puts the firmware and a General MIDI bank on your FM-1 over USB
-(Chrome or Edge; the first time needs M-VAVE's Workbench, see [section 5](#5-installing-firmware-and-bank)).
+(Chrome or Edge; see [section 5](#5-installing-firmware-and-bank)).
 
 **Try it without a device:** <https://mwedmark.github.io/fm1-sf2/> runs the firmware in the [fm1-emu](https://github.com/joakimeriksson/fm1-emu)
 emulator in your browser, and its [MIDI player](https://mwedmark.github.io/fm1-sf2/player.html?song=astley&play=1) plays MIDI files through it.
@@ -129,9 +129,12 @@ The firmware that does not play a bank's codec shows **NO BANK**.
 
 The install page (`install.html`) writes the firmware and the bank over USB-MIDI in one go. It works in Chrome or Edge.
 
-**The first time**, the FM-1 runs M-VAVE's own firmware, and the install page cannot update that. Install the SF2 firmware once with
-M-VAVE's [FM-1 Workbench](https://open.m-vave.com/fm1-workbench): connect the FM-1 with USB, choose the `.fwsc` file and let it write.
-After that, use the install page for every update. The original firmware (`FM-1_015.fwsc`) can be put back with the Workbench at any time.
+**The first time**, the FM-1 runs M-VAVE's own firmware (or another one). The install page then writes nothing and shows what the
+FM-1 runs, for example `FM-1_918`. Tick **Replace … with the SF2 player firmware** and click **Replace and install**: the page takes
+the same route as the "Force flash" of M-VAVE's [FM-1 Workbench](https://open.m-vave.com/fm1-workbench), through M-VAVE's own update
+loader. The voices and settings of the old firmware are not kept. If that firmware does not speak the USB-MIDI update protocol, use the
+Workbench (Recovery & force update > Force flash) once instead. The original firmware can be put back with the Workbench
+("Restore original V15") at any time.
 
 **Every time after that:**
 
