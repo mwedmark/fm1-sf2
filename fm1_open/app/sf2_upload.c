@@ -72,11 +72,11 @@ static void upload_reply(unsigned cmd, unsigned status)
     else
         (void)fm1_midi_send(reply, sizeof reply);
 }
-static uint32_t read35(const uint8_t *p)
+__attribute__((noinline)) static uint32_t read35(const uint8_t *p)   /* not inlined: the live-cache image is tight */
 {
     return (uint32_t)p[0] | (uint32_t)p[1] << 7 | (uint32_t)p[2] << 14 | (uint32_t)p[3] << 21 | (uint32_t)p[4] << 28;
 }
-static uint32_t crc32_flash(uint32_t bytes)
+__attribute__((noinline)) static uint32_t crc32_flash(uint32_t bytes)   /* called twice: one copy */
 {
     static const uint32_t nibble[16] = {0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac, 0x76dc4190, 0x6b6b51f4, 0x4db26158, 0x5005713c,
                                         0xedb88320, 0xf00f9344, 0xd6d6a3e8, 0xcb61b38c, 0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c};
@@ -154,10 +154,11 @@ void sf2_upload_poll(void)
         upload_stage = 11;
     } else if (cmd == 9 && n == 17) {                            /* F0 7D S F 02 09 size*5 crc*5 F7 */
         uint32_t size = read35(m + 6);
-        const uint8_t *h = fm1_flash_map(FM1B_FLASH_OFFSET, 48);  /* the bank's own size (header bytes 40..43) must be that size */
-        uint32_t own = h ? (uint32_t)h[40] | (uint32_t)h[41] << 8 | (uint32_t)h[42] << 16 | (uint32_t)h[43] << 24 : 0;
-        status = !upload_active && fm1b_ready() && own == size && size >= 48 && size <= FM1B_FLASH_BYTES
-                 && crc32_flash(size) == read35(m + 11) ? 0 : 4;
+        const uint8_t *h = fm1_flash_map(FM1B_FLASH_OFFSET, 48);  /* the bank's own size (header bytes 40..43, LE) must be that size */
+        uint32_t own = 0;
+        if (h)
+            memcpy(&own, h + 40, 4);
+        status = fm1b_ready() && own == size && size <= FM1B_FLASH_BYTES && crc32_flash(size) == read35(m + 11) ? 0 : 4;   /* mid-upload: CRC differs */
     } else if (cmd == 3 && n == 12) {
         status = upload_active ? 0 : 5;
         if (!status) {
