@@ -12,7 +12,9 @@
 //   codec 2: packed offset = the byte where the MP3 frame to start decoding at begins (one lead-in frame before the sound's first), packed bytes = to the
 //   end of the frame holding the sound's last sample, delay (u16 at 18) = samples of that decode to throw away, crossfade (u16 at 20) = loop crossfade;
 //   codec 0: the BFP8 stored, packed bytes = unpacked bytes.
-const fs = require('fs'), { execFileSync } = require('child_process');
+// The converter page (index.html) loads this file too, as FM1_PACK: there opt.encode is LAME in JavaScript (lamejs, bit reservoir off) and
+// opt.decode the firmware's minimp3 (mp3_decoder_wasm.js). In Node they default to ffmpeg.
+(function () {
 const FRAME = 1152, RATE_BYTES_PER_FRAME = kbit => Math.floor(144 * kbit * 1000 / 32000), LEAD = 1, XFADE = 256, MIN_LOOP = 16, NEW_HEADER = 92, ENTRY = 24;
 const bfpBytes = n => Math.ceil(n / 32) * 33, align4 = n => (n + 3) & ~3;
 
@@ -21,14 +23,15 @@ function unpackBfp8(b, off, n) {                 // n samples from a BFP8 run at
   for (let g = 0; g * 32 < n; g++) { const sh = b[off + g * 33]; for (let i = 0; i < 32; i++) out[g * 32 + i] = ((b[off + g * 33 + 1 + i] << 24) >> 24) << sh; }
   return out.subarray(0, n);
 }
-const ffmpeg = (args, input) => execFileSync('ffmpeg', ['-v', 'error', ...args], { input, maxBuffer: 1 << 29 });
-function encode(pcm, kbit) {
+const ffmpeg = (args, input) => require('child_process').execFileSync('ffmpeg', ['-v', 'error', ...args], { input, maxBuffer: 1 << 29 });
+function ffmpegEncode(pcm, kbit) {
   return ffmpeg(['-f', 's16le', '-ar', '32000', '-ac', '1', '-i', '-', '-c:a', 'libmp3lame', '-b:a', kbit + 'k', '-reservoir', '0', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', '-'], Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
 }
-function decode(stream) { const d = ffmpeg(['-f', 'mp3', '-i', '-', '-ar', '32000', '-f', 's16le', '-'], stream); return new Int16Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.length)); }
+function ffmpegDecode(stream) { const d = ffmpeg(['-f', 'mp3', '-i', '-', '-ar', '32000', '-f', 's16le', '-'], stream); return new Int16Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.length)); }
 const snr = (a, c) => { let s = 0, e = 0; for (let i = 0; i < a.length; i++) { s += a[i] * a[i]; e += (a[i] - c[i]) ** 2; } return 10 * Math.log10(Math.max(s, 1e-9) / Math.max(e, 1e-9)); };
 
 function pack(src, opt = {}) {
+  const encode = opt.encode || ffmpegEncode, decode = opt.decode || ffmpegDecode;
   const MIN = opt["min-loop"] === undefined ? MIN_LOOP : opt["min-loop"], kbit = opt.kbit || 64, flash = opt.flash || 466944, margin = opt.margin === undefined ? 3072 : opt.margin;
   const dv = new DataView(src.buffer, src.byteOffset, src.byteLength), u32 = o => dv.getUint32(o, true);
   if (String.fromCharCode(...src.subarray(0, 4)) !== 'FM1B' || dv.getUint16(4, true) !== 1 || dv.getUint16(6, true) !== 8) throw new Error('not a version 1 BFP8 bank');
@@ -64,7 +67,7 @@ function pack(src, opt = {}) {
   const extra = s => s.bytes - s.n / 32000 * perSecond;
   const tables = offSmp + shift, entriesBytes = sounds.length * ENTRY;
   let lossless = new Set(sounds.filter(s => s.always));
-  let rest = sounds.filter(s => !lossless.has(s)), pk = rest.length ? stream(rest) : { mp3: Buffer.alloc(0), back: new Int16Array(0), delay: 0 };
+  let rest = sounds.filter(s => !lossless.has(s)), pk = rest.length ? stream(rest) : { mp3: new Uint8Array(0), back: new Int16Array(0), delay: 0 };
   const sizeNow = () => tables + align4(pk.mp3.length) + [...lossless].reduce((a, s) => a + align4(s.bytes), 0) + entriesBytes;
   const weak = sounds.filter(s => !lossless.has(s) && s.snr < 12).sort((a, b) => (12 - b.snr) / Math.max(extra(b), 1) - (12 - a.snr) / Math.max(extra(a), 1));
   let budget = flash - margin - sizeNow();
@@ -92,13 +95,17 @@ function pack(src, opt = {}) {
     o.setUint32(e + 8, mp3At - tables + f0 * frameBytes, true); o.setUint32(e + 12, (f1 - f0 + 1) * frameBytes, true);
     out[e + 16] = 2; o.setUint16(e + 18, s.discard, true); o.setUint16(e + 20, s.loop && s.loop[0] >= 64 ? XFADE : 0, true);
   });
-  return { bytes: out, sounds: sounds.length, lossless: lossless.size, always: sounds.filter(s => s.always).length, why: sounds.filter(s => s.always).reduce((m, s) => (m[s.why] = (m[s.why] || 0) + 1, m), {}), mp3Bytes: pk.mp3.length, shift,
+  // heard: what the device plays for each MP3 sound (its unpacked offset and samples), for a preview of the packed bank
+  const heard = rest.map(s => ({ off: s.off, pcm: pk.back.slice(s.t + pk.delay, s.t + pk.delay + s.n) }));
+  return { bytes: out, heard, kbit, sounds: sounds.length, lossless: lossless.size, always: sounds.filter(s => s.always).length, why: sounds.filter(s => s.always).reduce((m, s) => (m[s.why] = (m[s.why] || 0) + 1, m), {}), mp3Bytes: pk.mp3.length, shift,
     unpackedBytes: src.length + shift, meanSnr: sounds.filter(s => !lossless.has(s)).reduce((a, s) => a + s.snr, 0) / Math.max(1, sounds.length - lossless.size),
     lossSnr: sounds.filter(s => lossless.has(s)).map(s => s.snr) };
 }
-module.exports = { pack, unpackBfp8 };
+if (typeof module !== 'undefined') module.exports = { pack, unpackBfp8 };
+else globalThis.FM1_PACK = { pack, unpackBfp8 };
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+  const fs = require('fs');
   const a = process.argv.slice(2), pos = a.filter((x, i) => !x.startsWith('--') && !(i && a[i - 1].startsWith('--')));
   const opt = {}; for (let i = 0; i < a.length; i++) if (a[i].startsWith('--')) opt[a[i].slice(2)] = Number(a[++i]);
   if (pos.length !== 2) { console.error('usage: node pack_bank.js in.fm1b out.fm1b [--kbit 64] [--flash 466944] [--margin 3072]'); process.exit(1); }
@@ -107,3 +114,4 @@ if (require.main === module) {
   console.log(`${pos[1]}: ${r.bytes.length} bytes (the unpacked bank would be ${r.unpackedBytes}); ${r.sounds} sounds, ${r.sounds - r.lossless} in a ${r.mp3Bytes}-byte MP3 stream (mean ${r.meanSnr.toFixed(1)} dB), ${r.lossless} lossless (because of: ${JSON.stringify(r.why)})` +
     (r.bytes.length > (opt.flash || 466944) ? ' - TOO BIG' : ''));
 }
+})();

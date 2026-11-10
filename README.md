@@ -74,21 +74,35 @@ The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (
 1. **Drop an `.sf2` file** on the page. It shows its size, presets and samples.
 2. **Preset**: *All presets with key mapping* makes a full General MIDI bank (program numbers, drum kits, every zone). A single preset
    makes a small bank of just that instrument.
-3. **Encoding**: the codec of the samples, see [section 4](#4-codecs). BFP8 is the default and the one to use.
+3. **Encoding**: the codec of the samples, see [section 4](#4-codecs). BFP8 is the default and the one to use. **MP3 64, 128 or 256 kbit/s**
+   makes a packed bank for the live-cache firmware: BFP8 at 32,000 Hz with the sounds as one MP3 stream (the sample rate is then fixed).
 4. **Sample rate**: 32,000 Hz is the default and the rate the player works at. Lower rates make the bank smaller and duller
    (22,059 Hz keeps up to about 11 kHz).
 5. **Bit depth**: only for raw PCM (8, 12 or 16 bit).
 6. **Convert**. The line under it says the bank's size and whether it **fits in the device's sample bank of 456.0 KB**. The table
    lists every sound with its key range, root note, loop and bytes.
-7. **Download .bin** saves the bank as `<name>_fm1.bin`. (*Download .sf2* saves the simplified SoundFont, to listen to in any SF2 player.)
+7. **Download .bin** saves the bank as `<name>_fm1.bin` (an MP3 bank as `<name>_fm1_mp3_<kbit>.fm1b`). (*Download .sf2* saves the simplified SoundFont, to listen to in any SF2 player.)
    *Send to FM-1* writes the bank straight to an FM-1 that runs the SF2 firmware; the install page does the same.
 
-Below that, *Try it in the FM-1 simulator* plays the converted bank on an on-screen keyboard.
+Below that, *Try it in the FM-1 simulator* plays the converted bank on an on-screen keyboard. For an MP3 bank it plays the MP3 sounds
+as the live-cache firmware decodes them.
 
-**For the live-cache firmware**, convert to BFP8 at 32,000 Hz first, then pack it (needs Node.js and ffmpeg with libmp3lame):
+**MP3 banks (live-cache firmware only).** The page codes the sounds with LAME in JavaScript ([lamejs](third_party/lamejs/README.md),
+LGPL-3.0) and checks them with the firmware's own MP3 decoder. Sounds that MP3 handles badly (under 12 dB) stay BFP8 as long as the bank
+fits, and so do sounds with very short loops. Packing a General MIDI bank takes a few seconds. For `soundfonts/1mgm.sf2` the result is:
+
+| Bit rate | Bank | Sounds as MP3 | Mean SNR against the BFP8 |
+| --- | --- | --- | --- |
+| 64 kbit/s | 239 KB | 119 of 165 | 16 dB |
+| 128 kbit/s | 270 KB | 153 of 165 | 22 dB |
+| 256 kbit/s | 449 KB | 155 of 165 | 30 dB |
+
+At 256 kbit/s the bank is nearly as big as the BFP8 one; 64 kbit/s leaves room for a SoundFont twice as large. To install an MP3 bank,
+choose the live-cache firmware on the install page (it picks it by itself when you choose an MP3 bank). The same packing on the command
+line (Node.js and ffmpeg with libmp3lame), from a BFP8 bank at 32,000 Hz:
 
 ```bash
-node pack_bank.js my_bank_fm1.bin my_bank_packed.fm1b
+node pack_bank.js my_bank_fm1.bin my_bank_packed.fm1b --kbit 64
 ```
 
 ## 3. How small a bank must be
@@ -123,7 +137,7 @@ Samples are stored mono in one of these formats. The whole bank uses one.
 | SEA5 | 5.7 | The FM-1's own ADPCM-like codec at 5 bits. | The most sound in the flash, with audible noise on quiet sounds. |
 | SEA6 | 6.7 | SEA at 6 bits, about 5 dB less noise than SEA5. | A middle ground (plain firmware only). |
 | PCM 8 / 12 / 16 | 8 / 12 / 16 | Plain samples. 12 and 16 bit are too big for a full GM bank. | Small banks of a few presets (plain firmware only). |
-| Packed | about 2 | One MP3 stream (64 kbit/s) made from a BFP8 bank by `pack_bank.js`; a few sounds MP3 handles badly stay BFP8. | Twice the sound in the same flash (live-cache firmware only). |
+| Packed (MP3) | about 2 at 64 kbit/s | One MP3 stream (64, 128 or 256 kbit/s) made from a BFP8 bank by the converter or `pack_bank.js`; a few sounds MP3 handles badly stay BFP8. | Twice the sound in the same flash (live-cache firmware only). |
 
 The firmware that does not play a bank's codec shows **NO BANK**.
 
@@ -147,11 +161,14 @@ Workbench (Recovery & force update > Force flash) once instead. To go back to th
 
 1. Connect the FM-1 with USB and close every other program that uses its MIDI port (a DAW, MIDIberry, the Workbench).
 2. Open the install page. **Hosted:** <https://mwedmark.github.io/fm1-sf2/install.html> installs the latest firmware built on GitHub
-   (the plain SF2 player) with the default General MIDI bank, nothing to set up. **Local:** `.\start_web.ps1` opens
+   with the default General MIDI bank, nothing to set up. It has both builds of the firmware: the plain SF2 player, and the SF2 player
+   with the live cache, which also plays MP3 banks (`install.html?firmware=live` opens it with that one chosen). **Local:** `.\start_web.ps1` opens
    <http://localhost:8765/install.html> with the firmware and bank you packed yourself (`build_install.ps1`); from another computer on the
    network, `.\start_web.ps1 -Lan` and the HTTPS address it prints.
 3. **What gets installed** shows the firmware package (its name, version, voices, size and build) and the bank (its name, size, share of the
-   flash, programs, codec and rate). To install another bank, open *Choose another bank* and pick a `.bin` or `.fm1b` file.
+   flash, programs, codec and rate). On the hosted page, the menu above it picks the plain or the live-cache firmware. To install another
+   bank, open *Choose another bank* and pick a `.bin` or `.fm1b` file. An MP3 bank picks the live-cache firmware by itself; the
+   live-cache firmware plays only BFP8 and MP3 banks, so the page stops before writing anything else to it.
 4. Tick what to do: **Install firmware**, **Send the sound bank**, or both.
 5. Click **Install** and allow MIDI/SysEx access when the browser asks. The steps:
    1. *Find the FM-1*: the page asks the FM-1 which firmware it runs.

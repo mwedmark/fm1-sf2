@@ -74,6 +74,9 @@
           <option value="sea6">SEA6 (6.7 bit/sample, about 5 dB less noise)</option>
           <option value="bfp8" selected>BFP8 (8 bit with a scale per 32 samples, 8.25 bit/sample, easy to decode)</option>
           <option value="pcm">Raw PCM</option>
+          <option value="mp3_64">MP3 64 kbit/s, packed for the live-cache firmware (BFP8 at 32,000 Hz underneath)</option>
+          <option value="mp3_128">MP3 128 kbit/s, packed for the live-cache firmware</option>
+          <option value="mp3_256">MP3 256 kbit/s, packed for the live-cache firmware</option>
         </select></label>
       <label class="f"><span>Sample rate</span>
         <select id="rate">
@@ -121,6 +124,10 @@
   <p id="err" class="warn" role="alert" hidden></p>
 </main>
 <script src="simulator_wasm.js" onerror="void 0"></script>
+<!-- MP3 banks: LAME in JavaScript (LGPL-3.0, third_party/lamejs), the firmware's decoder and the packer pack_bank.js -->
+<script src="third_party/lamejs/lame.min.js" onerror="void 0"></script>
+<script src="mp3_decoder_wasm.js" onerror="void 0"></script>
+<script src="pack_bank.js" onerror="void 0"></script>
 
 <script id="core">
 // ---- SF2 reader -----------------------------------------------------------
@@ -920,17 +927,41 @@ function writeSf2(bank, name) {
     $('opts').hidden = false;
   }
 
-  function convert() {
+  // MP3: the codec menu's kbit/s, else 0. The bank is made as BFP8 at 32 kHz and then packed by pack_bank.js (the live-cache firmware's format).
+  const mp3Kbit = () => +($('codec').value.match(/^mp3_(\d+)$/) || [0, 0])[1];
+  // The file of the bank: the packed one for MP3, else as written.
+  const bankBytes = () => bank.packed ? bank.packed.bytes : writeFm1(bank, bank.info);
+  const bankFileName = (kbit = bank.packed && bank.packed.kbit) => baseName + (kbit ? '_fm1_mp3_' + kbit + '.fm1b' : '_fm1.bin');
+  let converting = false;
+  async function convert() {
+    if (converting) return;
     showErr('');
+    const kbit = mp3Kbit();
+    if (kbit && (typeof lamejs === 'undefined' || typeof MP3_DECODER === 'undefined' || typeof FM1_PACK === 'undefined')) { showErr('MP3 needs third_party/lamejs/lame.min.js, mp3_decoder_wasm.js and pack_bank.js next to this page.'); return; }
     try {
-      bank = buildBank(sf, +$('preset').value, { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
+      bank = buildBank(sf, +$('preset').value, kbit ? { rate: 32000, bits: 8, sea: false, seaBits: 5, bfp: true } :
+        { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
     } catch (e) { showErr('The conversion failed: ' + e.message); return; }
     if (!bank.zones.length) { $('result').hidden = true; showErr('The preset has no playable sounds.'); return; }
-    bank.info = bankInfo(baseName + '_fm1.bin');             // one name and time a conversion: the file sent and the one saved are the same
+    bank.info = bankInfo(bankFileName(kbit));                // one name and time a conversion: the file sent and the one saved are the same
     const bin = writeFm1(bank, bank.info);
-    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + (bank.zonesWritten ?? bank.zones.length) + ' zones, ' + (bank.soundsWritten ?? bank.samples.length) + ' unique sounds, ' + bank.rate + ' Hz, ' + (bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
-      '. <strong>.bin ' + fmtBytes(bin.length) + '</strong>' +
-      (bin.length > FM1_SAMPLE_BANK ? ' <span class="warn">(more than the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (fits in the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
+    let play = bin;
+    if (kbit) {
+      converting = true; $('go').disabled = true; $('go').textContent = 'Packing as MP3 ...';
+      await new Promise(r => setTimeout(r, 30));             // let the button show it: the packing takes a few seconds
+      try { bank.packed = FM1_PACK.pack(bin, { kbit, encode: lameEncode, decode: MP3_DECODER.decode }); }
+      catch (e) { bank = null; $('result').hidden = true; showErr('The MP3 packing failed: ' + e.message); return; }
+      finally { converting = false; $('go').disabled = false; $('go').textContent = 'Convert'; }
+      // the simulator plays plain banks: the BFP8 bank with each MP3 sound as the firmware decodes it
+      play = bin.slice();
+      for (const h of bank.packed.heard) play.set(packBfp8(h.pcm), h.off);
+    }
+    const p = bank.packed, file = p ? p.bytes : bin;
+    $('summary').innerHTML = (bank.presets.length ? bank.presets.length + ' presets, ' : '') + (bank.zonesWritten ?? bank.zones.length) + ' zones, ' + (bank.soundsWritten ?? bank.samples.length) + ' unique sounds, ' + bank.rate + ' Hz, ' + (p ? 'MP3 ' + p.kbit + ' kbit/s' : bank.sea ? 'SEA' + bank.seaBits : bank.bfp ? 'BFP8' : bank.bits + ' bit') +
+      (p ? ' (' + (p.sounds - p.lossless) + ' sounds as MP3, mean ' + p.meanSnr.toFixed(1) + ' dB against the BFP8; ' + p.lossless + ' kept as BFP8; the BFP8 bank would be ' + fmtBytes(p.unpackedBytes) + ')' : '') +
+      '. <strong>' + (p ? '.fm1b ' : '.bin ') + fmtBytes(file.length) + '</strong>' +
+      (file.length > FM1_SAMPLE_BANK ? ' <span class="warn">(more than the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')</span>' : ' (fits in the device\'s sample bank of ' + fmtBytes(FM1_SAMPLE_BANK) + ')') +
+      (p ? '. <strong>It plays only on the live-cache firmware</strong> (<a href="install.html?firmware=live">the install page</a> installs it); the simulator below plays the MP3 sounds as that firmware decodes them' : '') +
       (bank.dropped ? ' <span class="warn">(' + bank.dropped + ' presets outside bank 0/128 are not in the .bin)</span>' : '');
     const tb = $('zones'); tb.textContent = '';
     for (const z of bank.zones) {
@@ -940,7 +971,17 @@ function writeSf2(bank, name) {
       tb.appendChild(tr);
     }
     $('result').hidden = false;
-    Play.load(bin);
+    Play.load(play);
+  }
+  // pcm (Int16Array, 32 kHz mono) to one constant-bit-rate MP3 stream: lamejs codes without the bit reservoir and writes no tag
+  function lameEncode(pcm, kbit) {
+    const enc = new lamejs.Mp3Encoder(1, 32000, kbit), parts = [];
+    for (let i = 0; i < pcm.length; i += 1152) parts.push(enc.encodeBuffer(pcm.subarray(i, i + 1152)));
+    parts.push(enc.flush());
+    const out = new Uint8Array(parts.reduce((a, q) => a + q.length, 0));
+    let at = 0;
+    for (const q of parts) { out.set(new Uint8Array(q.buffer, q.byteOffset, q.length), at); at += q.length; }
+    return out;
   }
 
   // ---- Playing the bank in the FM-1 simulator (fm1_open compiled to WebAssembly) ----
@@ -1050,10 +1091,14 @@ function writeSf2(bank, name) {
   window.addEventListener('drop', e => e.preventDefault());
 
   $('go').addEventListener('click', convert);
-  const syncCodec = () => { $('bits').disabled = $('codec').value !== 'pcm'; };   // SEA is always coded from 16 bit
+  const syncCodec = () => {                                  // SEA is always coded from 16 bit; MP3 is packed from BFP8 at 32 kHz
+    $('bits').disabled = $('codec').value !== 'pcm';
+    $('rate').disabled = !!mp3Kbit();
+    if (mp3Kbit()) $('rate').value = '32000';
+  };
   $('codec').addEventListener('change', syncCodec);
   syncCodec();
-  $('dlBin').addEventListener('click', () => bank && download(writeFm1(bank, bank.info), baseName + '_fm1.bin', 'application/octet-stream'));
+  $('dlBin').addEventListener('click', () => bank && download(bankBytes(), bankFileName(), 'application/octet-stream'));
   // ---- Send the bank to the FM-1 (the SF2 player firmware receives it as SysEx and writes it to flash) ----
   const send = { access: null, busy: false };
   function sendMsg(text, bad) { const el = $('sendStatus'); el.hidden = !text; el.textContent = text || ''; el.className = bad ? 'meta warn' : 'meta'; }
@@ -1083,7 +1128,7 @@ function writeSf2(bank, name) {
   const SEND_ERRORS = { 1: 'malformed frame', 2: 'outside the flash', 3: 'flash error', 4: 'checksum mismatch', 5: 'no transfer in progress' };
   async function sendBank() {
     if (send.busy || !bank) return;
-    const bin = writeFm1(bank, bank.info);
+    const bin = bankBytes();
     if (bin.length > FM1_SAMPLE_BANK) { sendMsg('The bank (' + fmtBytes(bin.length) + ') is larger than the flash (' + fmtBytes(FM1_SAMPLE_BANK) + ').', true); return; }
     if (!navigator.requestMIDIAccess) { sendMsg('This browser has no Web MIDI. Use Chrome or Edge.', true); return; }
     try {
@@ -1102,7 +1147,8 @@ function writeSf2(bank, name) {
           try { status = await exchange(output, input, frame, i === 0 ? 30000 : 3000); } catch (e) { if (i === 0) break; }
         }
         if (status < 0) throw new Error('The FM-1 does not answer. Is it running the SF2 player firmware?');
-        if (status !== 0) throw new Error('The FM-1 rejected frame ' + (i + 1) + ': ' + (SEND_ERRORS[status] || 'error ' + status));
+        if (status !== 0) throw new Error('The FM-1 rejected frame ' + (i + 1) + ': ' + (SEND_ERRORS[status] || 'error ' + status) +
+          (bank.packed && i === frames.length - 1 && status === 1 ? '. An MP3 bank plays only on the live-cache firmware.' : ''));
       }
       sendMsg('Done: ' + fmtBytes(bin.length) + ' is in the FM-1\'s flash and plays right away. It stays when the FM-1 is switched off.');
     } catch (e) {

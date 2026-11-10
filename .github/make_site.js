@@ -1,10 +1,11 @@
 // Makes the GitHub Pages site: the fm1-emu emulator (MIT, https://github.com/joakimeriksson/fm1-emu) fetched from its own site,
 // this repo's firmware package registered in its catalog as "sf2", and the sine test bank as a flash overlay.
-//   node .github/make_site.js <outdir> <firmware.fwsc> [version] [build-identity.json]
+//   node .github/make_site.js <outdir> <firmware.fwsc> [version] [build-identity.json] [live-cache.fwsc live-cache-identity.json]
 // The same steps as start_emu.ps1 (RUNNING.md section 4), for a Pages site instead of a local server. With the build's
-// build-identity.json the site also gets install.html, which installs that firmware and the first bank on an FM-1 (make_install.js).
+// build-identity.json the site also gets install.html, which installs that firmware and the first bank on an FM-1 (make_install.js);
+// with the live-cache build's package and identity too, the install page offers that build as well (for MP3 banks).
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
-const [out, fwsc, version = String(Date.now()), identity] = process.argv.slice(2);
+const [out, fwsc, version = String(Date.now()), identity, liveFwsc, liveIdentity] = process.argv.slice(2);
 if (!out || !fwsc) throw new Error('usage: node .github/make_site.js <outdir> <firmware.fwsc> [version]');
 const root = path.join(__dirname, '..');
 const SITE = 'https://joakimeriksson.github.io/fm1-emu/';
@@ -121,15 +122,21 @@ async function get(url) {
   const install = !!(identity && fs.existsSync(identity) && installBank);
   if (install) {
     execFileSync('node', [path.join(root, 'make_install.js'), installBank.file, `--fwsc=${fwsc}`, `--identity=${identity}`,
-      `--out=${path.join(out, 'dist', 'install')}`, `--name=sf2player (build ${version.slice(0, 7)})`], { stdio: 'inherit' });
+      `--out=${path.join(out, 'dist', 'install')}`, `--name=sf2player (build ${version.slice(0, 7)})`,
+      ...(liveFwsc && fs.existsSync(liveFwsc) && liveIdentity && fs.existsSync(liveIdentity)
+        ? [`--live-fwsc=${liveFwsc}`, `--live-identity=${liveIdentity}`, `--live-name=sf2player live cache (build ${version.slice(0, 7)})`]
+        : (console.warn('No live-cache package: the install page offers only the plain firmware'), []))], { stdio: 'inherit' });
     fs.copyFileSync(path.join(root, 'install.html'), path.join(out, 'install.html'));
     fs.mkdirSync(path.join(out, 'fm1_open', 'sdk'), { recursive: true });
     fs.copyFileSync(path.join(root, 'fm1_open', 'sdk', 'WebUpdate.js'), path.join(out, 'fm1_open', 'sdk', 'WebUpdate.js'));
   } else console.warn('No install page: it needs the build-identity.json of the firmware and a bank in banks/ or soundfonts/');
 
-  // The bank converter (the repo's index.html, SF2 to FM1B) as converter.html, with the simulator it plays the bank in.
-  for (const [from, to] of [['index.html', 'converter.html'], ['simulator_wasm.js', 'simulator_wasm.js']])
-    fs.copyFileSync(path.join(root, from), path.join(out, to));
+  // The bank converter (the repo's index.html, SF2 to FM1B) as converter.html, with the simulator it plays the bank in and, for MP3
+  // banks, LAME in JavaScript (LGPL-3.0), the firmware's MP3 decoder and the packer, at the same paths as in the repo.
+  fs.mkdirSync(path.join(out, 'third_party', 'lamejs'), { recursive: true });
+  for (const [from, to] of [['index.html', 'converter.html'], ['simulator_wasm.js'], ['mp3_decoder_wasm.js'], ['pack_bank.js'],
+    ['third_party/lamejs/lame.min.js'], ['third_party/lamejs/LICENSE'], ['third_party/lamejs/README.md']])
+    fs.copyFileSync(path.join(root, from), path.join(out, to || from));
 
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
@@ -157,7 +164,7 @@ The sine test bank has seven programs (plain, vibrato, tremolo, delayed vibrato,
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
 <li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the MIDI files of the repo or one of your own.
 Its <b>Copy link</b> gives a link to a bank and song that plays at the first click, e.g. <a href="player.html?song=astley&amp;play=1">player.html?song=astley&amp;play=1</a>.</li>
-${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). It also replaces M-VAVE's original firmware and other firmware such as Felucca, after asking.</li>\n` : ''}<li><a href="converter.html"><b>Bank converter</b></a>: an SF2 file to an FM1B bank (SEA5, SEA6, BFP8 or PCM), tried in the simulator before you download it or send it to an FM-1.</li>
+${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). It also replaces M-VAVE's original firmware and other firmware such as Felucca, after asking.</li>\n` : ''}<li><a href="converter.html"><b>Bank converter</b></a>: an SF2 file to an FM1B bank (SEA5, SEA6, BFP8, PCM, or MP3 at 64, 128 or 256 kbit/s for the live-cache firmware), tried in the simulator before you download it or send it to an FM-1.</li>
 <li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>

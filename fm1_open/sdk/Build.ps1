@@ -418,6 +418,11 @@ try {
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root 'app') -Recurse -File | Sort-Object FullName) {
         $identityInputs += $file.FullName.Substring($root.Length+1).Replace('\','/') + ':' + (Hash $file.FullName)
     }
+    # and the build's switches and the live cache's sources, so that the plain and the -LiveCache build of the same app/ differ (the install page
+    # tells by the id which one the FM-1 runs)
+    $identityInputs += 'defines:' + (($flags | Where-Object { $_ -like '-D*' }) -join ' ')   # not the -I paths: they name this computer's folders
+    if ($LiveCache) { foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root 'live_cache') -File -Include *.c,*.h -Recurse | Sort-Object FullName) {
+        $identityInputs += $file.FullName.Substring($root.Length+1).Replace('\','/') + ':' + (Hash $file.FullName) } }
     $buildIdentity = Hash-Text ($identityInputs -join "`n")
     $idBytes = for ($i=0; $i -lt 64; $i+=2) { '0x' + $buildIdentity.Substring($i,2) }
     if ($variant.update_family -ne 7 -or $variant.user_bytes -lt 4096 -or $variant.user_bytes % 4096) {

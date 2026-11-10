@@ -4,6 +4,8 @@
 //   node make_install.js [bank.fm1b] [--voices=N]      (default dist/gm_32k.fm1b, the voices fm1b.h has)
 // A package built elsewhere (the Pages site, .github/make_site.js): --fwsc=<package> --identity=<its build-identity.json>
 // [--out=<folder>, default dist/install] [--name=<the package's name>].
+// The live-cache build too (the install page's choice for MP3 banks): --live-fwsc=<package> --live-identity=<its build-identity.json>
+// [--live-name=<its name>]. It gets the same voices.
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const root = __dirname, build = path.join(root, 'fm1_open/build/dx7');
 const option = name => { const a = process.argv.find(a => a.startsWith('--' + name + '=')); return a ? a.slice(name.length + 3) : null; };
@@ -39,15 +41,29 @@ fs.writeFileSync(path.join(out, 'stock.fwsc'), stock);
 const dist = path.join(root, 'dist');
 const name = option('name') || (fs.existsSync(dist) ? fs.readdirSync(dist) : []).filter(f => f.endsWith('.fwsc')).sort()
   .find(f => fs.statSync(path.join(dist, f)).size === firmware.length && fs.readFileSync(path.join(dist, f)).equals(firmware)) || '';
+// the update metadata of a package of ours (the version in the address: never a cached package)
+const entry = (bytes, id, file) => ({ schema: 1, product, family: 7, release_version: id.release_version, build_id: id.build_id,
+  sha256: sha(bytes), bytes: bytes.length, loader_sha256: sha(loader), url: 'dist/install/' + file + '?v=' + sha(bytes).slice(0, 12), voices });
+let live = null;
+if (option('live-fwsc')) {
+  const bytes = fs.readFileSync(option('live-fwsc'));
+  const id = JSON.parse(fs.readFileSync(option('live-identity'), 'utf8').replace(/^\uFEFF/, ''));
+  if (!/^[0-9a-f]{64}$/.test(id.build_id)) throw new Error('no build id for the live-cache package');
+  // the page tells the builds apart by their id (fm1_open/sdk/Build.ps1 hashes the -D switches too): the same id would make one look installed
+  if (id.build_id === identity.build_id) throw new Error('the live-cache package has the same build id as the plain one');
+  fs.writeFileSync(path.join(out, 'firmware_live.fwsc'), bytes);
+  live = { name: option('live-name') || '', firmware: entry(bytes, id, 'firmware_live.fwsc') };
+}
 const manifest = {
   name,
-  firmware: { schema: 1, product, family: 7, release_version: identity.release_version, build_id: identity.build_id,
-    sha256: sha(firmware), bytes: firmware.length, loader_sha256: sha(loader), url: 'dist/install/firmware.fwsc?v=' + sha(firmware).slice(0, 12), voices },   // the version in the address: never a cached package
+  firmware: entry(firmware, identity, 'firmware.fwsc'),
   bank: { url: 'dist/install/bank.fm1b?v=' + sha(bank).slice(0, 12), bytes: bank.length, crc32: (~crc) >>> 0, source: path.relative(root, bankPath).replace(/\\/g, '/') },
   // as fm1_open/sdk/Build.ps1 describes it for the SDK (kind 'stock': its loader is the vendor one, the same as ours)
   stock: { schema: 1, kind: 'stock', product: 'FM-1_015', family: 7, release_version: 'V15', build_id: STOCK_SHA, sha256: STOCK_SHA,
     bytes: stock.length, loader_sha256: 'ef1f2db89b011fa53e71df363f0122de0ea896618c53fb53e8da676322004541', url: 'dist/install/stock.fwsc?v=' + STOCK_SHA.slice(0, 12) },
+  ...(live ? { live } : {}),
   made: new Date().toISOString(),
 };
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
-console.log(`${path.relative(root, out).replace(/\\/g, '/')}: firmware ${name || '(no dist/*.fwsc is this package)'}, ${firmware.length} bytes (${voices} voices, build ${identity.build_id.slice(0, 16)}), bank ${bank.length} bytes`);
+console.log(`${path.relative(root, out).replace(/\\/g, '/')}: firmware ${name || '(no dist/*.fwsc is this package)'}, ${firmware.length} bytes (${voices} voices, build ${identity.build_id.slice(0, 16)}), bank ${bank.length} bytes` +
+  (live ? `; live cache ${live.firmware.bytes} bytes (build ${live.firmware.build_id.slice(0, 16)})` : ''));

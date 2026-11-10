@@ -4,8 +4,10 @@
 // the header and pack table are read independently of pack_bank.js, a codec 2 entry is decoded from the stream by the C code (and its loop
 // crossfaded), a codec 0 entry is copied. Then the unpacked sound is compared with the BFP8 sound the bank held.
 //   node test_pack_bank.js [font.sf2]      (default 1mgm.sf2; ffmpeg with libmp3lame and a clang for wasm32 are needed, as for test_sound_cache.js)
+//   node test_pack_bank.js font.sf2 --packed=bank.fm1b    checks a bank the converter page packed from that font (any bit rate) instead
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
-const root = __dirname, fontFile = process.argv[2] || path.join(root, '1mgm.sf2');
+const root = __dirname, fontFile = process.argv.slice(2).find(a => !a.startsWith('--')) || path.join(root, '1mgm.sf2');
+const packedFile = (process.argv.find(a => a.startsWith('--packed=')) || '').slice(9);
 const { pack, unpackBfp8 } = require('./pack_bank.js');
 const wasiClang = path.join(root, 'fm1_open/build/tools/wasi-sdk-27.0-x86_64-windows/bin/clang.exe');
 const clang = process.env.FM1_CLANG || (fs.existsSync(wasiClang) ? wasiClang : 'clang');
@@ -22,8 +24,10 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 eval(html.match(/<script id="core">([\s\S]*?)<\/script>/)[1] + '\nglobalThis.api = { parseSf2, buildBank, writeFm1, bankInfo };');
 const A = globalThis.api, b = fs.readFileSync(fontFile);
 const sf = A.parseSf2(b.buffer.slice(b.byteOffset, b.byteOffset + b.length));
-const src = A.writeFm1(A.buildBank(sf, -2, { rate: 32000, bfp: true }), A.bankInfo('test.fm1b'));
-const t0 = Date.now(), r = pack(new Uint8Array(src)), P = r.bytes, dv = new DataView(P.buffer, P.byteOffset), sdv = new DataView(src.buffer, src.byteOffset), u32 = o => dv.getUint32(o, true);
+// a bank from the page: the same BFP8 bank, with the name and date its info block has (at 92 in the packed file, 32 and 20 bytes)
+const given = packedFile ? new Uint8Array(fs.readFileSync(packedFile)) : null, text = (a, n) => String.fromCharCode(...given.subarray(a, a + n)).replace(/\0.*$/s, '');
+const src = A.writeFm1(A.buildBank(sf, -2, { rate: 32000, bfp: true }), given ? { name: text(92, 32), date: text(124, 20) } : A.bankInfo('test.fm1b'));
+const t0 = Date.now(), r = given ? { bytes: given, sounds: '?', lossless: '?' } : pack(new Uint8Array(src)), P = r.bytes, dv = new DataView(P.buffer, P.byteOffset), sdv = new DataView(src.buffer, src.byteOffset), u32 = o => dv.getUint32(o, true);
 console.log(`${path.basename(fontFile)}: ${src.length} bytes as BFP8, ${P.length} packed (${((Date.now() - t0) / 1000).toFixed(0)} s); ${r.sounds} sounds, ${r.sounds - r.lossless} MP3, ${r.lossless} lossless`);
 
 // ---- the header, read on its own

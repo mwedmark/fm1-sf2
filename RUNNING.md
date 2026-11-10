@@ -221,6 +221,18 @@ V15 refused, no FM-1 found; and (2026-11-10) "FM-1_918" with no capability reply
 firmware, the SF2 player back with the right build, then the bank. On the FM-1 (2026-11-03, already on this build): the bank was written and plays. The firmware write itself is the SDK's code and has
 not been run from this page yet.
 
+**MP3 banks and the live-cache firmware (2026-11-10).** The converter page packs MP3 banks itself (64, 128 or 256 kbit/s): `pack_bank.js`
+runs in the page with lamejs as the encoder (`third_party/lamejs`, bit reservoir off, no tag) and the firmware's minimp3 as the decoder
+(`mp3_decoder_wasm.js`). That decoder gives ffmpeg's samples within 1 LSB and the same length, and `pack_bank.js` with it makes the same
+file byte for byte as with ffmpeg (64 and 128 kbit/s, ffmpeg's encoder). The banks the page made from `1mgm.sf2` pass
+`node test_pack_bank.js soundfonts/1mgm.sf2 --packed=<bank>` at all three rates (64: 245 040 bytes, 119 MP3 sounds, mean 15.8 dB;
+128: 275 988, 153, 21.4 dB; 256: 459 672, 155, 28.4 dB, against the C decoder with the loop crossfade). The hosted install page now has
+both builds (`manifest.live`) and a menu for them; an MP3 bank picks the live cache, and a non-BFP8 bank is refused for it. The two builds
+used to have the same build id (it hashed only `app/`), so the page could not tell them apart: `Build.ps1` now also hashes the `-D`
+switches and, for `-LiveCache`, the `live_cache` sources, which gives every build a new id. Checked in the browser pane against a fake FM-1
+(the choice, `?firmware=live`, the bank checks, the live package through the confirmation); the switch from the plain to the live-cache
+build on a running SF2 player is not covered by the fake, and nothing of this has run on the FM-1.
+
 **From another computer on the same network (2026-11-05).** `.\start_web.ps1 -Lan` also serves this folder over HTTPS on port 8766
 and prints the addresses (this machine: `https://192.168.50.145:8766/install.html`, and `song.html` the same way; Windows Firewall
 already lets Python in). Chrome gives Web MIDI only to `localhost` or HTTPS, so on the other computer accept the self-signed

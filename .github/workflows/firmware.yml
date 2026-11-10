@@ -136,6 +136,12 @@ jobs:
         with:
           name: firmware-plain
           path: fw
+      - name: The live-cache package (the install page's choice for MP3 banks; missing when that build failed)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: firmware-live-cache
+          path: fw
       - name: The converted bank (when the bank job made one)
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -145,7 +151,7 @@ jobs:
       - name: JZZ.js (pinned in .github/site/package-lock.json)
         run: npm ci --ignore-scripts --prefix .github/site
       - name: Make the site
-        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}" fw/build-identity_plain.json
+        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}" fw/build-identity_plain.json fw/sf2player_live-cache.fwsc fw/build-identity_live-cache.json
       - uses: actions/upload-artifact@v4
         with:
           name: emulator-site
