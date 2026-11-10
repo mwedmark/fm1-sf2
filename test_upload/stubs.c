@@ -84,6 +84,7 @@ int fm1b_bind(const uint8_t *image, unsigned bytes, const int16_t *dqt)
     bound_bytes = bytes;
     return 0;
 }
+unsigned fm1b_ready(void) { return bound_bytes != 0; }
 int fm1b_bind_flash(void)
 {
     const uint8_t *h = flash + FM1B_FLASH_OFFSET;

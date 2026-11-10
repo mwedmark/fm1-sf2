@@ -211,7 +211,10 @@ any other firmware than V15 (and other than a vendor loader) the page first inst
 first try hung after the restart into Felucca's loader ("USB-Midi", its input listed twice): the SDK pairs only a port name it finds
 once, and with `force` it also asks every other port (a loopMIDI echo answers with a malformed identity, which the SDK reports
 instead of "not found"). The page now leaves out the ports that did not answer while the FM-1 did, takes one port of a name at a
-time (another on each search), and logs each search. `make_install.js` must run after the build it packs: the build id it
+time (another on each search), and logs each search. The bank step first sends cmd 9 (size and CRC32, `sf2_upload.c`) and skips the
+upload when the FM-1 plays that bank (`test_upload.js` checks cmd 9). *Leaving FM1-SF2* installs `stock.fwsc` with `force` whatever runs
+(from the SF2 player the tagged route, from V15 only the voice restore); the SDK writes V15's factory voices after it. Checked against
+a fake FM-1 (2026-11-10): the same bank skipped, another bank sent, leaving from the SF2 player to V15 with its four voice banks. `make_install.js` must run after the build it packs: the build id it
 writes is `build/dx7/build-identity.json`'s, and the device's must match it after the update. Checked in the browser pane against a fake
 FM-1 (Web MIDI replaced): the same build skips the firmware and the whole bank arrives (1 040 frames, CRC right), bank only, the stock
 V15 refused, no FM-1 found; and (2026-11-10) "FM-1_918" with no capability reply: the confirmation, then legacy route, loader,

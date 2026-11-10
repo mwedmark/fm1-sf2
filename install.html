@@ -85,7 +85,7 @@
     <ol class="steps">
       <li id="s-connect"><span class="dot">1</span><div><div class="step-title">Find the FM-1</div><div class="step-note">Over USB-MIDI. The browser asks for MIDI/SysEx access.</div></div><span class="step-pct"></span></li>
       <li id="s-firmware"><span class="dot">2</span><div><div class="step-title">Firmware</div><div class="step-note">Skipped if the FM-1 already has this exact version.</div></div><span class="step-pct"></span></li>
-      <li id="s-bank"><span class="dot">3</span><div><div class="step-title">Sound bank</div><div class="step-note">Erases and writes the sample flash, then checks the checksum.</div></div><span class="step-pct"></span></li>
+      <li id="s-bank"><span class="dot">3</span><div><div class="step-title">Sound bank</div><div class="step-note">Skipped if the FM-1 already plays this bank (same size and CRC32); else erases and writes the sample flash, then checks the checksum.</div></div><span class="step-pct"></span></li>
     </ol>
     <label class="check"><input type="checkbox" id="doFirmware" checked> Install firmware</label>
     <label class="check"><input type="checkbox" id="doBank" checked> Send the sound bank</label>
@@ -105,6 +105,15 @@
       <div class="actions"><button class="primary" id="replace" disabled>Replace and install</button><button id="replaceCancel">Cancel</button></div>
     </div>
     <p class="warn">Do not unplug the cable, and keep the FM-1 powered until the page says it is done. Close other programs and tabs that use the FM-1's MIDI port (Workbench, DAW, MIDIberry).</p>
+  </section>
+
+  <section class="panel" id="leave">
+    <h2>Leaving FM1-SF2</h2>
+    <p class="muted">Puts M-VAVE's original firmware V15 back on the FM-1, the same package the page uses on the way from other
+      firmware, and then writes V15's 128 factory voices (four banks) again, which the original firmware needs. The SF2 bank in
+      the sample flash is not used by V15. The progress shows under Steps above. To come back later, use this page again.</p>
+    <label class="check"><input type="checkbox" id="leaveOk"> Replace the SF2 player with the original firmware V15</label>
+    <div class="actions"><button id="leaveBtn" disabled>Install original firmware V15</button></div>
   </section>
 
   <details class="panel" id="logBox">
@@ -229,6 +238,11 @@
     await input.open(); await output.open();
     const frames = uploadFrames(bank), started = Date.now();
     try {
+      // cmd 9: does the FM-1 already hold this bank (its size and CRC32) and play it? Firmware before cmd 9 answers 1: send it.
+      step('bank', 'run', 'Checking the bank on the FM-1 …');
+      const same = await exchange(output, input, Uint8Array.from([0xf0, 0x7d, 0x53, 0x46, 2, 9, ...num35(bank.length), ...num35(crc32(bank)), 0xf7]), 15000).catch(() => -1);
+      log('bank check: ' + (same === 0 ? 'the FM-1 has this bank' : same === 4 ? 'another bank' : same === 1 ? 'firmware without the check' : 'no answer'));
+      if (same === 0) { step('bank', 'skip', bankName + ' is already on the FM-1 (same size and CRC32).'); return; }
       for (const [i, frame] of frames.entries()) {
         const last = i === frames.length - 1, pct = Math.round(100 * i / frames.length);
         step('bank', 'run', i === 0 ? 'Erasing the sample flash (up to a minute) …' : last ? 'Checking the bank …' : 'Sending ' + kb(Math.min(bank.length, (i - 1) * 448)) + ' of ' + kb(bank.length), i ? pct : undefined);
@@ -324,7 +338,7 @@
     step('connect', 'done', 'Found FM-1: ' + device.identity + '.');
     log('connected: ' + device.identity + ' (' + updater.mode + (force ? ', force' : '') + ')');
     if (device.migration) { await updater.disconnect(); throw new OtherFirmware(device.identity); }
-    if (force && !device.resume && device.identity !== expect && device.identity !== p.product) {
+    if (force && expect !== '*' && !device.resume && device.identity !== expect && device.identity !== p.product) {
       await updater.disconnect();
       throw new OtherFirmware(device.identity);                // another device or firmware than the one agreed to: ask again
     }
@@ -352,12 +366,15 @@
     step('firmware', 'done', 'Installed and checked (' + pkg.release_version + ', ' + manifest.firmware.voices + ' voices).', 100);
   }
 
-  async function install() {
+  // leaving: only the original firmware V15 and its factory voices (the Leaving FM1-SF2 section)
+  async function install(leaving = false) {
     if (busy) return;
-    const doFw = $('doFirmware').checked, doBank = $('doBank').checked;
+    const doFw = leaving || $('doFirmware').checked, doBank = !leaving && $('doBank').checked;
+    if (leaving && !stockPkg) { message('The original firmware V15 could not be loaded. Use Workbench (Restore original V15).', 'bad'); return; }
     if (!doFw && !doBank) { message('Choose firmware, sound bank or both.', 'bad'); return; }
     if (!navigator.requestMIDIAccess) { message('This browser has no Web MIDI. Use Chrome or Edge.', 'bad'); return; }
-    busy = true; $('install').disabled = true; message(''); progress(null); $('replaceBox').hidden = true;
+    busy = true; $('install').disabled = $('leaveBtn').disabled = true; message(''); progress(null); $('replaceBox').hidden = true;
+    if (leaving) document.querySelector('ol.steps').scrollIntoView({ behavior: 'smooth', block: 'center' });
     for (const s of ['connect', 'firmware', 'bank']) step(s, '', undefined);
     const started = Date.now();
     let current = 'connect';
@@ -372,14 +389,21 @@
         known.set(e.port.id, e.port.state); log('port changed: ' + portText(e.port));
       };
       step('connect', 'run', 'Looking for the FM-1 …');
-      if (doFw) { current = 'firmware'; await installFirmware(access); }
+      if (leaving) {
+        current = 'firmware';
+        // force: whatever runs (the SF2 player goes the tagged route, V15 itself only gets its voices back, other firmware the
+        // vendor's route); the box ticked is the confirmation. The SDK writes V15's factory voices after it (kind 'stock').
+        await flash(access, stockPkg, true, '*', 'Original firmware V15: ');
+        step('firmware', 'done', 'M-VAVE\'s original firmware V15 and its 128 factory voices are on the FM-1.', 100);
+      } else if (doFw) { current = 'firmware'; await installFirmware(access); }
       else { step('firmware', 'skip', 'Skipped.'); }
       if (doBank) {
         current = 'bank';
         await sendBank(access);
-      } else step('bank', 'skip', 'Skipped.');
+      } else step('bank', 'skip', leaving ? 'Not used by the original firmware.' : 'Skipped.');
       progress(null);
-      message('Done. The FM-1 plays the bank right away; it stays when you switch off.', 'ok');
+      message(leaving ? 'Done. The FM-1 runs M-VAVE\'s original firmware V15 again.' : 'Done. The FM-1 plays the bank right away; it stays when you switch off.', 'ok');
+      if (leaving) { $('leaveOk').checked = false; }
       $('duration').textContent = 'Took ' + Math.round((Date.now() - started) / 1000) + ' s.';
     } catch (e) {
       if (e instanceof OtherFirmware) {                          // nothing written: ask before the force route
@@ -403,7 +427,7 @@
       log('error: ' + (e && e.message || e));
       $('logBox').open = true;
       message('The installation stopped. See the step above.', 'bad');
-    } finally { busy = false; $('install').disabled = false; replaceFor = null; }
+    } finally { busy = false; $('install').disabled = false; $('leaveBtn').disabled = !$('leaveOk').checked; replaceFor = null; }
   }
   window.addEventListener('beforeunload', e => { if (busy) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -419,7 +443,9 @@
     const f = $('bankFile').files[0]; if (!f) return;
     try { showBank(new Uint8Array(await f.arrayBuffer()), f.name); message(''); } catch (e) { message(e.message, 'bad'); }
   });
-  $('install').addEventListener('click', install);
+  $('install').addEventListener('click', () => install());
+  $('leaveOk').addEventListener('change', () => { $('leaveBtn').disabled = busy || !$('leaveOk').checked; });
+  $('leaveBtn').addEventListener('click', () => { if ($('leaveOk').checked) install(true); });
   $('replaceOk').addEventListener('change', () => { $('replace').disabled = !$('replaceOk').checked; });
   $('replaceCancel').addEventListener('click', () => { $('replaceBox').hidden = true; message(''); });
   $('replace').addEventListener('click', () => {

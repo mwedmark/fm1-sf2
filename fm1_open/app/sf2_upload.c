@@ -25,6 +25,8 @@
  *   cmd 2 data:  offset (5 x 7 bits), then up to 448 bytes packed 7 to 8: a byte with the 7 high bits, then the 7
  *                low parts. Written where it says; the host sends them in order and waits for each reply.
  *   cmd 3 end:   CRC-32 of the whole bank (5 x 7 bits). When it matches, the bank is bound and plays.
+ *   cmd 9 check: size, then CRC-32 (5 x 7 bits each). 0 when the flash holds exactly that bank and it plays, else 4: the page
+ *                then skips the upload. (Firmware before it answers 1, as for any unknown command.)
  * status: 0 done, 1 malformed, 2 outside the bank's flash, 3 flash error, 4 CRC differs, 5 no begin first.
  * With FM1_MIDIPLAY a song (song.c) goes the same way into RAM, and plays from there:
  *   cmd 4 song begin: size (5 x 7 bits). A song playing stops, the old one is freed and RAM is taken for the new one.
@@ -150,6 +152,12 @@ void sf2_upload_poll(void)
         if (!status && fm1_flash_write(FM1B_FLASH_OFFSET + offset, data, count) != FM1_FLASH_OK)
             status = 3;
         upload_stage = 11;
+    } else if (cmd == 9 && n == 17) {                            /* F0 7D S F 02 09 size*5 crc*5 F7 */
+        uint32_t size = read35(m + 6);
+        const uint8_t *h = fm1_flash_map(FM1B_FLASH_OFFSET, 48);  /* the bank's own size (header bytes 40..43) must be that size */
+        uint32_t own = h ? (uint32_t)h[40] | (uint32_t)h[41] << 8 | (uint32_t)h[42] << 16 | (uint32_t)h[43] << 24 : 0;
+        status = !upload_active && fm1b_ready() && own == size && size >= 48 && size <= FM1B_FLASH_BYTES
+                 && crc32_flash(size) == read35(m + 11) ? 0 : 4;
     } else if (cmd == 3 && n == 12) {
         status = upload_active ? 0 : 5;
         if (!status) {

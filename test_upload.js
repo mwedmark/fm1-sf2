@@ -90,6 +90,19 @@ w.test_fail_write_at(OFFSET + 448);
 const results = frames.slice(1, 4).map(send).map(r => r.status);
 check('a flash write error is reported (status 3)', results[0] === 0 && results[1] === 3, JSON.stringify(results));
 
+// cmd 9: does the flash hold this bank (size, CRC) and does it play?
+const checkFrame = (size, crc) => Uint8Array.from([0xf0, 0x7d, 0x53, 0x46, 2, 9, ...num35(size), ...num35(crc), 0xf7]);
+w.test_reset();
+check('check with an empty flash: not there (status 4)', send(checkFrame(bin.length, crc32(bin)))?.status === 4);
+for (const f of uploadFrames(bin, 448)) send(f);
+const c9 = send(checkFrame(bin.length, crc32(bin)));
+check('check after the upload: the same bank (status 0, reply cmd 0x49)', c9?.status === 0 && c9.cmd === 0x49);
+check('check with another CRC: not the same (status 4)', send(checkFrame(bin.length, crc32(bin) ^ 1))?.status === 4);
+check('check with another size: not the same (status 4)', send(checkFrame(bin.length - 1, crc32(bin.subarray(0, bin.length - 1))))?.status === 4);
+check('check of a malformed frame (status 1)', send(checkFrame(bin.length, crc32(bin)).slice(0, 16).map((b, i) => i === 15 ? 0xf7 : b))?.status === 1);
+send(frames[0]);   // a new upload begins: the bank no longer plays
+check('check while the bank does not play: not the same (status 4)', send(checkFrame(bin.length, crc32(bin)))?.status === 4);
+
 check('crc32 of "123456789" is the standard one', crc32(Uint8Array.from(Buffer.from('123456789'))) === 0xcbf43926);
 console.log(failed ? failed + ' FAILED' : 'ALL OK');
 process.exit(failed ? 1 : 0);

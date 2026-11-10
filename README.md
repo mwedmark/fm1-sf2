@@ -137,8 +137,7 @@ From any other firmware it is two: first the original V15 (from fm1_open, publis
 brings its own update loader that takes only packages of its own layout: Felucca's (`FM-1_9xx`, its loader `ota-FM-1_900`, "Felucca
 Update") refuses the SF2 player's package but takes V15. An FM-1 left in such a loader (it comes back there after power-off) is
 picked up the same way. If that firmware does not speak the USB-MIDI update protocol, use the
-Workbench (Recovery & force update > Force flash) once instead. The original firmware can be put back with the Workbench
-("Restore original V15") at any time.
+Workbench (Recovery & force update > Force flash) once instead. To go back to the original firmware, see *Leaving FM1-SF2* below.
 
 **Every time after that:**
 
@@ -154,11 +153,19 @@ Workbench (Recovery & force update > Force flash) once instead. The original fir
    1. *Find the FM-1*: the page asks the FM-1 which firmware it runs.
    2. *Firmware*: written by M-VAVE's update loader, after which the FM-1 restarts and the page checks the version it reports.
       Skipped when the FM-1 already has this exact build.
-   3. *Sound bank*: erases the sample flash (up to a minute), sends the bank and checks its CRC32. The bank plays as soon as it is checked.
+   3. *Sound bank*: first asks the FM-1 whether it already plays this bank (the same size and CRC32); then it is skipped. Otherwise
+      it erases the sample flash (up to a minute), sends the bank and checks its CRC32. The bank plays as soon as it is checked.
+      (Firmware before this check does not answer it, and gets the bank every time.)
 6. Keep the cable in and the FM-1 on until the page says it is done. If it is interrupted, plug in again and click Install again.
 
 The bank on the install page is the one `build_install.ps1` packed with the firmware; the converter's *Send to FM-1* sends a bank on its
 own. Check what is on the FM-1 on its [info page](#9-the-info-page): the names and CRC32s there match what the page installed.
+
+**Leaving FM1-SF2:** the section of that name at the bottom of the install page puts M-VAVE's original firmware V15 back, the same
+package the page uses on the way from other firmware, and then writes V15's 128 factory voices (four banks) again, which the original
+firmware needs to sound. Tick **Replace the SF2 player with the original firmware V15** and click **Install original firmware V15**;
+the progress shows under Steps. On an FM-1 that already runs V15 it only writes the factory voices again. The SF2 bank stays in the
+sample flash unused; to come back, run the install page again (from V15 it is one step).
 
 **If the FM-1 does not start** after a firmware or bank: switch it off, hold **OCT−** and **OCT+**, switch it on and hold them until the
 screen says SAFE MODE ([section 10](#10-other-screens)). The bank is then not used, and the install page can install again.
