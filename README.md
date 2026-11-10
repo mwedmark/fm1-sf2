@@ -195,6 +195,16 @@ sample flash unused; to come back, run the install page again (from V15 it is on
 **If the FM-1 does not start** after a firmware or bank: switch it off, hold **OCT−** and **OCT+**, switch it on and hold them until the
 screen says SAFE MODE ([section 10](#10-other-screens)). The bank is then not used, and the install page can install again.
 
+**Newer FM-1s (another flash chip).** FM-1s sold since autumn 2026 have a UC25HQ80 flash (JEDEC ID `0xB36014`) in place of the first
+units' Puya P25Q80 (`0x856014`): the same 1 MiB and the same commands. Many custom firmwares only accepted the old ID and then neither
+save nor take updates on the newer units ([The Firmware Hub](https://thefirmwarehub.com/) lists which ones know both). The SF2 player
+has no such check that we know of: it writes its flash (the bank, the settings) through M-VAVE's own flash driver in the FM1 Open SDK,
+which has no comparison with a chip ID (searched for in the SDK's library, 2026-11-10), and it installs through M-VAVE's update loader,
+as the original V15 does, which saves and updates on both chips. Not yet tried on a newer FM-1. On a newer
+FM-1 that runs a firmware which knows only the old chip (Felucca 1.8.1, for example), that firmware does not start an update, so the
+install page cannot replace it: use the Workbench's Force flash, or `rescue_tools/fm1_rescue.py`, which accepts both chips
+(`rescue_tools/test_rescue_chip.py` runs it on a pretend FM-1 with each).
+
 ## 6. The panel
 
 ![The panel](docs/img/panel.png)

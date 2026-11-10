@@ -43,6 +43,7 @@ firmware and `banks/default.fm1b`, packed by `make_install.js --fwsc --identity 
 - `make_bank.js <format> [rate]`: the whole GM bank in SEA5, SEA6, BFP8 or PCM, for `start_emu.ps1 -Bank`.
 - `pack_bank.js in out [--kbit 64]`: a BFP8 bank into the live cache's packed bank (one MP3 stream, a pack table, a lossless tier; ffmpeg). The converter page loads the same file and passes lamejs and `mp3_decoder_wasm.js` in place of ffmpeg. `test_pack_bank.js`: unpacks it again with the C decoder (`--packed=<file>` checks a bank the page made). `test_packed_engine.js`: the engine (`fm1b.c` with `FM1B_PACKED`) playing a packed bank, bit for bit against the plain engine on the unpacked bank. `test_sound_cache.js`: the decoder and the cache (`fm1_open/live_cache`).
 - `test_chosen_presets.js [sf2]`: the converter's *Chosen instruments*: the ticked presets at their program numbers, the others on the empty preset, and silent in the engine (`fm1b.c`, the harness of `test_multitimbral.js`).
+- `rescue_tools/test_rescue_chip.py`: the USB rescue on a pretend FM-1 with the first units' flash (`0x856014`), the newer units' (`0xB36014`) and an unknown one, which it must refuse.
 - `test_upload.js`: the firmware's side of the bank upload on WebAssembly. `make_flash_overlay.js`: a flash image for fm1-emu.
 - `make_midi.js`: the emulator scripts as MIDI files (`test_emu/midi/`).
 - `measure_zone_codecs.py [sf2]`: what packing the sample data (xz, MP3) would save, sample by sample (python3, numpy, ffmpeg).

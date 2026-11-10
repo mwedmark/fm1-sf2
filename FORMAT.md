@@ -233,7 +233,7 @@ On the FM-1, in this order, and stop at the first step that fails:
 - **What the FM-1's chip is.** Four public documentation projects, with photos of at least three units: the SoC is marked `JL C156211-11B8`
   (aroum's unit), `C188612-11B8` (the owner's unit in [ip2k/lunar-modulator](https://github.com/ip2k/lunar-modulator), `docs/01-hardware.md`)
   and `C188760-11B8` ([DimmKirr/modd](https://github.com/DimmKirr/modd), `docs/hardware/board/README.md`), QFN-48. Read with the datasheet's code,
-  `11B8` is an AC7911B**8**: 8 Mbit (1 MB) of flash in the package, which is exactly the Puya flash (JEDEC `0x856014`) the FM-1 boots from.
+  `11B8` is an AC7911B**8**: 8 Mbit (1 MB) of flash in the package, which is exactly the Puya flash (JEDEC `0x856014`) the FM-1 boots from (the units sold since autumn 2026 have a UC25HQ80, `0xB36014`, of the same size).
   [TEG-Lizard-Man/cyma-1](https://github.com/TEG-Lizard-Man/cyma-1) (`notes/FM-1-hardware-atlas.md`) says the same: "The chip is an AC7911B8 ...
   The flash is inside the package", "The B8 has no SDRAM", and no separate flash chip is found on the board (the SOIC-8 `U12` is the charger).
   ip2k/lunar-modulator: "the FM-1 has none", and it checked that an AC7911B8 is 1 MB of in-package flash and no SDRAM against datasheet V1.4 and
