@@ -7,6 +7,9 @@ the browser, and then play it from the FM-1's keys or over MIDI (USB, DIN or Blu
 **Install it:** <https://mwedmark.github.io/fm1-sf2/install.html> puts the firmware and a General MIDI bank on your FM-1 over USB
 (Chrome or Edge; see [section 5](#5-installing-firmware-and-bank)).
 
+**Convert a bank:** <https://mwedmark.github.io/fm1-sf2/converter.html> turns an `.sf2` into an FM1B bank in your browser
+(see [section 2](#2-converting-a-bank)).
+
 **Try it without a device:** <https://mwedmark.github.io/fm1-sf2/> runs the firmware in the [fm1-emu](https://github.com/joakimeriksson/fm1-emu)
 emulator in your browser, and its [MIDI player](https://mwedmark.github.io/fm1-sf2/player.html?song=astley&play=1) plays MIDI files through it.
 
@@ -64,7 +67,8 @@ not cached yet starts a little late the first time it is played.
 
 ![The converter page](docs/img/converter_page.png)
 
-The converter is `index.html` in this repository. Serve the folder (`.\start_web.ps1`, or `python -m http.server 8765`) and open
+The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (the latest version on GitHub). It is
+`index.html` in this repository: to run it locally, serve the folder (`.\start_web.ps1`, or `python -m http.server 8765`) and open
 <http://localhost:8765/index.html> in Chrome or Edge. Everything happens in the browser; the SoundFont never leaves the computer.
 
 1. **Drop an `.sf2` file** on the page. It shows its size, presets and samples.

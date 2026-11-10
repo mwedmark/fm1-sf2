@@ -127,6 +127,10 @@ async function get(url) {
     fs.copyFileSync(path.join(root, 'fm1_open', 'sdk', 'WebUpdate.js'), path.join(out, 'fm1_open', 'sdk', 'WebUpdate.js'));
   } else console.warn('No install page: it needs the build-identity.json of the firmware and a bank in banks/ or soundfonts/');
 
+  // The bank converter (the repo's index.html, SF2 to FM1B) as converter.html, with the simulator it plays the bank in.
+  for (const [from, to] of [['index.html', 'converter.html'], ['simulator_wasm.js', 'simulator_wasm.js']])
+    fs.copyFileSync(path.join(root, from), path.join(out, to));
+
   // The emulator's licence (MIT): its repository's file, or a pointer if that cannot be fetched.
   let licence = null;
   for (const branch of ['main', 'master']) {
@@ -153,7 +157,8 @@ The sine test bank has seven programs (plain, vibrato, tremolo, delayed vibrato,
 <li><a href="emulator.html?${q}&amp;script=sine.script">The same, with the sine test script</a> (steps through the programs by itself).</li>
 <li><a href="player.html"><b>MIDI player</b></a>: the emulator as a MIDI output (JZZ.js): play the MIDI files of the repo or one of your own.
 Its <b>Copy link</b> gives a link to a bank and song that plays at the first click, e.g. <a href="player.html?song=astley&amp;play=1">player.html?song=astley&amp;play=1</a>.</li>
-${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). It also replaces M-VAVE's original firmware and other firmware such as Felucca, after asking.</li>\n` : ''}<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
+${install ? `<li><a href="install.html"><b>Install on your FM-1</b></a>: this firmware and the default bank over USB (Chrome or Edge). It also replaces M-VAVE's original firmware and other firmware such as Felucca, after asking.</li>\n` : ''}<li><a href="converter.html"><b>Bank converter</b></a>: an SF2 file to an FM1B bank (SEA5, SEA6, BFP8 or PCM), tried in the simulator before you download it or send it to an FM-1.</li>
+<li><a href="sf2player.fwsc">sf2player.fwsc</a>, the firmware package of this build.</li>
 </ul>
 <p>Press HOME for the channel page. EDIT arms the channel under the cursor and GLO steps its MIDI channel.</p>
 ${beer}<p><small>The emulator is MIT licensed, see <a href="LICENSE-fm1-emu.txt">its licence</a>; JZZ.js and its SMF player are MIT too (<a href="LICENSE-jzz.txt">licence</a>).</small></p>
