@@ -6,6 +6,7 @@
 #define MINIMP3_ONLY_MP3
 #define MINIMP3_NO_SIMD
 #define MINIMP3_STATIC_SCRATCH
+#define MINIMP3_FM1_MONO_32K                                  /* the packed bank's stream is MPEG-1 layer 3, mono, 32 kHz (pack_bank.js); other frames are refused */
 #include "mp3_sound.h"
 
 void bfp8_pack_group(const int16_t *pcm, uint8_t *out)

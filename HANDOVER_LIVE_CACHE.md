@@ -68,12 +68,22 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   included (the user): "sounds very good", about the same as the unpacked BFP8 bank. Step 3 below (measurements) is next.
   The heap check in `Build.ps1` is now 111 468. `fm1_device_recovery()` exists in the SDK, undocumented and not used (it may enter the loader; try it in fm1-emu first, never first on the FM-1).
 
+- **2026-11-11 (local session, branch `claude/live-cache-stats`, measured on the user's machine):** minimp3 trimmed for mono 32 kHz MPEG-1 layer 3
+  (`MINIMP3_FM1_MONO_32K`, see `fm1_open/third_party/mp3/README.md`): `-LiveCache` 451 612 bytes, **2 309 to spare** (was 5); `test_sound_cache.js` gives the same
+  figures with and without it, `test_pack_bank.js` and `test_packed_engine.js` pass. Then the cache's counters and timing on the info page (two lines, `#elif FM1B_PACKED`
+  in `sf2player.c`, read in FM1_TEST.md section H): **452 924 bytes, 997 to spare**, heap 113 260 at `-CacheKB 72`. Base build 439 516 (14 405 to spare).
+  `dist\sf2player_live72.fwsc` (CRC32 `4549A7A9`) booted in fm1-emu with `gm_32k_packed.fm1b` (`test_emu\live_cache.script`): `CACHE H7 M4 E0 F0 L0 P0 W0`,
+  `MP3 45 FR 1800 US/FR CYC 10 MAX 42 MS` (emulator timing, not the device's). **Not flashed on the FM-1 yet**: that is step 3's measurement (FM1_TEST.md H1-H4).
+
 ## Not done, in the order I would do it
+
+0. (2026-11-11) Steps 1 and 2 are done (the build fits, the packed bank plays on the FM-1, 2026-11-08). Step 3 now has its page: flash `dist\sf2player_live72.fwsc`
+   and run FM1_TEST.md section H; the user's figures go into `FORMAT.md` and here.
 
 1. Get the `-LiveCache` build under the limit (above), flash `dist\sf2player_live.fwsc` (keep `fm1_open\sdk\firmware\FM-1_015.fwsc` at hand), and check it still boots and plays an ordinary bank... **but it refuses non-BFP8 banks**, so use a BFP8 bank (`node make_bank.js bfp8 32000 1mgm.sf2 dist/gm_32k_bfp8.fm1b`).
 2. Make a packed bank: `node pack_bank.js dist/gm_32k_bfp8.fm1b dist/gm_32k_packed.fm1b` (`1mgm.sf2`: 241 520 bytes, 120 MP3 sounds, 45 lossless). Flash it as any bank.
 3. **Measure on the FM-1:** the decoder's speed (K, million cycles per second of mono audio; the design assumes 5 to 12; the cache must decode 20 to 48 times real time) and the control task's cycle time (it decodes `-CacheFrames` MP3 frames per cycle),
-   the latency of a note whose sound is not cached, notes lost with a 96/128/160 KB pool (`-CacheKB`), the CPU load against the BFP8 bank in flash. The info page shows nothing about the cache yet: `fm1b_cache_stats()` has hits, misses, decoded frames, lost notes, pins; put it on a page.
+   the latency of a note whose sound is not cached, notes lost with a 96/128/160 KB pool (`-CacheKB`; the heap allows about 72 KB, see above), the CPU load against the BFP8 bank in flash. The info page shows the cache's counters, µs per MP3 frame and the control cycle since 2026-11-11 (FM1_TEST.md H).
 4. For the 4 MB font: `make_bank.js` writes all 138 presets (about 516 KB packed, 50 KB over); it needs an option for the 128 melodic presets + kit 0 (what the calculation used, 429 KB) — `index.html`'s `buildBank` takes a preset index list; `test_sound_cache.js` shows how to pick them.
 5. Listening: re-render and listen to the 4 MB font from the real packed file on the device (the earlier tests were simulated on the PC).
 6. Layered notes starting together; note-off while a voice still waits for its sound; a web page description of the bank format and the cache (the user asked "later").

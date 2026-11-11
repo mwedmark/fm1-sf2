@@ -130,6 +130,24 @@ so far"). Det skiljer inte helt "inget SDRAM" från "SDRAM avstängt i bootkonfi
 gör det. Testet, `sdram_test.c` och `test_sdram.js` är borttagna; SAVE nollställer nu bara räknaren för tappade noter. Det som finns är
 de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
+## H. Live-cachen: mätningar (packad bank)
+
+Firmware `dist\sf2player_live72.fwsc` (2026-11-11, `-LiveCache -CacheKB 72 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz; firmwarens CRC32 `4549A7A9`)
+med banken `dist\gm_32k_packed.fm1b` (241 520 byte). Kontrollerad i fm1-emu (startar, spelar, infosidan räknar); **inte på FM-1 än**.
+Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och flasha tillbaka. Infosidans två nedersta rader räknar från att REC trycktes:
+
+- `CACHE H M E F L P W`: träffar (ljudet fanns i cachen), missar (avkodades), ljud som slängts ur cachen, gånger utan plats,
+  toner som tog slut innan ljudet hann bli klart (raden blir orange), lås just nu, ljud som väntar just nu.
+- `MP3 n FR u US/FR CYC c MAX m MS`: avkodade MP3-ramar, mikrosekunder per ram (ljudavbrottets andel av tiden ingår), styrtaskens varv i ms, snitt och längsta.
+  En ram är 36 ms ljud. **K** (miljoner cykler per sekund ljud) = 240 × `u` / 36 000. Emulatorn (240 MHz): 1 800 US/FR, alltså K ≈ 12, CYC 10, MAX 42.
+
+| # | Steg | Väntat | Resultat |
+| --- | --- | --- | --- |
+| H1 | Flasha firmwaren och banken. Tryck REC och spela några toner på panelen, olika program. | Infosidan visar `GM_32K_BFP8.FM1B`, 241 520 byte. `M` och `MP3` ökar vid första tonen på ett nytt ljud, `H` när samma ton spelas igen. | |
+| H2 | Tryck REC två gånger (räknarna nollställs), spela `MIDIs\R.ASTLEY.Never gonna give you up K.mid` från Windows i en minut. Skriv av båda raderna. | `L` 0 eller nära; notera `US/FR`, `CYC`, `MAX`. | |
+| H3 | Samma låt, titta på programsidans `CPU n% MAX m%` och `DROPPED`. Jämför med samma låt på BFP8-banken (C16). | Ungefär samma CPU som BFP8-banken (avkodningen går i styrtasken, inte i ljudavbrottet). | |
+| H4 | Lyssna: hörs fördröjning på första tonen av ett nytt ljud? | Högst några ms (en ram avkodas på ungefär 2 ms). | |
+
 ## G. Avsluta
 
 | # | Steg | Resultat |

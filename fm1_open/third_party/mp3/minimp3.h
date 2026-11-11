@@ -77,6 +77,31 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
 #define HDR_IS_FRAME_576(h)         ((h[1] & 14) == 2)
 #define HDR_IS_LAYER_1(h)           ((h[1] & 6) == 6)
 
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: only MPEG-1 layer 3, mono, 32 kHz, not free format (what the FM-1's packed banks hold). hdr_valid refuses every
+                              other header, so the rest of the decoder may take these as known and the stereo, MPEG-2/2.5 and free-format paths drop out. */
+#define FM1_HDR_IS_MONO_32K(h)      (((h[1]) & 0xFE) == 0xFA && ((h[2]) & 0x0C) == 0x08 && ((h[2]) & 0xF0) != 0 && ((h[3]) & 0xC0) == 0xC0)
+#undef HDR_IS_MONO
+#undef HDR_IS_MS_STEREO
+#undef HDR_IS_FREE_FORMAT
+#undef HDR_TEST_MPEG1
+#undef HDR_TEST_NOT_MPEG25
+#undef HDR_TEST_I_STEREO
+#undef HDR_TEST_MS_STEREO
+#undef HDR_GET_MY_SAMPLE_RATE
+#undef HDR_IS_FRAME_576
+#undef HDR_IS_LAYER_1
+#define HDR_IS_MONO(h)              1
+#define HDR_IS_MS_STEREO(h)         0
+#define HDR_IS_FREE_FORMAT(h)       0
+#define HDR_TEST_MPEG1(h)           1
+#define HDR_TEST_NOT_MPEG25(h)      1
+#define HDR_TEST_I_STEREO(h)        0
+#define HDR_TEST_MS_STEREO(h)       0
+#define HDR_GET_MY_SAMPLE_RATE(h)   8
+#define HDR_IS_FRAME_576(h)         0
+#define HDR_IS_LAYER_1(h)           0
+#endif /* MINIMP3_FM1_MONO_32K */
+
 #define BITS_DEQUANTIZER_OUT        -1
 #define MAX_SCF                     (255 + BITS_DEQUANTIZER_OUT*4 - 210)
 #define MAX_SCFI                    ((MAX_SCF + 3) & ~3)
@@ -263,6 +288,9 @@ static uint32_t get_bits(bs_t *bs, int n)
 
 static int hdr_valid(const uint8_t *h)
 {
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2 */
+    return h[0] == 0xff && FM1_HDR_IS_MONO_32K(h) && HDR_GET_BITRATE(h) != 15;
+#endif
     return h[0] == 0xff &&
         ((h[1] & 0xF0) == 0xf0 || (h[1] & 0xFE) == 0xe2) &&
         (HDR_GET_LAYER(h) != 0) &&
@@ -280,6 +308,10 @@ static int hdr_compare(const uint8_t *h1, const uint8_t *h2)
 
 static unsigned hdr_bitrate_kbps(const uint8_t *h)
 {
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: the MPEG-1 layer 3 row only */
+    static const uint8_t halfrate_l3[15] = { 0,16,20,24,28,32,40,48,56,64,80,96,112,128,160 };
+    return 2*halfrate_l3[HDR_GET_BITRATE(h)];
+#endif
     static const uint8_t halfrate[2][3][15] = {
         { { 0,4,8,12,16,20,24,28,32,40,48,56,64,72,80 }, { 0,4,8,12,16,20,24,28,32,40,48,56,64,72,80 }, { 0,16,24,28,32,40,48,56,64,72,80,88,96,112,128 } },
         { { 0,16,20,24,28,32,40,48,56,64,80,96,112,128,160 }, { 0,16,24,28,32,40,48,56,64,80,96,112,128,160,192 }, { 0,16,32,48,64,80,96,112,128,144,160,176,192,208,224 } },
@@ -289,6 +321,10 @@ static unsigned hdr_bitrate_kbps(const uint8_t *h)
 
 static unsigned hdr_sample_rate_hz(const uint8_t *h)
 {
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2 */
+    (void)h;
+    return 32000;
+#endif
     static const unsigned g_hz[3] = { 44100, 48000, 32000 };
     return g_hz[HDR_GET_SAMPLE_RATE(h)] >> (int)!HDR_TEST_MPEG1(h) >> (int)!HDR_TEST_NOT_MPEG25(h);
 }
@@ -483,6 +519,12 @@ static void L12_apply_scf_384(L12_scale_info *sci, const float *scf, float *dst)
 
 static int L3_read_side_info(bs_t *bs, L3_gr_info_t *gr, const uint8_t *hdr)
 {
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: the rows for MPEG-1 32 kHz (row 7 below) only */
+    static const uint8_t g_scf_long[1][23] = { { 4,4,4,4,4,4,6,6,8,10,12,16,20,24,30,38,46,56,68,84,102,26,0 } };
+    static const uint8_t g_scf_short[1][40] = { { 4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,8,8,8,12,12,12,16,16,16,20,20,20,26,26,26,34,34,34,42,42,42,12,12,12,0 } };
+    static const uint8_t g_scf_mixed[1][40] = { { 4,4,4,4,4,4,6,6,4,4,4,6,6,6,8,8,8,12,12,12,16,16,16,20,20,20,26,26,26,34,34,34,42,42,42,12,12,12,0 } };
+    const int sr_idx = 0;
+#else
     static const uint8_t g_scf_long[8][23] = {
         { 6,6,6,6,6,6,8,10,12,14,16,20,24,28,32,38,46,52,60,68,58,54,0 },
         { 12,12,12,12,12,12,16,20,24,28,32,40,48,56,64,76,90,2,2,2,2,2,0 },
@@ -513,10 +555,11 @@ static int L3_read_side_info(bs_t *bs, L3_gr_info_t *gr, const uint8_t *hdr)
         { 4,4,4,4,4,4,6,6,4,4,4,6,6,6,6,6,6,10,10,10,12,12,12,14,14,14,16,16,16,20,20,20,26,26,26,66,66,66,0 },
         { 4,4,4,4,4,4,6,6,4,4,4,6,6,6,8,8,8,12,12,12,16,16,16,20,20,20,26,26,26,34,34,34,42,42,42,12,12,12,0 }
     };
+    int sr_idx = HDR_GET_MY_SAMPLE_RATE(hdr); sr_idx -= (sr_idx != 0);
+#endif /* MINIMP3_FM1_MONO_32K */
 
     unsigned tables, scfsi = 0;
     int main_data_begin, part_23_sum = 0;
-    int sr_idx = HDR_GET_MY_SAMPLE_RATE(hdr); sr_idx -= (sr_idx != 0);
     int gr_count = HDR_IS_MONO(hdr) ? 1 : 2;
 
     if (HDR_TEST_MPEG1(hdr))
@@ -653,11 +696,15 @@ static float L3_ldexp_q2(float y, int exp_q2)
 
 static void L3_decode_scalefactors(const uint8_t *hdr, uint8_t *ist_pos, bs_t *bs, const L3_gr_info_t *gr, float *scf, int ch)
 {
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: MPEG-1 reads the first four of each row only */
+    static const uint8_t g_scf_partitions[3][4] = { { 6,5,5,5 }, { 8,9,6,12 }, { 9,9,6,12 } };
+#else
     static const uint8_t g_scf_partitions[3][28] = {
         { 6,5,5, 5,6,5,5,5,6,5, 7,3,11,10,0,0, 7, 7, 7,0, 6, 6,6,3, 8, 8,5,0 },
         { 8,9,6,12,6,9,9,9,6,9,12,6,15,18,0,0, 6,15,12,0, 6,12,9,6, 6,18,9,0 },
         { 9,9,6,12,9,9,9,9,9,9,12,6,18,18,0,0,12,12,12,0,12, 9,9,6,15,12,9,0 }
     };
+#endif
     const uint8_t *scf_partition = g_scf_partitions[!!gr->n_short_sfb + !gr->n_long_sfb];
     uint8_t scf_size[4], iscf[40];
     int i, scf_shift = gr->scalefac_scale + 1, gain_exp, scfsi = gr->scfsi;
@@ -1678,6 +1725,9 @@ static int mp3d_find_frame(const uint8_t *mp3, int mp3_bytes, int *free_format_b
             int frame_bytes = hdr_frame_bytes(mp3, *free_format_bytes);
             int frame_and_padding = frame_bytes + hdr_padding(mp3);
 
+#ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: hdr_valid refuses free format, so frame_bytes is never 0 here */
+            (void)k;
+#else
             for (k = HDR_SIZE; !frame_bytes && k < MAX_FREE_FORMAT_FRAME_SIZE && i + 2*k < mp3_bytes - HDR_SIZE; k++)
             {
                 if (hdr_compare(mp3, mp3 + k))
@@ -1691,6 +1741,7 @@ static int mp3d_find_frame(const uint8_t *mp3, int mp3_bytes, int *free_format_b
                     *free_format_bytes = fb;
                 }
             }
+#endif /* MINIMP3_FM1_MONO_32K */
             if ((frame_bytes && i + frame_and_padding <= mp3_bytes &&
                 mp3d_match_frame(mp3, mp3_bytes - i, frame_bytes)) ||
                 (!i && frame_and_padding == mp3_bytes))

@@ -417,7 +417,7 @@ the kit on channel 10, bank select ignored) and counts what the song does to a c
 **Built so far** (branch `claude/live-cache`; `fm1_open/live_cache`, kept out of `app/` because nothing here has been built with the pi32v2 toolchain; `node test_sound_cache.js`, 22 checks, and each of
 five broken versions of the C is caught):
 
-- `mp3_sound.c`: a sound of a packed stream decoded into BFP8 a few MP3 frames at a time (minimp3, `fm1_open/third_party/mp3`, CC0, unmodified, pinned), the BFP8 packer (the converter's bytes
+- `mp3_sound.c`: a sound of a packed stream decoded into BFP8 a few MP3 frames at a time (minimp3, `fm1_open/third_party/mp3`, CC0, pinned; two changes under defines: its scratch static, and only mono 32 kHz MPEG-1 layer 3, see its README), the BFP8 packer (the converter's bytes
   for 3000 random groups) and the loop crossfade. Against ffmpeg's decode of the same stream every sound is at least 40 dB (BFP8's own noise is about 44), whatever the slice size.
 - `sound_cache.c`: a pool, best-fit gaps, drop of the least recently used sound that is not pinned, pins, a queue of decodes, sounds that play in place, groups held back until the crossfade is done.
   4 000 random requests: no two sounds overlap, and every sound left is right. Songs played through it: every sound that was ready when a note found it is bit for bit a decode of that sound, also

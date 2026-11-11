@@ -308,10 +308,34 @@ static struct fm1b_info info_bank;
 #if FM1_MIDIPLAY
 static uint32_t info_free_ram;
 #endif
+#if FM1B_PACKED
+/* The live cache, measured from when REC opened the info page: the cache's counters then (shown as the change since), the ms the
+ * control task spent in fm1b_cache_service (nearly all of it decoding; the audio interrupt's share of that time is in it), and the
+ * control task's cycle, from one call to the next, average and longest. */
+static struct fm1b_cache_stats cache_base;
+static uint32_t cache_busy_ms, cycle_at, cycle_sum, cycle_count, cycle_max;
+static void cache_service_timed(void)
+{
+    uint32_t start = fm1_millis();
+    if (cycle_at) {
+        uint32_t gap = start - cycle_at;
+        cycle_sum += gap;
+        ++cycle_count;
+        if (gap > cycle_max) cycle_max = gap;
+    }
+    cycle_at = start;
+    fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+    cache_busy_ms += fm1_millis() - start;
+}
+#endif
 static void info_compute(void)
 {
 #if FM1_MIDIPLAY
     info_free_ram = song_free_ram();
+#endif
+#if FM1B_PACKED
+    fm1b_cache_stats(&cache_base);
+    cache_busy_ms = cycle_sum = cycle_count = cycle_max = 0;
 #endif
     if (!firmware_crc_done) {
         firmware_bytes = (uint32_t)(uintptr_t)text_size + (uint32_t)(uintptr_t)data_size + (uint32_t)(uintptr_t)_ram0_data_size +
@@ -391,6 +415,32 @@ static void info_update(void)
     d = put_text(d, " KB FOR A SONG");
     *d = 0;
     line_show(14, 217, line, 1, GREY);
+#elif FM1B_PACKED
+    {   /* "CACHE H1234 M56 E7 F0 L0 P3 W0": hits, misses, sounds dropped, no room, notes lost, pins now, waiting now;
+         * "MP3 5678 FR 1234 US/FR CYC 4 MAX 37 MS": frames decoded, ms in the service per frame (as us), the control cycle. FM1_TEST.md. */
+        struct fm1b_cache_stats cs;
+        char wide[80];
+        fm1b_cache_stats(&cs);
+        d = put_number(put_text(wide, "CACHE H"), (int32_t)(cs.hits - cache_base.hits), 0);
+        d = put_number(put_text(d, " M"), (int32_t)(cs.misses - cache_base.misses), 0);
+        d = put_number(put_text(d, " E"), (int32_t)(cs.evictions - cache_base.evictions), 0);
+        d = put_number(put_text(d, " F"), (int32_t)(cs.no_room - cache_base.no_room), 0);
+        d = put_number(put_text(d, " L"), (int32_t)(cs.lost - cache_base.lost), 0);
+        d = put_number(put_text(d, " P"), (int32_t)cs.pinned, 0);
+        d = put_number(put_text(d, " W"), (int32_t)cs.waiting, 0);
+        *d = 0;
+        wide[LINE_CHARS] = 0;
+        line_show(13, 206, wide, 1, cs.lost != cache_base.lost ? ORANGE : GREY);
+        uint32_t frames = cs.decoded_mp3_frames - cache_base.decoded_mp3_frames;
+        d = put_number(put_text(wide, "MP3 "), (int32_t)frames, 0);
+        d = put_number(put_text(d, " FR "), frames ? (int32_t)((uint64_t)cache_busy_ms * 1000U / frames) : 0, 0);
+        d = put_number(put_text(d, " US/FR CYC "), cycle_count ? (int32_t)(cycle_sum / cycle_count) : 0, 0);
+        d = put_number(put_text(d, " MAX "), (int32_t)cycle_max, 0);
+        d = put_text(d, " MS");
+        *d = 0;
+        wide[LINE_CHARS] = 0;
+        line_show(14, 217, wide, 1, GREY);
+    }
 #endif
     line_show(11, 228, "REC BACK", 1, GREY);
 }
@@ -794,7 +844,7 @@ void groove_screen_control(void)
     if (safe_start())
         return;
 #if FM1B_PACKED
-    fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+    cache_service_timed();
 #endif
 #if FM1_MIDIPLAY
     song_poll();                                              /* the song's events that are due */
