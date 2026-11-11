@@ -137,6 +137,7 @@ void fm1b_cache_attach(uint8_t *pool, unsigned bytes);
 unsigned fm1b_cache_service(unsigned mp3_frames);
 struct fm1b_cache_stats {
     uint32_t hits, misses, evictions, no_room, decoded_mp3_frames, requested, lost, waiting, pinned;   /* lost: notes over before their sound came; pinned: pins held now */
+    uint32_t squeezed;                         /* releasing voices cut so that a waiting note's sound gets room */
 };
 void fm1b_cache_stats(struct fm1b_cache_stats *stats);
 #endif

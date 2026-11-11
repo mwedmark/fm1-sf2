@@ -12,8 +12,8 @@
 #include "mp3_sound.h"
 
 #ifndef SOUND_CACHE_ENTRIES                                   /* sounds in the pool at once (28 bytes each); when all are taken the least recently used goes, as when the pool is full */
-#if defined(FM1B_CACHE_KB) && FM1B_CACHE_KB < 160             /* the firmware: one per KB of pool (a decoded sound of 1mgm.sf2 is 2.8 KB on average), RAM is short */
-#define SOUND_CACHE_ENTRIES ((unsigned)FM1B_CACHE_KB)
+#if defined(FM1B_CACHE_KB) && FM1B_CACHE_KB < 160             /* the firmware: 7 per 8 KB of pool (a decoded sound of 1mgm.sf2 is 2.8 KB on average), RAM is short */
+#define SOUND_CACHE_ENTRIES ((unsigned)FM1B_CACHE_KB * 7U / 8U)  /* 84 KB: 73 (with 160 and with 84 the song in fm1-emu gave the same, 2026-11-11) */
 #else
 #define SOUND_CACHE_ENTRIES 160U
 #endif

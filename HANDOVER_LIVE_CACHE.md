@@ -117,6 +117,12 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   the pool's, not the control task's. Two lines still take about 40 ms (each line is drawn and sent the full 240 pixels wide). Logs: `dist\stats_log_astley_v1.jsonl`,
   `_v2.jsonl` and `_v3.jsonl` (not in git). Next for the late notes: when there is no room, let a new note take the room of a sound that only releasing
   voices hold (cut their tails, as the voice limit does), rather than wait.
+  **Releasing voices cut for room** (`packed_squeeze_pick` in the control task chooses the oldest releasing voice that holds an MP3 sound, one whose
+  sound no other voice holds first; `packed_squeeze` in the interrupt cuts it as the voice limit does, counted as TAIL; once a control cycle while a note
+  waits with no room). To fit the heap, the cache's table is 7 entries per 8 KB (73 at 84 KB; heap 111 660, image 165 bytes to spare). Stats SysEx
+  version 3 adds the count. fm1-emu, 60 s: 2 late against 4. **On the FM-1, the whole song** (`85D99FA6`): **19 late** (25, 30, 33 before), no room 545,
+  245 tails cut, 477 decodes, TAIL 5 247 (5 138 before). Logs `dist\stats_log_astley_v1..v4.jsonl`. Left: notes still late when no voice is releasing
+  (all held) or while the cut voice fades and the sound decodes; more room needs more pool.
   The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
 
 ## Not done, in the order I would do it

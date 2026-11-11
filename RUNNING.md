@@ -271,8 +271,8 @@ info page showed the song. Not yet run on the FM-1.
 
 Built with `FM1_STATS_MIDI` (`sf2player.c`; on when `FM1B_PACKED` is, i.e. in `-LiveCache` builds; `-DFM1_STATS_MIDI=0` leaves it out, 288 bytes), the
 player sends its figures once a second as one SysEx to the USB MIDI port: `F0 7D 46 4D 53 01`, 20 values of 32 bits (5 bytes of 7 bits each, lowest first),
-`F7` (version 2, 2026-11-11: 22 values, 117 bytes; version 1 had the first 20, 107 bytes). Totals since start: ms, the cache's hits, misses, dropped sounds, no room, MP3 frames decoded, requests, notes late, waiting, pins; ms in
-`fm1b_cache_service`, control cycles and their ms, the longest cycle since the last message; CPU % average and peak; voices; DROPPED held, tail, CPU; the longest control step and the longest screen update since the last message.
+`F7` (version 3, 2026-11-11: 23 values, 122 bytes; version 2 had the first 22, version 1 the first 20). Totals since start: ms, the cache's hits, misses, dropped sounds, no room, MP3 frames decoded, requests, notes late, waiting, pins; ms in
+`fm1b_cache_service`, control cycles and their ms, the longest cycle since the last message; CPU % average and peak; voices; DROPPED held, tail, CPU; the longest control step and the longest screen update since the last message; releasing voices cut so that a waiting note's sound got room.
 `stats.html` (Chrome or Edge, Web MIDI with SysEx) shows them live, per second and since a moment you pick, and posts each message to `/stats-log`
 of the server that serves the page: `test_emu\cors_server.py` (the `-Lan` server of `start_web.ps1`) appends it to `dist\stats_log.jsonl`, so the
 figures can be read on this computer while the FM-1 is on another. `python -m http.server` (the plain 8765 server) takes no posts: the page then

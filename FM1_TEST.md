@@ -155,6 +155,8 @@ emulatorns tid (K ≈ 43). `MAX 214 MS` är inte förklarat. Spelat efter REC: N
 373 gånger utan plats, **25 toner för sent**, alltid i täta partier och samtidigt som "utan plats": cachen är full av ljud som klingande röster håller fast.
 Ljudavbrottet tar 63 % av CPU:n (topp 83 %) under låten, och den tiden ingår i 6,8 ms per ram: avkodaren själv tar cirka 2,5 ms (K ≈ 15, som i emulatorn).
 Styrcykeln: 10 ms i vila, 33 ms under låten och cirka 90 ms (upp till 128) en gång i sekunden. DROPPED: held 502, tail 5 131, CPU 3.
+Med högst två skärmrader per uppdatering (`95FCED19`): längsta styrcykel 55 ms i stället för 90, men 33 toner för sent. Med klippta utklingningar
+när cachen saknar plats (`85D99FA6`): **19 toner för sent**, 245 utklingningar klippta.
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |

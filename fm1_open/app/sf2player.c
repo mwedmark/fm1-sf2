@@ -358,11 +358,12 @@ static void cache_service_timed(void)
 #endif
 #if FM1_STATS_MIDI
 /* Once a second, the player's figures as one SysEx to the USB MIDI port (RUNNING.md, "Live figures over MIDI"; stats.html reads them):
- * F0 7D 46 4D 53 02 (non-commercial id, "FMS", version 2), then 22 values of 32 bits, each 5 bytes of 7 bits, lowest first, then F7.
+ * F0 7D 46 4D 53 02 (non-commercial id, "FMS", version 3), then 23 values of 32 bits, each 5 bytes of 7 bits, lowest first, then F7.
  * Totals since start, so a reader takes differences: 0 ms since start; the cache's 1 hits 2 misses 3 dropped sounds 4 no room 5 MP3 frames decoded
  * 6 notes that asked for a sound 7 notes over before their sound 8 waiting now 9 pins now; 10 ms in fm1b_cache_service 11 control cycles 12 their ms
  * 13 the longest cycle since the last message; 14 CPU % average 15 CPU % peak (as the screen shows them) 16 voices sounding; 17..19 DROPPED HELD, TAIL, CPU;
- * 20 the longest control step (groove_screen_control) and 21 the longest screen update, both since the last message (version 1 had 0..19).
+ * 20 the longest control step (groove_screen_control) and 21 the longest screen update, both since the last message; 22 releasing voices cut
+ * so that a waiting note's sound got room (fm1b.c, packed_squeeze). Version 1 had 0..19, version 2 0..21.
  * Without the live cache the cache's values are 0. */
 static uint32_t stats_sent_at, window_step_max, window_screen_max;
 static void stats_midi_poll(void)
@@ -371,12 +372,12 @@ static void stats_midi_poll(void)
     if (now - stats_sent_at < 1000U)
         return;
     stats_sent_at = now;
-    uint32_t v[22] = {now};
+    uint32_t v[23] = {now};
 #if FM1B_PACKED
     struct fm1b_cache_stats cs;
     fm1b_cache_stats(&cs);
     v[1] = cs.hits; v[2] = cs.misses; v[3] = cs.evictions; v[4] = cs.no_room; v[5] = cs.decoded_mp3_frames;
-    v[6] = cs.requested; v[7] = cs.lost; v[8] = cs.waiting; v[9] = cs.pinned;
+    v[6] = cs.requested; v[7] = cs.lost; v[8] = cs.waiting; v[9] = cs.pinned; v[22] = cs.squeezed;
     v[10] = total_busy_ms; v[11] = total_cycles; v[12] = total_cycle_ms; v[13] = window_cycle_max;
     window_cycle_max = 0;
 #endif
@@ -386,8 +387,8 @@ static void stats_midi_poll(void)
     v[17] = st.drops_held; v[18] = st.drops_tail; v[19] = st.drops_guard;
     v[20] = window_step_max; v[21] = window_screen_max;
     window_step_max = window_screen_max = 0;
-    uint8_t m[6 + 22 * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x02}, *d = m + 6;
-    for (unsigned i = 0; i < 22; ++i)
+    uint8_t m[6 + 23 * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x03}, *d = m + 6;
+    for (unsigned i = 0; i < 23; ++i)
         for (unsigned k = 0; k < 5; ++k)
             *d++ = (uint8_t)((v[i] >> (7 * k)) & 0x7fU);
     *d = 0xf7;
