@@ -438,6 +438,10 @@ components keep their own terms, listed in [fm1_open/THIRD_PARTY.md](fm1_open/TH
 binary form for M-VAVE FM-1 devices only. The converter page loads [lamejs](third_party/lamejs/README.md) (LGPL-3.0) as a separate,
 unchanged file.
 
+The rest of the code in this repository (the converter and install pages, `pack_bank.js`, the tools and the tests) is GPL-3.0-only as well: the same
+[LICENSE](LICENSE), whose linking exception only matters where code is linked with the FM1 SDK. Files that carry another licence keep it, `third_party/`
+included. The sound data (`banks/default.fm1b`) and the MIDI files are not code and are not covered by this licence; see below.
+
 The corresponding source of every release is this repository at the release's tag.
 
 **The starter bank.** `banks/default.fm1b` (also attached to each release as `gm_32k_bfp8.fm1b`, and what the install page puts on the FM-1) is a
