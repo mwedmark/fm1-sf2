@@ -46,6 +46,8 @@ For building the firmware and working on the code, see [DEVELOPING.md](DEVELOPIN
   `.fwsc` package, like M-VAVE's own updates.
 - **The bank** is a separate file in the FM-1's sample flash, the 456 KB region the stock firmware uses for its samples. The firmware
   plays it where it lies, without loading it into RAM. Changing the bank does not touch the firmware, and changing the firmware keeps the bank.
+- **Other firmwares' data.** The firmware does not read the projects, voices or samples of any other firmware, M-VAVE's original included. Installing it
+  does not keep them, and sending a bank erases the sample flash, so back up what you want to keep first.
 - **The bank format (FM1B)** is a SoundFont reduced to what the FM-1 can play: presets with their key and velocity zones, layered zones,
   loop points, volume envelopes, the filter and its envelope, vibrato and tremolo LFOs, pan, reverb and chorus sends, and the samples, mono and
   in one of the codecs below. The full layout is in [FORMAT.md](FORMAT.md).
