@@ -1,0 +1,9 @@
+{
+  "what": "A 32-voice, 16-channel General MIDI sound module for the FM-1. It plays a SoundFont converted in the browser to a compact bank, with filters, LFOs, reverb and chorus, over USB, DIN or Bluetooth MIDI. Installs over USB from a web page.",
+  "author": "mwedmark",
+  "kinds": ["synth"],
+  "play": "https://mwedmark.github.io/fm1-sf2/",
+  "editor": "https://mwedmark.github.io/fm1-sf2/converter.html",
+  "image": "docs/img/lcd_program_note.png",
+  "color": "#4fc3f7"
+}

@@ -12,6 +12,9 @@ on:
       bank_format:
         description: 'Sample format of the hosted bank (make_bank.js): sea5, sea6, bfp8, pcm8, pcm12 or pcm16'
         default: 'bfp8'
+      release_tag:
+        description: 'Optional: publish a GitHub pre-release with this tag (for example v0.1.0) holding both .fwsc packages and the licence files'
+        default: ''
 
 permissions:
   contents: read
@@ -158,3 +161,37 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # A pre-release (the Firmware Hub marks 0.x, alpha, beta and rc as beta) with the two packages, the licence and the third-party
+  # notices. Only when "Run workflow" is given a release_tag; the tag is made on the commit that was built.
+  release:
+    needs: build
+    if: ${{ inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: fw
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -e
+          cp LICENSE fm1_open/THIRD_PARTY.md fw/
+          cat > notes.md <<'NOTES'
+          Firmware packages for the M-VAVE FM-1 (install them with https://mwedmark.github.io/fm1-sf2/install.html).
+
+          - `sf2player_plain.fwsc`: the SF2 player (BFP8, SEA and PCM banks, MIDI file player).
+          - `sf2player_live-cache.fwsc`: the SF2 player with the live cache (BFP8 and MP3-packed banks). Still being tested on the device.
+
+          Licence: GPL-3.0 with the FM1 SDK linking exception (`LICENSE`). The proprietary engine and the other third-party components keep their own terms (`THIRD_PARTY.md`); the engine may be redistributed in binary form for M-VAVE FM-1 devices only. The corresponding source is this repository at the tag of this release.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "$TAG" --notes-file notes.md \
+            fw/sf2player_plain.fwsc fw/sf2player_live-cache.fwsc fw/LICENSE fw/THIRD_PARTY.md

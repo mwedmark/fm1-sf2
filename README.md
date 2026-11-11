@@ -435,4 +435,14 @@ Notes from the FM-1's own keys play at velocity 100.
 The firmware is built on [m-vave/fm1_open](https://github.com/m-vave/fm1_open) (GPLv3 with the FM1 SDK linking exception, see
 `fm1_open/LICENSE.md`). The screenshots are from fm1-emu (MIT) running the plain firmware with `dist/gm_32k_bfp8.fm1b`.
 
+## Licence
+
+The firmware is GPL-3.0 with the FM1 SDK linking exception, as [m-vave/fm1_open](https://github.com/m-vave/fm1_open): see [LICENSE](LICENSE)
+(the same text as `fm1_open/LICENSE.md`). The proprietary engine in `fm1_open/sdk/lib/libfm1_engine.a` and the other third-party
+components keep their own terms, listed in [fm1_open/THIRD_PARTY.md](fm1_open/THIRD_PARTY.md); the engine may be redistributed in
+binary form for M-VAVE FM-1 devices only. The converter page loads [lamejs](third_party/lamejs/README.md) (LGPL-3.0) as a separate,
+unchanged file.
+
+The corresponding source of every release is this repository at the release's tag.
+
 If you like it: [🍺 Buy me a beer](https://ko-fi.com/overclocked73).
