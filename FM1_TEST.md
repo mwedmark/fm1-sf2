@@ -147,6 +147,10 @@ Emulatorn, 2026-11-11, första 60 s av Never gonna give you up (`node midi_scrip
 Cachen kostar alltså ingen CPU i ljudavbrottet, men 72 KB räcker inte helt: 8 toner kom för sent. `-CacheFrames 4` hjälpte inte (`L10`).
 Med 84 KB (`sf2player_live84.fwsc`, efter att cachens egna buffertar krympts 10,9 KB): `CACHE H1696 M89 E73 F276 L4 P0 W0`, `MP3 517 FR 2203 US/FR CYC 11 MAX 43 MS`.
 
+**På FM-1, 2026-11-11** (`sf2player_live84.fwsc`, CRC32 `24D0C78C`, installerad med `install.html`): startar och spelar. Infosidan:
+`CACHE H1990 M27 E19 F0 L0 P0 W0`, `MP3 144 FR 6493 US/FR CYC 10 MAX 214 MS`. Inga toner för sent. Avkodningen tar 6,5 ms per ram, tre gånger
+emulatorns tid (K ≈ 43). `MAX 214 MS` är inte förklarat. Spelat efter REC: Never gonna give you up i 31 s och lite Eine kleine Nachtmusik.
+
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
 | H1 | Flasha firmwaren och banken. Tryck REC och spela några toner på panelen, olika program. | Infosidan visar `GM_32K_BFP8.FM1B`, 241 520 byte. `M` och `MP3` ökar vid första tonen på ett nytt ljud, `H` när samma ton spelas igen. | |

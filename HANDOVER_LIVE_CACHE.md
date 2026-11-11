@@ -89,6 +89,13 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   with the normal check** (heap 111 500, image 997 to spare): `dist\sf2player_live84.fwsc`, CRC32 `24D0C78C`. Same song in fm1-emu: `H1696 M89 E73 F276 L4 P0 W0`,
   as the 84 KB test with the check lowered: the smaller table cost nothing. All three PC tests pass with the same figures. **Not on the FM-1 yet.**
   More would need SRAM from the SDK's own buffers (effects 49 KB, Bluetooth audio 16 KB, groove engine) or the 4 KB `groove_project` scratch in `sf2player.c` (who uses it: not checked).
+  **On the FM-1, 2026-11-11** (`sf2player_live84.fwsc`, CRC32 `24D0C78C`, installed with `install.html` from another computer with `gm_32k_packed.fm1b`;
+  install.html needs the plain build as `firmware` and the live one as `--live-fwsc`, else it refuses an MP3 bank): it boots (heap 111 500) and plays. The info page
+  after the user played (photo): `CACHE H1990 M27 E19 F0 L0 P0 W0`, `MP3 144 FR 6493 US/FR CYC 10 MAX 214 MS`. **No note lost.** The decoder is about 3 times
+  slower than in fm1-emu: 6.5 ms per MP3 frame (36 ms of audio), so K is about 43 at 240 MHz with the audio interrupt's share in it (the design assumed 5 to 12):
+  a sound decodes at about 5.5 times real time. The longest control cycle, 214 ms, is not explained (a decode is 2 frames, 13 ms); played (the user):
+  REC first, then Never gonna give you up for 31 s and some of Eine kleine Nachtmusik, so fewer new sounds than the emulator's 60 s (27 decodes
+  against 89; some sounds may have been in the cache from before REC). CPU and DROPPED figures not taken. Next: those, and a longer song with many new sounds, where the slower decoder may make notes late.
   The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
 
 ## Not done, in the order I would do it
