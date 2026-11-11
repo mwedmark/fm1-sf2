@@ -438,4 +438,8 @@ unchanged file.
 
 The corresponding source of every release is this repository at the release's tag.
 
+**The starter bank.** `banks/default.fm1b` (also attached to each release as `gm_32k_bfp8.fm1b`, and what the install page puts on the FM-1) is a
+General MIDI bank converted from a SoundFont whose header names E-mu Systems (1993) as the copyright holder. It is included so that you can
+get going at once; the SoundFont itself is not in the repository. If you want other sounds, make your own bank with the converter.
+
 If you like it: [🍺 Buy me a beer](https://ko-fi.com/overclocked73).
