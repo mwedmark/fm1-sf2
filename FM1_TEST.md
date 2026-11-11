@@ -132,7 +132,7 @@ de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
 ## H. Live-cachen: mätningar (packad bank)
 
-Firmware `dist\sf2player_live84.fwsc` (2026-11-11, `-LiveCache -CacheKB 84 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz, 84 KB cache med samma lediga heap som 72 KB hade förut; firmwarens CRC32 `24D0C78C`, se `dist\sf2player_live84.txt`)
+Firmware `dist\sf2player_live84.fwsc` (2026-11-11, `-LiveCache -CacheKB 84 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz, 84 KB cache med samma lediga heap som 72 KB hade förut; firmwarens CRC32 `E3468A2D` sedan den också skickar mätvärdena över MIDI till `stats.html`, RUNNING.md 3d; se `dist\sf2player_live84.txt`)
 med banken `dist\gm_32k_packed.fm1b` (241 520 byte). Kontrollerad i fm1-emu (startar, spelar, infosidan räknar); **inte på FM-1 än**.
 Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och flasha tillbaka. Infosidans två nedersta rader räknar från att REC trycktes:
 
@@ -147,9 +147,14 @@ Emulatorn, 2026-11-11, första 60 s av Never gonna give you up (`node midi_scrip
 Cachen kostar alltså ingen CPU i ljudavbrottet, men 72 KB räcker inte helt: 8 toner kom för sent. `-CacheFrames 4` hjälpte inte (`L10`).
 Med 84 KB (`sf2player_live84.fwsc`, efter att cachens egna buffertar krympts 10,9 KB): `CACHE H1696 M89 E73 F276 L4 P0 W0`, `MP3 517 FR 2203 US/FR CYC 11 MAX 43 MS`.
 
-**På FM-1, 2026-11-11** (`sf2player_live84.fwsc`, CRC32 `24D0C78C`, installerad med `install.html`): startar och spelar. Infosidan:
+**På FM-1, 2026-11-11** (`sf2player_live84.fwsc` utan MIDI-mätvärden, CRC32 `24D0C78C`, installerad med `install.html`): startar och spelar. Infosidan:
 `CACHE H1990 M27 E19 F0 L0 P0 W0`, `MP3 144 FR 6493 US/FR CYC 10 MAX 214 MS`. Inga toner för sent. Avkodningen tar 6,5 ms per ram, tre gånger
 emulatorns tid (K ≈ 43). `MAX 214 MS` är inte förklarat. Spelat efter REC: Never gonna give you up i 31 s och lite Eine kleine Nachtmusik.
+
+**Hela Never gonna give you up på FM-1, mätvärdena över MIDI** (`E3468A2D`, `stats.html`, 214 s spelat): 6 627 träffar, 426 avkodningar, 407 slängda ljud,
+373 gånger utan plats, **25 toner för sent**, alltid i täta partier och samtidigt som "utan plats": cachen är full av ljud som klingande röster håller fast.
+Ljudavbrottet tar 63 % av CPU:n (topp 83 %) under låten, och den tiden ingår i 6,8 ms per ram: avkodaren själv tar cirka 2,5 ms (K ≈ 15, som i emulatorn).
+Styrcykeln: 10 ms i vila, 33 ms under låten och cirka 90 ms (upp till 128) en gång i sekunden. DROPPED: held 502, tail 5 131, CPU 3.
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |

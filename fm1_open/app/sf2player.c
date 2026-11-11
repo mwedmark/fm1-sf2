@@ -12,6 +12,9 @@
 #define FM1B_CACHE_FRAMES 2U                             /* MP3 frames (1152 samples) decoded in one control cycle */
 #endif
 #endif
+#ifndef FM1_STATS_MIDI
+#define FM1_STATS_MIDI FM1B_PACKED                       /* the player's figures once a second as SysEx to USB (stats_midi_poll): on in the live-cache build */
+#endif
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sf2out.h"
@@ -314,6 +317,9 @@ static uint32_t info_free_ram;
  * control task's cycle, from one call to the next, average and longest. */
 static struct fm1b_cache_stats cache_base;
 static uint32_t cache_busy_ms, cycle_at, cycle_sum, cycle_count, cycle_max;
+#if FM1_STATS_MIDI
+static uint32_t total_busy_ms, total_cycles, total_cycle_ms, window_cycle_max;   /* since start, and the longest cycle since the last stats message */
+#endif
 static void cache_service_timed(void)
 {
     uint32_t start = fm1_millis();
@@ -322,10 +328,54 @@ static void cache_service_timed(void)
         cycle_sum += gap;
         ++cycle_count;
         if (gap > cycle_max) cycle_max = gap;
+#if FM1_STATS_MIDI
+        total_cycle_ms += gap;
+        ++total_cycles;
+        if (gap > window_cycle_max) window_cycle_max = gap;
+#endif
     }
     cycle_at = start;
     fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
-    cache_busy_ms += fm1_millis() - start;
+    uint32_t busy = fm1_millis() - start;
+    cache_busy_ms += busy;
+#if FM1_STATS_MIDI
+    total_busy_ms += busy;
+#endif
+}
+#endif
+#if FM1_STATS_MIDI
+/* Once a second, the player's figures as one SysEx to the USB MIDI port (RUNNING.md, "Live figures over MIDI"; stats.html reads them):
+ * F0 7D 46 4D 53 01 (non-commercial id, "FMS", version 1), then 20 values of 32 bits, each 5 bytes of 7 bits, lowest first, then F7.
+ * Totals since start, so a reader takes differences: 0 ms since start; the cache's 1 hits 2 misses 3 dropped sounds 4 no room 5 MP3 frames decoded
+ * 6 notes that asked for a sound 7 notes over before their sound 8 waiting now 9 pins now; 10 ms in fm1b_cache_service 11 control cycles 12 their ms
+ * 13 the longest cycle since the last message; 14 CPU % average 15 CPU % peak (as the screen shows them) 16 voices sounding; 17..19 DROPPED HELD, TAIL, CPU.
+ * Without the live cache the cache's values are 0. */
+static uint32_t stats_sent_at;
+static void stats_midi_poll(void)
+{
+    uint32_t now = fm1_millis();
+    if (now - stats_sent_at < 1000U)
+        return;
+    stats_sent_at = now;
+    uint32_t v[20] = {now};
+#if FM1B_PACKED
+    struct fm1b_cache_stats cs;
+    fm1b_cache_stats(&cs);
+    v[1] = cs.hits; v[2] = cs.misses; v[3] = cs.evictions; v[4] = cs.no_room; v[5] = cs.decoded_mp3_frames;
+    v[6] = cs.requested; v[7] = cs.lost; v[8] = cs.waiting; v[9] = cs.pinned;
+    v[10] = total_busy_ms; v[11] = total_cycles; v[12] = total_cycle_ms; v[13] = window_cycle_max;
+    window_cycle_max = 0;
+#endif
+    struct fm1b_status st;
+    fm1b_status(&st);
+    v[14] = cpu_average; v[15] = cpu_peak; v[16] = st.voices;
+    v[17] = st.drops_held; v[18] = st.drops_tail; v[19] = st.drops_guard;
+    uint8_t m[6 + 20 * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x01}, *d = m + 6;
+    for (unsigned i = 0; i < 20; ++i)
+        for (unsigned k = 0; k < 5; ++k)
+            *d++ = (uint8_t)((v[i] >> (7 * k)) & 0x7fU);
+    *d = 0xf7;
+    (void)fm1_midi_send_port(FM1_MIDI_USB, m, sizeof m);      /* -1 when no USB host, -2 when the queue is full: the next second tries again */
 }
 #endif
 static void info_compute(void)
@@ -845,6 +895,9 @@ void groove_screen_control(void)
         return;
 #if FM1B_PACKED
     cache_service_timed();
+#endif
+#if FM1_STATS_MIDI
+    stats_midi_poll();
 #endif
 #if FM1_MIDIPLAY
     song_poll();                                              /* the song's events that are due */

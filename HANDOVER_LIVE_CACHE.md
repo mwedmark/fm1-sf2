@@ -96,6 +96,19 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   a sound decodes at about 5.5 times real time. The longest control cycle, 214 ms, is not explained (a decode is 2 frames, 13 ms); played (the user):
   REC first, then Never gonna give you up for 31 s and some of Eine kleine Nachtmusik, so fewer new sounds than the emulator's 60 s (27 decodes
   against 89; some sounds may have been in the cache from before REC). CPU and DROPPED figures not taken. Next: those, and a longer song with many new sounds, where the slower decoder may make notes late.
+  **Live figures over MIDI** (2026-11-11): the `-LiveCache` build sends all its figures once a second as SysEx to USB (`FM1_STATS_MIDI`, RUNNING.md 3d);
+  `stats.html` shows them and posts them to `dist\stats_log.jsonl` here (the `-Lan` server). Image 453 212 bytes, **709 to spare**; heap unchanged.
+  `dist\sf2player_live84.fwsc` is now this build (CRC32 `E3468A2D`), packed in `dist\install` with the plain build. Boots and plays in fm1-emu; the MIDI
+  output itself is not checked yet (the emulator has none).
+  **The whole of Never gonna give you up on the FM-1 over MIDI** (2026-11-11, `stats.html` from the computer the FM-1 is on, log here in `dist\stats_log.jsonl`,
+  255 messages, 214 s playing): 6 627 hits, 426 decodes, 407 sounds dropped, **373 no room, 25 notes late**, 2 482 MP3 frames. The late notes come in the busy
+  parts (s 89-92, 132-157, 208-238) and always with no room: the pool is full of sounds that sounding voices pin (up to 26 pins, 31 of 32 voices), so at 84 KB the
+  pool is the limit again for a whole song, not the decoder. 6.8 ms per frame **with the audio interrupt's time in it: the interrupt takes 63 % (median, peak
+  83 %) while the song plays**, so the decoder itself takes about 2.5 ms a frame (K about 15, like fm1-emu; the 6.5 ms of the info page was not three times slower
+  after all). At most 59 frames decoded in a second (1.7 times real time). The control cycle: 10 ms idle, 33 ms median while playing, and **about 90 ms (up to
+  128) once every second** even when nothing is decoded: something else in the control task (the screen?) holds it, which slows how fast a new sound is
+  ready. The voice limit: DROPPED held 502, tail 5 131, CPU guard 3. Next, in order: what the 90 ms cycle is; then RAM or fewer pins (a voice pins its sound
+  for as long as it sounds) for the pool.
   The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
 
 ## Not done, in the order I would do it

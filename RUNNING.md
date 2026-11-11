@@ -267,6 +267,18 @@ much faster): `R.ASTLEY.Never gonna give you up K.mid` (63 209 bytes, 15 771 eve
 (20 s of the page's clock were 20 s of the song), with 16-30 voices and `DROPPED HELD 46` after 31 s; PLAY started and stopped it, the
 info page showed the song. Not yet run on the FM-1.
 
+### 3d. Live figures over MIDI (2026-11-11, the live-cache build)
+
+Built with `FM1_STATS_MIDI` (`sf2player.c`; on when `FM1B_PACKED` is, i.e. in `-LiveCache` builds; `-DFM1_STATS_MIDI=0` leaves it out, 288 bytes), the
+player sends its figures once a second as one SysEx to the USB MIDI port: `F0 7D 46 4D 53 01`, 20 values of 32 bits (5 bytes of 7 bits each, lowest first),
+`F7`, 107 bytes. Totals since start: ms, the cache's hits, misses, dropped sounds, no room, MP3 frames decoded, requests, notes late, waiting, pins; ms in
+`fm1b_cache_service`, control cycles and their ms, the longest cycle since the last message; CPU % average and peak; voices; DROPPED held, tail, CPU.
+`stats.html` (Chrome or Edge, Web MIDI with SysEx) shows them live, per second and since a moment you pick, and posts each message to `/stats-log`
+of the server that serves the page: `test_emu\cors_server.py` (the `-Lan` server of `start_web.ps1`) appends it to `dist\stats_log.jsonl`, so the
+figures can be read on this computer while the FM-1 is on another. `python -m http.server` (the plain 8765 server) takes no posts: the page then
+says so and only shows them. From another computer: `.\start_web.ps1 -Lan`, then `https://<this computer>:8766/stats.html`.
+Not on the FM-1 yet; fm1-emu does not pass the firmware's MIDI output on, so there it only shows that the build boots and plays.
+
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 
 **Quick start** (verified): build the firmware (section 1), then
