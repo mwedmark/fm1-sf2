@@ -1,7 +1,7 @@
 # Packs the last firmware build and a bank into dist\install\ for install.html (node make_install.js).
 # Run it after .\build_firmware.ps1: it packs the build in fm1_open\build\dx7, not a dist\*.fwsc of your choosing.
-#   .\build_install.ps1                                  the packed bank (for a live-cache firmware)
-#   .\build_install.ps1 -Bank dist\gm_32k_bfp8.fm1b      the BFP8 bank (for a firmware built with -NoLiveCache)
+#   .\build_install.ps1                                  the packed bank (the default firmware, with the live cache, plays it)
+#   .\build_install.ps1 -Bank dist\gm_32k_bfp8.fm1b      the BFP8 bank (either firmware plays it)
 #   .\build_install.ps1 -Serve                           also starts the server and opens install.html (start_web.ps1)
 param([string]$Bank = 'dist\gm_32k_packed.fm1b', [int]$Voices = 0, [switch]$Serve)
 $ErrorActionPreference = 'Stop'

@@ -148,10 +148,12 @@
   // the two builds of the firmware: plain, and with the live cache (manifest.live, when the site has it), which also plays MP3 banks
   let plainPkg = null, livePkg = null, fw = 'plain';
   const fwMeta = () => fw === 'live' ? manifest.live.firmware : manifest.firmware;
+  // the chosen firmware has the live cache: the live one, or the main one when the manifest says so (make_install.js, main_live: one firmware for all)
+  const isLive = () => fw === 'live' || !!manifest.main_live;
   const packedBank = b => !!b && b.length >= 8 && new DataView(b.buffer, b.byteOffset).getUint16(4, true) === 2 && !!(b[6] & 0x10);
   function showFw() {
     const name = fw === 'live' ? manifest.live.name : manifest.name;
-    $('fwInfo').textContent = (name ? name + ': ' : '') + 'SF2 player ' + (fw === 'live' ? 'with the live cache ' : '') + pkg.release_version + ', ' + fwMeta().voices + ' voices, ' + kb(pkg.bytes) + ', build ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
+    $('fwInfo').textContent = (name ? name + ': ' : '') + 'SF2 player ' + (isLive() ? 'with the live cache ' : '') + pkg.release_version + ', ' + fwMeta().voices + ' voices, ' + kb(pkg.bytes) + ', build ' + pkg.build_id.slice(0, 12) + ' (' + manifest.made.slice(0, 16).replace('T', ' ') + ' UTC)';
   }
   function chooseFw(which) {
     if (which === 'live' && !livePkg) return;
@@ -379,7 +381,7 @@
       log('V15 is installed');
       await flash(access, pkg, true, 'FM-1_015', 'Step 2 of 2, SF2 player: ');
     }
-    step('firmware', 'done', 'Installed and checked (' + pkg.release_version + (fw === 'live' ? ' with the live cache' : '') + ', ' + fwMeta().voices + ' voices).', 100);
+    step('firmware', 'done', 'Installed and checked (' + pkg.release_version + (isLive() ? ' with the live cache' : '') + ', ' + fwMeta().voices + ' voices).', 100);
   }
 
   // leaving: only the original firmware V15 and its factory voices (the Leaving FM1-SF2 section)
@@ -387,7 +389,7 @@
     if (busy) return;
     const doFw = leaving || $('doFirmware').checked, doBank = !leaving && $('doBank').checked;
     if (!leaving && doBank && doFw && packedBank(bank) && fw !== 'live') { message('The bank is an MP3 bank: choose the firmware with the live cache above.', 'bad'); return; }
-    if (!leaving && doBank && fw === 'live' && !(bank[6] & 8)) { message('The firmware with the live cache plays only BFP8 and MP3 banks: convert the bank to one of them, or choose the SF2 player.', 'bad'); return; }
+    if (!leaving && doBank && isLive() && !(bank[6] & 8)) { message('The firmware with the live cache plays only BFP8 and MP3 banks: convert the bank to one of them, or choose the SF2 player.', 'bad'); return; }
     if (leaving && !stockPkg) { message('The original firmware V15 could not be loaded. Use Workbench (Restore original V15).', 'bad'); return; }
     if (!doFw && !doBank) { message('Choose firmware, sound bank or both.', 'bad'); return; }
     if (!navigator.requestMIDIAccess) { message('This browser has no Web MIDI. Use Chrome or Edge.', 'bad'); return; }
@@ -454,7 +456,7 @@
     if (bytes.length > 466944) throw new Error(name + ' (' + kb(bytes.length) + ') is larger than the FM-1\'s sample flash (456 KB).');
     const dv = new DataView(bytes.buffer, bytes.byteOffset), flags = dv.getUint16(6, true), presets = dv.getUint16(12, true);
     const format = packedBank(bytes) ? 'MP3 (packed, for the live cache)' : flags & 8 ? 'BFP8' : flags & 2 ? 'SEA' : flags & 4 ? '12-bit' : flags & 1 ? '16-bit' : '8-bit';
-    if (packedBank(bytes) && fw !== 'live') {
+    if (packedBank(bytes) && !isLive()) {
       if (!livePkg) throw new Error(name + ' is an MP3 bank: it needs the firmware with the live cache, which this site does not have.');
       chooseFw('live');
       message('An MP3 bank: the page installs the firmware with the live cache, which plays it.', 'ok');

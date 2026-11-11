@@ -1,9 +1,8 @@
 # Builds the FM-1 firmware on a Windows runner (JieLi toolchain 2.5.3, as RUNNING.md section 1) and publishes the emulator page.
-#   plain       the default build
-#   live-cache  the -LiveCache build, the one that is close to the image's limit (the build stops if it does not fit). -CacheKB 72:
-#               with 96 the runtime heap is 88 716 bytes and Build.ps1 stops under 111 468 (HANDOVER_LIVE_CACHE.md)
+# One firmware since 2026-11-11: the default build, with the live cache (84 KB pool), which plays BFP8 and MP3 banks; it is close to the
+# image's limit and to the smallest heap seen to boot, and Build.ps1 stops if it does not fit (HANDOVER_LIVE_CACHE.md).
 # Runs only when started by hand (Actions > firmware > Run workflow); pushes and pull requests no longer build.
-# It builds both and uploads the .fwsc packages; run on main it also deploys the emulator to GitHub Pages
+# It builds it and uploads the .fwsc package; run on main it also deploys the emulator to GitHub Pages
 # (Settings > Pages > Source: GitHub Actions, once).
 name: firmware
 
@@ -19,16 +18,7 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.variant }})
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: plain
-            flags: ''
-          - variant: live-cache
-            flags: '-LiveCache -CacheKB 72 -CacheFrames 2'
     steps:
       - uses: actions/checkout@v4
 
@@ -61,14 +51,14 @@ jobs:
         working-directory: fm1_open
         run: |
           $env:FM1_PI32_TOOLCHAIN = Join-Path $env:GITHUB_WORKSPACE 'jl-toolchain\pi32'
-          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN ${{ matrix.flags }} 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
+          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
           if (!$?) { throw 'The build failed.' }
 
       - name: Sizes
         if: always()
         shell: pwsh
         run: |
-          "### firmware (${{ matrix.variant }})" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "### firmware" | Out-File $env:GITHUB_STEP_SUMMARY -Append
           if (Test-Path build.log) {
             $lines = Select-String -Path build.log -Pattern 'app image|fits|does not fit|runtime_heap|heap' | ForEach-Object { $_.Line }
             '```' + "`n" + ($lines -join "`n") + "`n" + '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append
@@ -80,14 +70,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item fm1_open/build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc "out/sf2player_${{ matrix.variant }}.fwsc"
-          Copy-Item fm1_open/build/dx7/firmware-report.json "out/firmware-report_${{ matrix.variant }}.json"
-          Copy-Item fm1_open/build/dx7/build-identity.json "out/build-identity_${{ matrix.variant }}.json"   # the install page's manifest needs the build id
-          Copy-Item build.log "out/build_${{ matrix.variant }}.log"
+          Copy-Item fm1_open/build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc out/sf2player.fwsc
+          Copy-Item fm1_open/build/dx7/firmware-report.json out/firmware-report.json
+          Copy-Item fm1_open/build/dx7/build-identity.json out/build-identity.json   # the install page's manifest needs the build id
+          Copy-Item build.log out/build.log
 
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.variant }}
+          name: firmware
           path: out/
           if-no-files-found: error
 
@@ -125,7 +115,7 @@ jobs:
   # page, the firmware and the bank, so the emulator can fetch them (RUNNING.md section 4).
   site:
     needs: [build, bank]
-    if: ${{ !cancelled() }}   # the site needs only the plain package; a live-cache failure must not hide it
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,13 +124,7 @@ jobs:
           node-version: 20
       - uses: actions/download-artifact@v4
         with:
-          name: firmware-plain
-          path: fw
-      - name: The live-cache package (the install page's choice for MP3 banks; missing when that build failed)
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: firmware-live-cache
+          name: firmware
           path: fw
       - name: The converted bank (when the bank job made one)
         uses: actions/download-artifact@v4
@@ -151,7 +135,7 @@ jobs:
       - name: JZZ.js (pinned in .github/site/package-lock.json)
         run: npm ci --ignore-scripts --prefix .github/site
       - name: Make the site
-        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}" fw/build-identity_plain.json fw/sf2player_live-cache.fwsc fw/build-identity_live-cache.json
+        run: node .github/make_site.js site fw/sf2player.fwsc "${GITHUB_SHA}" fw/build-identity.json
       - uses: actions/upload-artifact@v4
         with:
           name: emulator-site

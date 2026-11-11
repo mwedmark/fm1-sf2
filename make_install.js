@@ -5,7 +5,8 @@
 // A package built elsewhere (the Pages site, .github/make_site.js): --fwsc=<package> --identity=<its build-identity.json>
 // [--out=<folder>, default dist/install] [--name=<the package's name>].
 // The live-cache build too (the install page's choice for MP3 banks): --live-fwsc=<package> --live-identity=<its build-identity.json>
-// [--live-name=<its name>]. It gets the same voices.
+// [--live-name=<its name>]. It gets the same voices. Since 2026-11-11 the default build has the live cache itself (its build-identity.json
+// says live_cache: true): the manifest then says main_live, and the page installs that one firmware for BFP8 and MP3 banks alike.
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const root = __dirname, build = path.join(root, 'fm1_open/build/dx7');
 const option = name => { const a = process.argv.find(a => a.startsWith('--' + name + '=')); return a ? a.slice(name.length + 3) : null; };
@@ -61,9 +62,10 @@ const manifest = {
   // as fm1_open/sdk/Build.ps1 describes it for the SDK (kind 'stock': its loader is the vendor one, the same as ours)
   stock: { schema: 1, kind: 'stock', product: 'FM-1_015', family: 7, release_version: 'V15', build_id: STOCK_SHA, sha256: STOCK_SHA,
     bytes: stock.length, loader_sha256: 'ef1f2db89b011fa53e71df363f0122de0ea896618c53fb53e8da676322004541', url: 'dist/install/stock.fwsc?v=' + STOCK_SHA.slice(0, 12) },
+  ...(identity.live_cache ? { main_live: true } : {}),
   ...(live ? { live } : {}),
   made: new Date().toISOString(),
 };
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
-console.log(`${path.relative(root, out).replace(/\\/g, '/')}: firmware ${name || '(no dist/*.fwsc is this package)'}, ${firmware.length} bytes (${voices} voices, build ${identity.build_id.slice(0, 16)}), bank ${bank.length} bytes` +
+console.log(`${path.relative(root, out).replace(/\\/g, '/')}: firmware ${name || '(no dist/*.fwsc is this package)'}, ${firmware.length} bytes (${voices} voices, build ${identity.build_id.slice(0, 16)}${identity.live_cache ? ', with the live cache' : ''}), bank ${bank.length} bytes` +
   (live ? `; live cache ${live.firmware.bytes} bytes (build ${live.firmware.build_id.slice(0, 16)})` : ''));

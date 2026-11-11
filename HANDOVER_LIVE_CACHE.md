@@ -123,6 +123,12 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   version 3 adds the count. fm1-emu, 60 s: 2 late against 4. **On the FM-1, the whole song** (`85D99FA6`): **19 late** (25, 30, 33 before), no room 545,
   245 tails cut, 477 decodes, TAIL 5 247 (5 138 before). Logs `dist\stats_log_astley_v1..v4.jsonl`. Left: notes still late when no voice is releasing
   (all held) or while the cut voice fades and the sound decodes; more room needs more pool.
+  **One firmware** (2026-11-11, the user's choice): the live-cache build is the default of `sdk\Build.ps1` (`-LiveCache` on, `-CacheKB 84`), `build_fw.ps1`
+  and `build_firmware.ps1`; `-LiveCache:$false` / `-NoLiveCache` still builds the plain one. The MIDI file player and the 8/12/16-bit and SEA formats are out
+  by their defines (`FM1_MIDIPLAY=0`, `FM1B_BFP8_ONLY=1`), the code stays: with all formats the heap was 3.7 KB short (107 916), the player does not fit
+  the image. The GitHub workflow builds one firmware; `build-identity.json` has `live_cache`, `make_install.js` writes `main_live` in the manifest and
+  `install.html` installs that firmware for BFP8 and MP3 banks (checked in the browser with the packed bank; not yet on the FM-1 from a fresh page, and
+  the workflow and `make_site.js` not run). A plain `sdk\Build.ps1` has 69 bytes to spare (the compiler's date string), `build_fw.ps1` 165.
   The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
 
 ## Not done, in the order I would do it

@@ -29,9 +29,14 @@ It writes the name and time to `fm1_open\app\build_info.h` (git ignores it), run
 copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prints next to it. A plain build shows
 `FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
 
-**With the live cache** (2026-11-08, **not built yet**; `-LiveCache` on `build_fw.ps1` or `sdk\Build.ps1`): plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
+**One firmware, with the live cache** (the default since 2026-11-11; `build_fw.ps1`, `build_firmware.ps1` and `sdk\Build.ps1` build it without a switch, the
+GitHub workflow builds only it, and `install.html` installs it for BFP8 and MP3 banks alike; `-LiveCache:$false` on `build_fw.ps1` or `sdk\Build.ps1`, or
+`-NoLiveCache` on `build_firmware.ps1`, builds the firmware without it, which has every bank format and the MIDI file player). With all the formats
+and the cache, the heap was 3.7 KB short (their voice loops run from SRAM); the MIDI file player does not fit the image (2.4 KB). Pool 84 KB:
+image 453 756 bytes with a name from `build_fw.ps1` (165 to spare), 453 852 from a plain `sdk\Build.ps1` (69: the compiler's date string), heap 111 660.
+It plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
 The image is at the layout's limit, so this build also plays BFP8 banks only (`FM1B_BFP8_ONLY`: one voice loop in place of ten; the packed bank is BFP8 after decoding; SEA, 8-, 12- and 16-bit banks are refused), and leaves out the MIDI file player (`FM1_MIDIPLAY=0`; the code stays and the plain build has it: with it the image was 2 235 bytes over, and a song takes its RAM from the heap the cache leaves short). (The SDRAM test of the info page is gone from every build since 2026-11-08: on the FM-1 it restarted the device, there is no SDRAM.)
-It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 96, 16 to 400) in the SRAM, which the link takes from the
+It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 84, 16 to 400; 90 and more did not boot) in the SRAM, which the link takes from the
 runtime heap; `-CacheFrames` (default 2) is the MP3 frames (1152 samples) decoded in one control cycle. The build prints the heap that is left (`runtime_heap_bytes` in `firmware-report.json`), and stops under 49 152
 bytes, which is how the free SRAM is found: raise `-CacheKB` until it stops. Without the switch the firmware is what it was. What to look at in the first build, none of it known:
 the compiler's warnings (`-Wframe-larger-than`: minimp3's decode takes about 16 KB of stack, and the control task that calls `fm1b_cache_service` must have it), the image size against the 30 KB or so spare
