@@ -63,22 +63,25 @@
   <div class="panel">
     <h2>Each second (newest first)</h2>
     <div class="scroll"><table>
-      <thead><tr><th>s</th><th>hits</th><th>decodes</th><th>frames</th><th>µs/frame</th><th>cycle ms</th><th>max ms</th><th>lost</th><th>wait</th><th>CPU %</th><th>peak</th><th>voices</th><th>held</th></tr></thead>
+      <thead><tr><th>s</th><th>hits</th><th>decodes</th><th>frames</th><th>µs/frame</th><th>cycle ms</th><th>max ms</th><th>step</th><th>screen</th><th>lost</th><th>wait</th><th>CPU %</th><th>peak</th><th>voices</th><th>held</th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
   </div>
 </main>
 <script>
-  // The message (sf2player.c, stats_midi_poll): F0 7D 46 4D 53 01, 20 values of 32 bits as 5 bytes of 7 bits, lowest first, F7.
+  // The message (sf2player.c, stats_midi_poll): F0 7D 46 4D 53 <version>, values of 32 bits as 5 bytes of 7 bits, lowest first, F7.
+  // Version 1 has 20 values, version 2 22 (the longest control step and screen update since the last message).
   const NAMES = ['ms', 'hits', 'misses', 'evictions', 'noRoom', 'frames', 'requested', 'lost', 'waiting', 'pinned',
-                 'busyMs', 'cycles', 'cycleMs', 'cycleMax', 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard'];
+                 'busyMs', 'cycles', 'cycleMs', 'cycleMax', 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard', 'stepMax', 'screenMax'];
+  const COUNT = { 1: 20, 2: 22 };
   const $ = id => document.getElementById(id);
   let base = null, last = null, count = 0;
 
   function decode(data) {
-    if (data.length !== 6 + 20 * 5 + 1 || data[0] !== 0xf0 || data[1] !== 0x7d || data[2] !== 0x46 || data[3] !== 0x4d || data[4] !== 0x53 || data[5] !== 1) return null;
-    const r = {};
-    NAMES.forEach((n, i) => { let v = 0; for (let k = 4; k >= 0; --k) v = v * 128 + data[6 + i * 5 + k]; r[n] = v >>> 0; });
+    const n = COUNT[data[5]];
+    if (!n || data.length !== 6 + n * 5 + 1 || data[0] !== 0xf0 || data[1] !== 0x7d || data[2] !== 0x46 || data[3] !== 0x4d || data[4] !== 0x53) return null;
+    const r = { stepMax: '–', screenMax: '–' };
+    NAMES.slice(0, n).forEach((n, i) => { let v = 0; for (let k = 4; k >= 0; --k) v = v * 128 + data[6 + i * 5 + k]; r[n] = v >>> 0; });
     return r;
   }
   const d = (a, b, n) => (a[n] - b[n]) >>> 0;
@@ -99,7 +102,7 @@
 
   function row(r, p) {
     const tr = document.createElement('tr');
-    const cells = [(r.ms / 1000).toFixed(0), d(r, p, 'hits'), d(r, p, 'misses'), d(r, p, 'frames'), perFrame(r, p), perCycle(r, p), r.cycleMax,
+    const cells = [(r.ms / 1000).toFixed(0), d(r, p, 'hits'), d(r, p, 'misses'), d(r, p, 'frames'), perFrame(r, p), perCycle(r, p), r.cycleMax, r.stepMax, r.screenMax,
                    d(r, p, 'lost'), r.waiting, r.cpu, r.cpuPeak, r.voices, d(r, p, 'held')];
     tr.innerHTML = cells.map(c => `<td>${c}</td>`).join('');
     $('rows').prepend(tr);

@@ -109,6 +109,14 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   128) once every second** even when nothing is decoded: something else in the control task (the screen?) holds it, which slows how fast a new sound is
   ready. The voice limit: DROPPED held 502, tail 5 131, CPU guard 3. Next, in order: what the 90 ms cycle is; then RAM or fewer pins (a voice pins its sound
   for as long as it sounds) for the pool.
+  **The 90 ms cycle is the screen** (message version 2 adds the longest control step and screen update a second): playing the song on the program page, the
+  longest screen update was 75 ms (median a second; 1 ms idle), nearly all of the step's 79 and the cycle's 90. The program page shows the last note's
+  zone, keys, sample, loop and envelope, so a new note changed 7 or 8 lines at once, about 10 ms each with the interrupt at 63 %. Now a screen update draws at most
+  2 changed lines, in turn (`line_show`, `LINES_PER_UPDATE`; a cleared page draws whole; the plain build too). Same song on the FM-1 (`95FCED19`): longest
+  cycle 90 -> 55 ms, screen 75 -> 39, cycle average 33 -> 26 ms. **The late notes did not go down** (25, 30, 33 in three runs; no room 373, 508, 660): they are
+  the pool's, not the control task's. Two lines still take about 40 ms (each line is drawn and sent the full 240 pixels wide). Logs: `dist\stats_log_astley_v1.jsonl`,
+  `_v2.jsonl` and `_v3.jsonl` (not in git). Next for the late notes: when there is no room, let a new note take the room of a sound that only releasing
+  voices hold (cut their tails, as the voice limit does), rather than wait.
   The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
 
 ## Not done, in the order I would do it
