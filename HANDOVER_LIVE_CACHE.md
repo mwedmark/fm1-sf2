@@ -82,6 +82,14 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   emulator; the device has only been seen to boot with 111 468, so 84 KB is untried there (`dist\sf2player_live84.fwsc`, built with the check lowered). More pool
   than that needs SRAM from elsewhere: the live cache's own buffers are 16 KB minimp3 scratch, 4 KB crossfade, 2.3 KB PCM, about 6.7 KB decoder state; the
   crossfade's 4 KB could share the minimp3 scratch (never in use at the same time; not checked), and mono-only minimp3 state would save about 3.4 KB.
+- **2026-11-11, later: RAM freed, 84 KB pool within the proven heap.** `-CacheFrames 4` at 72 KB did not help (`L10`), so the pool is the limit, not the decoder's
+  speed. Then: the crossfade's blended samples are int16 and share one 2.3 KB buffer with the decoded frame (`mp3_sound.c`, was 2.3 + 4 KB); minimp3's state and
+  scratch hold one channel and a 1440-byte frame under `MINIMP3_FM1_MONO_32K` (now set in `mp3_sound.h`, since it sizes `mp3dec_t`); the cache's table has one
+  entry per KB of pool in the firmware (`SOUND_CACHE_ENTRIES`, 160 in the tests). Heap at 72 KB 113 260 -> 124 140 (10 880 freed). **`-CacheKB 84` now builds
+  with the normal check** (heap 111 500, image 997 to spare): `dist\sf2player_live84.fwsc`, CRC32 `24D0C78C`. Same song in fm1-emu: `H1696 M89 E73 F276 L4 P0 W0`,
+  as the 84 KB test with the check lowered: the smaller table cost nothing. All three PC tests pass with the same figures. **Not on the FM-1 yet.**
+  More would need SRAM from the SDK's own buffers (effects 49 KB, Bluetooth audio 16 KB, groove engine) or the 4 KB `groove_project` scratch in `sf2player.c` (who uses it: not checked).
+  The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
 
 ## Not done, in the order I would do it
 

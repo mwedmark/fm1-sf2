@@ -6,8 +6,10 @@
 #define MINIMP3_ONLY_MP3
 #define MINIMP3_NO_SIMD
 #define MINIMP3_STATIC_SCRATCH
-#define MINIMP3_FM1_MONO_32K                                  /* the packed bank's stream is MPEG-1 layer 3, mono, 32 kHz (pack_bank.js); other frames are refused */
 #include "mp3_sound.h"
+
+/* A frame of decoded samples in mp3_sound_step, the blended samples in mp3_sound_loop_crossfade: never both at once, so one buffer (2.3 KB; it was 6.3 KB). */
+static int16_t work[MP3_SOUND_FRAME_SAMPLES];
 
 void bfp8_pack_group(const int16_t *pcm, uint8_t *out)
 {
@@ -60,7 +62,7 @@ uint32_t mp3_sound_step(struct mp3_sound_job *job, uint32_t max_frames)
 {
     uint32_t decoded = 0;
     while (decoded < max_frames && !job->done && !job->error) {
-        static int16_t pcm[MP3_SOUND_FRAME_SAMPLES];
+        int16_t *pcm = work;
         mp3dec_frame_info_t info;
         if (job->position >= job->stream->bytes) {
             job->error = 1;
@@ -120,13 +122,13 @@ uint32_t mp3_sound_loop_crossfade(uint8_t *bfp, uint32_t frames, uint32_t loop_s
         xfade = (loop_end - loop_start) / 2;
     if (!xfade)
         return frames / 32U;
-    static int32_t blended[1024];
+    int16_t *blended = work;                                  /* each a weighted mean of two BFP8 samples (-32768..32512): fits 16 bits */
     if (xfade > 1024)
         xfade = 1024;
     for (uint32_t i = 0; i < xfade; ++i) {                    /* w = (i + 1) / (xfade + 1), computed on the samples as they are before any of them changes */
         int32_t end = bfp_sample(bfp, loop_end - xfade + i), before = bfp_sample(bfp, loop_start - xfade + i);
         int32_t n = end * (int32_t)(xfade - i) + before * (int32_t)(i + 1), d = (int32_t)xfade + 1;
-        blended[i] = floor_div(n + d / 2, d);
+        blended[i] = (int16_t)floor_div(n + d / 2, d);
     }
     uint32_t first = (loop_end - xfade) >> 5, last = (loop_end - 1U) >> 5;
     for (uint32_t g = first; g <= last; ++g) {

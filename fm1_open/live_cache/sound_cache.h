@@ -11,7 +11,13 @@
 #include <stdint.h>
 #include "mp3_sound.h"
 
-#define SOUND_CACHE_ENTRIES 160U                              /* sounds in the pool at once */
+#ifndef SOUND_CACHE_ENTRIES                                   /* sounds in the pool at once (28 bytes each); when all are taken the least recently used goes, as when the pool is full */
+#if defined(FM1B_CACHE_KB) && FM1B_CACHE_KB < 160             /* the firmware: one per KB of pool (a decoded sound of 1mgm.sf2 is 2.8 KB on average), RAM is short */
+#define SOUND_CACHE_ENTRIES ((unsigned)FM1B_CACHE_KB)
+#else
+#define SOUND_CACHE_ENTRIES 160U
+#endif
+#endif
 #define SOUND_CACHE_QUEUE 32U                                 /* sounds waiting to be decoded */
 
 enum sound_cache_result {

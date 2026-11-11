@@ -18,4 +18,8 @@ wasm32 without a warning but for the stack frames (minimp3's decode 16.4 KB, the
 
 Earlier note, for any other build: add `live_cache` and `third_party/mp3` to the include paths, the sources to the build in `sdk/Build.ps1`, and `-DFM1B_PACKED=1`; the pool
 (the free SRAM), a task that calls `fm1b_cache_service` and the stack of that task (about 14 KB for minimp3's working data plus 2.3 KB for a frame of samples) are the firmware's to give.
+
+**RAM, 2026-11-11:** all static now (minimp3's scratch 13.0 KB, the decoder state 5.5 KB in the cache's job, one 2.3 KB buffer `mp3_sound.c` shares between a decoded frame and the
+loop crossfade, the cache's table at 28 bytes a sound: one per KB of pool in the firmware, `SOUND_CACHE_ENTRIES`, 160 in the tests). Together 10 880 bytes less than before, which
+lets the firmware have an 84 KB pool within the heap the FM-1 has been seen to boot with (111 468 bytes).
 Nothing of this has been built with JieLi's compiler.

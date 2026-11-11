@@ -132,7 +132,7 @@ de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
 ## H. Live-cachen: mätningar (packad bank)
 
-Firmware `dist\sf2player_live72.fwsc` (2026-11-11, `-LiveCache -CacheKB 72 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz; firmwarens CRC32 `F2AEC279`, se `dist\sf2player_live72.txt`)
+Firmware `dist\sf2player_live84.fwsc` (2026-11-11, `-LiveCache -CacheKB 84 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz, 84 KB cache med samma lediga heap som 72 KB hade förut; firmwarens CRC32 `24D0C78C`, se `dist\sf2player_live84.txt`)
 med banken `dist\gm_32k_packed.fm1b` (241 520 byte). Kontrollerad i fm1-emu (startar, spelar, infosidan räknar); **inte på FM-1 än**.
 Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och flasha tillbaka. Infosidans två nedersta rader räknar från att REC trycktes:
 
@@ -144,7 +144,8 @@ Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och
 Emulatorn, 2026-11-11, första 60 s av Never gonna give you up (`node midi_script.js ... --seconds=60`, REC först): `CACHE H1622 M159 E144 F937 L8 P16 W0`,
 `MP3 878 FR 2191 US/FR CYC 11 MAX 43 MS` (K ≈ 15; `P16`: skriptet klipper låten mitt i, så 16 toner ligger kvar). Programsidan vid 40 s / 54 s: packad bank
 `CPU 43% MAX 49%` / `39% MAX 39%`, `DROPPED HELD 122 TAIL 1320`; BFP8-banken med samma firmware `CPU 45% MAX 60%` / `39% MAX 40%`, `HELD 121 TAIL 1330`.
-Cachen kostar alltså ingen CPU i ljudavbrottet, men 72 KB räcker inte helt: 8 toner kom för sent.
+Cachen kostar alltså ingen CPU i ljudavbrottet, men 72 KB räcker inte helt: 8 toner kom för sent. `-CacheFrames 4` hjälpte inte (`L10`).
+Med 84 KB (`sf2player_live84.fwsc`, efter att cachens egna buffertar krympts 10,9 KB): `CACHE H1696 M89 E73 F276 L4 P0 W0`, `MP3 517 FR 2203 US/FR CYC 11 MAX 43 MS`.
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
