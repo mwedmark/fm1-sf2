@@ -132,7 +132,7 @@ de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
 ## H. Live-cachen: mätningar (packad bank)
 
-Firmware `dist\sf2player_live72.fwsc` (2026-11-11, `-LiveCache -CacheKB 72 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz; firmwarens CRC32 `1442D636`, se `dist\sf2player_live72.txt`)
+Firmware `dist\sf2player_live72.fwsc` (2026-11-11, `-LiveCache -CacheKB 72 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz; firmwarens CRC32 `F2AEC279`, se `dist\sf2player_live72.txt`)
 med banken `dist\gm_32k_packed.fm1b` (241 520 byte). Kontrollerad i fm1-emu (startar, spelar, infosidan räknar); **inte på FM-1 än**.
 Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och flasha tillbaka. Infosidans två nedersta rader räknar från att REC trycktes:
 

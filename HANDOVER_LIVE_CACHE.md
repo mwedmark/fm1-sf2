@@ -77,6 +77,11 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   A song in fm1-emu (60 s of Never gonna give you up, `-CacheKB 72`): **8 notes lost**, 144 sounds dropped, 159 decodes, 2 191 µs per MP3 frame (K ≈ 15), control
   cycle 11 ms (longest 43); the audio interrupt's CPU the same as with the BFP8 bank (FM1_TEST.md H). So the pool, which the heap holds to about 72 KB, is
   the limit: next, find SRAM for a bigger pool (`-CacheKB 128` gave 0 dropped on the PC for ABBA) or decode more frames a cycle (`-CacheFrames`).
+  Bigger pools in fm1-emu (heap check lowered for the test only, not committed): **84 KB** (heap 100 972) boots, same song: `H1696 M89 E73 F275 L4`, half the lost
+  notes; **90 KB** (heap 94 828) and **96 KB** (88 684) do not (blank screen, 306 % load). So the SDK needs between 94 828 and 100 972 bytes of heap at boot in the
+  emulator; the device has only been seen to boot with 111 468, so 84 KB is untried there (`dist\sf2player_live84.fwsc`, built with the check lowered). More pool
+  than that needs SRAM from elsewhere: the live cache's own buffers are 16 KB minimp3 scratch, 4 KB crossfade, 2.3 KB PCM, about 6.7 KB decoder state; the
+  crossfade's 4 KB could share the minimp3 scratch (never in use at the same time; not checked), and mono-only minimp3 state would save about 3.4 KB.
 
 ## Not done, in the order I would do it
 
