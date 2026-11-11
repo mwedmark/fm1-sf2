@@ -451,7 +451,7 @@
 
   function showBank(bytes, name) {
     if (bytes.length < 76 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'FM1B') throw new Error(name + ' is not an FM1B bank.');
-    if (bytes.length > 466944) throw new Error(name + ' (' + kb(bytes.length) + ') is larger than the FM-1\'s sample flash (456 KB).');
+    if (bytes.length > 536576) throw new Error(name + ' (' + kb(bytes.length) + ') is larger than the FM-1\'s sample flash (524 KB).');
     const dv = new DataView(bytes.buffer, bytes.byteOffset), flags = dv.getUint16(6, true), presets = dv.getUint16(12, true);
     const format = packedBank(bytes) ? 'MP3 (packed, for the live cache)' : flags & 8 ? 'BFP8' : flags & 2 ? 'SEA' : flags & 4 ? '12-bit' : flags & 1 ? '16-bit' : '8-bit';
     if (packedBank(bytes) && fw !== 'live') {
@@ -460,7 +460,7 @@
       message('An MP3 bank: the page installs the firmware with the live cache, which plays it.', 'ok');
     }
     bank = bytes; bankName = name;
-    $('bankInfo').textContent = name + ': ' + kb(bytes.length) + ' (' + (100 * bytes.length / 466944).toFixed(1) + ' % of the flash), ' + presets + ' programs, ' + format + ', ' + dv.getUint32(8, true) + ' Hz';
+    $('bankInfo').textContent = name + ': ' + kb(bytes.length) + ' (' + (100 * bytes.length / 536576).toFixed(1) + ' % of the flash), ' + presets + ' programs, ' + format + ', ' + dv.getUint32(8, true) + ' Hz';
   }
   $('bankFile').addEventListener('change', async () => {
     const f = $('bankFile').files[0]; if (!f) return;

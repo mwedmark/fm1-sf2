@@ -44,7 +44,8 @@ For building the firmware and working on the code, see [DEVELOPING.md](DEVELOPIN
 
 - **The firmware** replaces the FM-1's own synthesizer with a sample player. It lives in the FM-1's program flash and is installed as a
   `.fwsc` package, like M-VAVE's own updates.
-- **The bank** is a separate file in the FM-1's sample flash, the 456 KB region the stock firmware uses for its samples. The firmware
+- **The bank** is a separate file in the FM-1's sample flash: the 524 KB user partition, which holds nothing else (the stock firmware kept its
+  projects in the first 68 KB and its samples after them; a bank installed there by an earlier firmware still plays). The firmware
   plays it where it lies, without loading it into RAM. Changing the bank does not touch the firmware, and changing the firmware keeps the bank.
 - **The bank format (FM1B)** is a SoundFont reduced to what the FM-1 can play: presets with their key and velocity zones, layered zones,
   loop points, volume envelopes, the filter and its envelope, vibrato and tremolo LFOs, pan, reverb and chorus sends, and the samples, mono and
@@ -83,7 +84,7 @@ The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (
 4. **Sample rate**: 32,000 Hz is the default and the rate the player works at. Lower rates make the bank smaller and duller
    (22,059 Hz keeps up to about 11 kHz).
 5. **Bit depth**: only for raw PCM (8, 12 or 16 bit).
-6. **Convert**. The line under it says the bank's size and whether it **fits in the device's sample bank of 456.0 KB**. The table
+6. **Convert**. The line under it says the bank's size and whether it **fits in the device's sample bank of 524.0 KB**. The table
    lists every sound with its key range, root note, loop and bytes.
 7. **Download .bin** saves the bank as `<name>_fm1.bin` (an MP3 bank as `<name>_fm1_mp3_<kbit>.fm1b`). (*Download .sf2* saves the simplified SoundFont, to listen to in any SF2 player.)
    *Send to FM-1* writes the bank straight to an FM-1 that runs the SF2 firmware; the install page does the same.
@@ -111,7 +112,8 @@ node pack_bank.js my_bank_fm1.bin my_bank_packed.fm1b --kbit 64
 
 ## 3. How small a bank must be
 
-The bank must be at most **466,944 bytes (456.0 KB)**: the size of the FM-1's sample flash. The converter marks a larger bank
+The bank must be at most **536,576 bytes (524.0 KB)**: the size of the FM-1's sample flash (466,944 bytes, 456.0 KB, before 2026-11-11, when the bank
+moved to the start of the user partition; a firmware from before refuses a bank over that size). The converter marks a larger bank
 *more than the device's sample bank*, and the firmware refuses to take it.
 
 What fits depends on the codec and the sample rate. The repository's General MIDI SoundFont `soundfonts/1mgm.sf2`
@@ -121,12 +123,12 @@ What fits depends on the codec and the sample rate. The repository's General MID
 | --- | --- | --- | --- |
 | SEA5 | 32,000 Hz | 345.4 KB | yes |
 | SEA6 | 32,000 Hz | 398.0 KB | yes |
-| BFP8 | 32,000 Hz | 453.7 KB | yes, just |
+| BFP8 | 32,000 Hz | 453.7 KB | yes |
 | BFP8 | 22,059 Hz | 324.5 KB | yes |
 | PCM 8 bit | 32,000 Hz | 438.7 KB | yes |
-| PCM 12 bit | 32,000 Hz | 635.0 KB | no |
+| PCM 12 bit | 32,000 Hz | 635.0 KB | no (by 111 KB) |
 | PCM 16 bit | 32,000 Hz | 831.1 KB | no |
-| Packed (MP3, from the BFP8 bank) | 32,000 Hz | 235.9 KB | yes, half the flash |
+| Packed (MP3, from the BFP8 bank) | 32,000 Hz | 235.9 KB | yes, under half the flash |
 
 A bank that does not fit: pick fewer presets, a lower sample rate, a smaller codec, or (with the live-cache firmware) pack it.
 The bank lives in flash, not RAM, so its size does not affect how many voices can play.

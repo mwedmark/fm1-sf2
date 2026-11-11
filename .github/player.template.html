@@ -184,7 +184,7 @@ choose();
 
 // Your own bank: an FM1B file (make_bank.js / the converter, not an MP3-packed one: this is the plain firmware) is laid in the emulator's
 // user flash as make_flash_overlay.js does (records of a little-endian u32 flash offset and 4096 bytes), and the emulator restarts with it.
-const SECTOR = 4096, START = 0x7C000 + 69632;       // fm1b_config.h: FM1B_FLASH_OFFSET in the user partition
+const SECTOR = 4096, START = 0x7C000 + 0;           // fm1b_config.h: FM1B_FLASH_OFFSET in the user partition
 let blobUrl = null;
 function boot(flash, label) {
   stop();

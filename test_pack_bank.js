@@ -75,6 +75,6 @@ check(ordered && covered, `${nPack} entries in order of their offsets, each a so
 check(sameLossless, `${nLossless} lossless entries are the bank's bytes exactly`);
 check(nMp3 > 0 && snrSum / nMp3 > 10 && snrWorst > 0, `${nMp3} MP3 sounds against the BFP8 of the bank: mean ${(snrSum / Math.max(nMp3, 1)).toFixed(1)} dB, worst ${snrWorst.toFixed(1)} dB (${xfaded} with the loop crossfade)`);
 check(loopOk, 'no MP3 entry reaches past the stream');
-const budget = 466944;
+const budget = 536576;
 console.log(`file ${P.length} bytes against ${budget} (${(P.length / budget * 100).toFixed(0)} %)`);
 console.log(failed ? `${failed} FAILED` : 'all passed'); process.exit(failed ? 1 : 0);
