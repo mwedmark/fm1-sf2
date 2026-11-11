@@ -74,6 +74,9 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   in `sf2player.c`, read in FM1_TEST.md section H): **452 924 bytes, 997 to spare**, heap 113 260 at `-CacheKB 72`. Base build 439 516 (14 405 to spare).
   `dist\sf2player_live72.fwsc` (CRC32 `4549A7A9`) booted in fm1-emu with `gm_32k_packed.fm1b` (`test_emu\live_cache.script`): `CACHE H7 M4 E0 F0 L0 P0 W0`,
   `MP3 45 FR 1800 US/FR CYC 10 MAX 42 MS` (emulator timing, not the device's). **Not flashed on the FM-1 yet**: that is step 3's measurement (FM1_TEST.md H1-H4).
+  A song in fm1-emu (60 s of Never gonna give you up, `-CacheKB 72`): **8 notes lost**, 144 sounds dropped, 159 decodes, 2 191 µs per MP3 frame (K ≈ 15), control
+  cycle 11 ms (longest 43); the audio interrupt's CPU the same as with the BFP8 bank (FM1_TEST.md H). So the pool, which the heap holds to about 72 KB, is
+  the limit: next, find SRAM for a bigger pool (`-CacheKB 128` gave 0 dropped on the PC for ABBA) or decode more frames a cycle (`-CacheFrames`).
 
 ## Not done, in the order I would do it
 

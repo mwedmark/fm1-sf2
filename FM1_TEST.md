@@ -132,7 +132,7 @@ de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
 ## H. Live-cachen: mätningar (packad bank)
 
-Firmware `dist\sf2player_live72.fwsc` (2026-11-11, `-LiveCache -CacheKB 72 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz; firmwarens CRC32 `4549A7A9`)
+Firmware `dist\sf2player_live72.fwsc` (2026-11-11, `-LiveCache -CacheKB 72 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz; firmwarens CRC32 `1442D636`, se `dist\sf2player_live72.txt`)
 med banken `dist\gm_32k_packed.fm1b` (241 520 byte). Kontrollerad i fm1-emu (startar, spelar, infosidan räknar); **inte på FM-1 än**.
 Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och flasha tillbaka. Infosidans två nedersta rader räknar från att REC trycktes:
 
@@ -140,6 +140,11 @@ Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och
   toner som tog slut innan ljudet hann bli klart (raden blir orange), lås just nu, ljud som väntar just nu.
 - `MP3 n FR u US/FR CYC c MAX m MS`: avkodade MP3-ramar, mikrosekunder per ram (ljudavbrottets andel av tiden ingår), styrtaskens varv i ms, snitt och längsta.
   En ram är 36 ms ljud. **K** (miljoner cykler per sekund ljud) = 240 × `u` / 36 000. Emulatorn (240 MHz): 1 800 US/FR, alltså K ≈ 12, CYC 10, MAX 42.
+
+Emulatorn, 2026-11-11, första 60 s av Never gonna give you up (`node midi_script.js ... --seconds=60`, REC först): `CACHE H1622 M159 E144 F937 L8 P16 W0`,
+`MP3 878 FR 2191 US/FR CYC 11 MAX 43 MS` (K ≈ 15; `P16`: skriptet klipper låten mitt i, så 16 toner ligger kvar). Programsidan vid 40 s / 54 s: packad bank
+`CPU 43% MAX 49%` / `39% MAX 39%`, `DROPPED HELD 122 TAIL 1320`; BFP8-banken med samma firmware `CPU 45% MAX 60%` / `39% MAX 40%`, `HELD 121 TAIL 1330`.
+Cachen kostar alltså ingen CPU i ljudavbrottet, men 72 KB räcker inte helt: 8 toner kom för sent.
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
