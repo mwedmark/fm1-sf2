@@ -8,10 +8,21 @@
  * converter writes it (packBfp8 in index.html): groups of 32 samples, 33 bytes each, the smallest shift 0..8 that keeps every rounded mantissa
  * in -128..127, the last group zero padded.
  *
- * No heap and no global state: the caller owns the job (6.7 KB for minimp3's state) and the output buffer ((frames + 31) / 32 * 33 bytes). */
+ * No heap and no global state: the caller owns the job (5.5 KB for minimp3's state) and the output buffer ((frames + 31) / 32 * 33 bytes). */
 #ifndef FM1_MP3_SOUND_H
 #define FM1_MP3_SOUND_H
 #include <stdint.h>
+/* The stream is mono MPEG-1 layer III cut at frame starts (pack_bank.js: ffmpeg, 32 kHz, -ac 1): minimp3 is trimmed to that (see minimp3.h). These change the size
+ * of mp3dec_t, so they are set here, for every file that includes this. */
+#ifndef MINIMP3_MONO_ONLY
+#define MINIMP3_MONO_ONLY
+#endif
+#ifndef MINIMP3_MPEG1_ONLY
+#define MINIMP3_MPEG1_ONLY
+#endif
+#ifndef MINIMP3_FRAME_START
+#define MINIMP3_FRAME_START
+#endif
 #include "minimp3.h"            /* ../third_party/mp3 */
 
 #define MP3_SOUND_FRAME_SAMPLES 1152U

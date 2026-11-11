@@ -10,6 +10,17 @@
 
 #define MINIMP3_MAX_SAMPLES_PER_FRAME (1152*2)
 
+/* fm1-sf2: three opt-in trims for the FM-1, which decodes one mono MPEG-1 layer III stream it made itself. Without the defines this file is upstream.
+ *   MINIMP3_MONO_ONLY     one channel: the state and scratch hold one channel, no stereo processing; a stereo frame is refused (frame_bytes 0).
+ *   MINIMP3_MPEG1_ONLY    MPEG-1 only (32, 44.1 and 48 kHz): no MPEG-2/2.5 half-rate paths; such a frame is refused (frame_bytes 0).
+ *   MINIMP3_FRAME_START   the stream is cut at frame starts: no search for a sync word and no free-format detection; a bad header is refused.
+ * They change the size of mp3dec_t, so every file that includes this must see the same defines (live_cache/mp3_sound.h sets them). */
+#ifdef MINIMP3_MONO_ONLY
+#define MINIMP3_CHANNELS 1
+#else
+#define MINIMP3_CHANNELS 2
+#endif
+
 typedef struct
 {
     int frame_bytes, frame_offset, channels, hz, layer, bitrate_kbps;
@@ -17,7 +28,7 @@ typedef struct
 
 typedef struct
 {
-    float mdct_overlap[2][9*32], qmf_state[15*2*32];
+    float mdct_overlap[MINIMP3_CHANNELS][9*32], qmf_state[15*2*32];
     int reserv, free_format_bytes;
     unsigned char header[4], reserv_buf[511];
 } mp3dec_t;
@@ -51,7 +62,11 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
 #define MAX_FRAME_SYNC_MATCHES      10
 #endif /* MAX_FRAME_SYNC_MATCHES */
 
+#ifdef MINIMP3_FRAME_START /* fm1-sf2: no free format, so the largest payload is 320 kbit/s at 32 kHz */
+#define MAX_L3_FRAME_PAYLOAD_BYTES  1440
+#else
 #define MAX_L3_FRAME_PAYLOAD_BYTES  MAX_FREE_FORMAT_FRAME_SIZE /* MUST be >= 320000/8/32000*1152 = 1440 */
+#endif
 
 #define MAX_BITRESERVOIR_BYTES      511
 #define SHORT_BLOCK_TYPE            2
@@ -64,7 +79,12 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
 #define HDR_IS_FREE_FORMAT(h)       (((h[2]) & 0xF0) == 0)
 #define HDR_IS_CRC(h)               (!((h[1]) & 1))
 #define HDR_TEST_PADDING(h)         ((h[2]) & 0x2)
+#ifdef MINIMP3_MPEG1_ONLY /* fm1-sf2: decode_frame refuses anything else first (HDR_IS_MPEG1_BIT), so the half-rate code is dead and goes */
+#define HDR_TEST_MPEG1(h)           1
+#else
 #define HDR_TEST_MPEG1(h)           ((h[1]) & 0x8)
+#endif
+#define HDR_IS_MPEG1_BIT(h)         ((h[1]) & 0x8)
 #define HDR_TEST_NOT_MPEG25(h)      ((h[1]) & 0x10)
 #define HDR_TEST_I_STEREO(h)        ((h[3]) & 0x10)
 #define HDR_TEST_MS_STEREO(h)       ((h[3]) & 0x20)
@@ -233,9 +253,9 @@ typedef struct
 {
     bs_t bs;
     uint8_t maindata[MAX_BITRESERVOIR_BYTES + MAX_L3_FRAME_PAYLOAD_BYTES];
-    L3_gr_info_t gr_info[4];
-    float grbuf[2][576], scf[40], syn[18 + 15][2*32];
-    uint8_t ist_pos[2][39];
+    L3_gr_info_t gr_info[2*MINIMP3_CHANNELS];
+    float grbuf[MINIMP3_CHANNELS][576], scf[40], syn[18 + 15][2*32];
+    uint8_t ist_pos[MINIMP3_CHANNELS][39];
 } mp3dec_scratch_t;
 
 static void bs_init(bs_t *bs, const uint8_t *data, int bytes)
@@ -876,6 +896,7 @@ static void L3_huffman(float *dst, bs_t *bs, const L3_gr_info_t *gr_info, const 
     bs->pos = layer3gr_limit;
 }
 
+#ifndef MINIMP3_MONO_ONLY /* fm1-sf2 */
 static void L3_midside_stereo(float *left, int n)
 {
     int i = 0;
@@ -991,6 +1012,8 @@ static void L3_intensity_stereo(float *left, uint8_t *ist_pos, const L3_gr_info_
     }
     L3_stereo_process(left, ist_pos, gr->sfbtab, hdr, max_band, gr[1].scalefac_compress & 1);
 }
+
+#endif /* MINIMP3_MONO_ONLY */
 
 static void L3_reorder(float *grbuf, float *scratch, const uint8_t *sfb)
 {
@@ -1246,6 +1269,7 @@ static void L3_decode(mp3dec_t *h, mp3dec_scratch_t *s, L3_gr_info_t *gr_info, i
         L3_huffman(s->grbuf[ch], &s->bs, gr_info + ch, s->scf, layer3gr_limit);
     }
 
+#ifndef MINIMP3_MONO_ONLY /* fm1-sf2 */
     if (HDR_TEST_I_STEREO(h->header))
     {
         L3_intensity_stereo(s->grbuf[0], s->ist_pos[1], gr_info, h->header);
@@ -1253,6 +1277,7 @@ static void L3_decode(mp3dec_t *h, mp3dec_scratch_t *s, L3_gr_info_t *gr_info, i
     {
         L3_midside_stereo(s->grbuf[0], 576);
     }
+#endif
 
     for (ch = 0; ch < nch; ch++, gr_info++)
     {
@@ -1654,6 +1679,7 @@ static void mp3d_synth_granule(float *qmf_state, float *grbuf, int nbands, int n
     }
 }
 
+#ifndef MINIMP3_FRAME_START /* fm1-sf2 */
 static int mp3d_match_frame(const uint8_t *hdr, int mp3_bytes, int frame_bytes)
 {
     int i, nmatch;
@@ -1705,6 +1731,8 @@ static int mp3d_find_frame(const uint8_t *mp3, int mp3_bytes, int *free_format_b
     return mp3_bytes;
 }
 
+#endif /* MINIMP3_FRAME_START */
+
 void mp3dec_init(mp3dec_t *dec)
 {
     dec->header[0] = 0;
@@ -1732,12 +1760,22 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
     if (!frame_size)
     {
         memset(dec, 0, sizeof(mp3dec_t));
+#ifdef MINIMP3_FRAME_START /* fm1-sf2: a frame starts here (a free-format header gives a size of 0 or 1 and is refused too) */
+        if (mp3_bytes > HDR_SIZE && hdr_valid(mp3))
+            frame_size = hdr_frame_bytes(mp3, 0) + hdr_padding(mp3);
+        if (frame_size <= HDR_SIZE || frame_size > mp3_bytes)
+        {
+            info->frame_bytes = 0;
+            return 0;
+        }
+#else
         i = mp3d_find_frame(mp3, mp3_bytes, &dec->free_format_bytes, &frame_size);
         if (!frame_size || i + frame_size > mp3_bytes)
         {
             info->frame_bytes = i;
             return 0;
         }
+#endif
     }
 
     hdr = mp3 + i;
@@ -1748,6 +1786,20 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
     info->hz = hdr_sample_rate_hz(hdr);
     info->layer = 4 - HDR_GET_LAYER(hdr);
     info->bitrate_kbps = hdr_bitrate_kbps(hdr);
+#ifdef MINIMP3_MONO_ONLY /* fm1-sf2 */
+    if (!HDR_IS_MONO(hdr))
+    {
+        info->frame_bytes = 0;
+        return 0;
+    }
+#endif
+#ifdef MINIMP3_MPEG1_ONLY
+    if (!HDR_IS_MPEG1_BIT(hdr))
+    {
+        info->frame_bytes = 0;
+        return 0;
+    }
+#endif
 
     if (!pcm)
     {
@@ -1773,7 +1825,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
         {
             for (igr = 0; igr < (HDR_TEST_MPEG1(hdr) ? 2 : 1); igr++, pcm += 576*info->channels)
             {
-                memset(scratch.grbuf[0], 0, 576*2*sizeof(float));
+                memset(scratch.grbuf[0], 0, sizeof(scratch.grbuf));
                 L3_decode(dec, &scratch, scratch.gr_info + igr*info->channels, info->channels);
                 mp3d_synth_granule(dec->qmf_state, scratch.grbuf[0], 18, info->channels, pcm, scratch.syn[0]);
             }
@@ -1787,7 +1839,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
         L12_scale_info sci[1];
         L12_read_scale_info(hdr, bs_frame, sci);
 
-        memset(scratch.grbuf[0], 0, 576*2*sizeof(float));
+        memset(scratch.grbuf[0], 0, sizeof(scratch.grbuf));
         for (i = 0, igr = 0; igr < 3; igr++)
         {
             if (12 == (i += L12_dequantize_granule(scratch.grbuf[0] + i, bs_frame, sci, info->layer | 1)))
@@ -1795,7 +1847,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
                 i = 0;
                 L12_apply_scf_384(sci, sci->scf + igr, scratch.grbuf[0]);
                 mp3d_synth_granule(dec->qmf_state, scratch.grbuf[0], 12, info->channels, pcm, scratch.syn[0]);
-                memset(scratch.grbuf[0], 0, 576*2*sizeof(float));
+                memset(scratch.grbuf[0], 0, sizeof(scratch.grbuf));
                 pcm += 384*info->channels;
             }
             if (bs_frame->pos > bs_frame->limit)

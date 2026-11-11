@@ -85,6 +85,24 @@ check(worst > 33 && sum / spread.length > 40, `against ffmpeg's decode of the sa
 const eager = decoded(0, 1000), minimal = (() => { w.decode_sound(0, 1); return w.last_frames_decoded(); })();
 check(eager !== null && spread.every(s => { const a = decoded(s, 1000); return a && a.some(v => v) ; }), 'with the reservoir off and one lead-in frame every sound decodes, none to silence');
 
+// minimp3 is trimmed to mono MPEG-1 frames that start where it is given them (minimp3.h, MINIMP3_MONO_ONLY, _MPEG1_ONLY, _FRAME_START): anything else is refused, not misdecoded
+{
+  const at = 1 << 20, base = new Uint8Array(w.memory.buffer, w.stream_ptr(), 700).slice();
+  const probe = (edit, n = 600) => { const m = mem(); m.set(base, w.stream_ptr() + at); edit(m.subarray(w.stream_ptr() + at, w.stream_ptr() + at + 4)); const r = w.probe(at, n); return { samples: r, bytes: w.probe_frame_bytes() }; };
+  const good = probe(() => {});
+  check(good.samples === 1152 && good.bytes >= 288 && good.bytes <= 289, `a mono MPEG-1 frame at 32 kHz decodes (${good.samples} samples from ${good.bytes} bytes)`);
+  const refused = (what, r) => check(r.samples === 0 && r.bytes === 0, `${what} is refused (no samples, frame_bytes 0)`);
+  refused('a stereo frame', probe(h => { h[3] &= 0x3f; }));
+  refused('a joint stereo frame', probe(h => { h[3] = (h[3] & 0x3f) | 0x40; }));
+  refused('an MPEG-2 frame', probe(h => { h[1] &= 0xf7; }));
+  refused('an MPEG-2.5 frame', probe(h => { h[1] = 0xe3; }));
+  refused('a free-format frame', probe(h => { h[2] &= 0x0f; }));
+  const layer2 = probe(h => { h[1] = (h[1] & 0xf9) | 0x04; });
+  check(layer2.samples === 0, 'a layer II frame decodes to nothing (MINIMP3_ONLY_MP3, as before the trim: the frame is skipped, not refused)');
+  refused('bytes that are not a header', probe(h => { h.fill(0); }));
+  refused('a frame cut short', probe(() => {}, 100));
+}
+
 // ---- 2. the packer
 let rng = 12345; const rnd = () => (rng = (rng * 1664525 + 1013904223) >>> 0) / 4294967296;
 let packOk = true;
