@@ -320,6 +320,38 @@ a little unfair to 44.1 kHz.
 The CPU is not the problem: 53 % in the mean is under the guess of 2d and far from the guard's 80 %. The pool is: every sound is 1.38 times bigger, and 25 times more notes come late. So
 44.1 kHz is of no use before the pool grows, and the next step is the RAM (the list at the end of 2d), not more work on the rate.
 
+### 2f. 44.1 kHz with the flash filled with plain BFP8: no late notes (2026-11-12)
+
+The pool was the limit in 2e. A sound stored as BFP8 plays in place from the flash and takes no room in the pool, and the packed 44.1 kHz bank of 2e left 219 KB of the 536 576 bytes
+of flash unused: the packer keeps a sound as BFP8 only when MP3 is badly wrong for it. `pack_bank.js --fill 1` goes on after that and stores more sounds as BFP8, worst MP3 first, until the
+flash is full. Without the switch a bank packs to the same bytes as before (checked on the 32 kHz bank). Emulator only: not on the FM-1, and nothing was listened to.
+
+```
+node pack_bank.js test_fluid/cmp/bfp8_44k.fm1b test_fluid/cmp/mp3_64_44k_fill.fm1b --kbit 64 --fill 1
+.\build_fw.ps1 -Name rate44k -CacheKB 81        (with fm1b_rate.h in place, as in 2e)
+.\start_emu.ps1 -Tap -Script astley60_rec.script -NoBrowser -Bank test_fluid\cmp\mp3_64_44k_fill.fm1b
+```
+
+**Result** (as 2e: fm1-emu at 240 MHz, MP3 64 kbit/s, the first 60 s of "Never gonna give you up"; the first two columns are 2e's; the filled bank's counts are from one run, its load from a second):
+
+| | 32 kHz, 84 KB pool | 44.1 kHz, 81 KB pool | 44.1 kHz, 81 KB pool, `--fill 1` |
+| --- | --- | --- | --- |
+| Sounds as MP3 / as BFP8 in place | 120 / 45 | 96 / 69 | 16 / 149 |
+| Packed bank | 241 520 bytes | 317 788 bytes | 533 268 bytes |
+| Notes that came late (`L`) | 2 | 50 | 0 |
+| Times with no room in the pool (`F`) | 162 | 1 593 | 0 |
+| Hits / decodes / dropped sounds (`H` `M` `E`) | 1697 / 90 / 74 | 1261 / 207 / 197 | 303 / 5 / 0 |
+| MP3 frames decoded | 508 | 1 159 | 67 |
+| Time for one MP3 frame | 2 185 us | 2 659 us | 3 358 us |
+| Longest control cycle | 43 ms | 46 ms | 60 ms |
+| Load while the song plays, mean / peak | 44.0 % / 49.9 % | 53.1 % / 64.3 % | 56.8 % / 64.9 % |
+
+With 16 sounds left as MP3 the pool is no longer a limit in this song: five decodes and nothing dropped. The bank fills 99 % of the flash, so this needs the 68 KB the bank got at the
+start of the user flash; without them about 70 KB more of the sounds would be MP3. Unpacked with the firmware's decoder (`unpack_bank.js`), 84 % of the sample bytes are the source bank's.
+
+**Not known.** Why one MP3 frame takes longer (3.4 ms) and the longest control cycle is 60 ms. How another song does: which 16 sounds are MP3 follows from the MP3's quality only, not from
+how often a sound is played, and this song uses few of them. `test_pack_bank.js --packed` compares with a 32 kHz bank, so `--fill` has no test of its own on a 44.1 kHz bank.
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell
