@@ -13,3 +13,7 @@ The `bank` job of `.github/workflows/firmware.yml` can make `default.fm1b` itsel
 Settings > Secrets and variables > Actions), converts it with `make_bank.js <format> 32000` (format: the repository variable `BANK_FORMAT`, or `bfp8`;
 "Run workflow" takes it as an input too), stores it as the artifact `bank`, and the site build puts it in this folder before building. A bank made
 that way replaces a committed `default.fm1b`. Without the secret nothing is made.
+
+`default.fm1b` is committed: a General MIDI bank (BFP8, 32 kHz) converted with `node make_bank.js bfp8 32000 soundfonts/1mgm.sf2 banks/default.fm1b`.
+The SoundFont `soundfonts/1mgm.sf2` itself is not in the repository (it stays on the maintainer's computer; its header names E-mu Systems, 1993);
+the tests that need it run only where the file is. The bank is also attached to every release as `gm_32k_bfp8.fm1b`.

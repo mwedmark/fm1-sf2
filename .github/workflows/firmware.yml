@@ -12,6 +12,9 @@ on:
       bank_format:
         description: 'Sample format of the hosted bank (make_bank.js): sea5, sea6, bfp8, pcm8, pcm12 or pcm16'
         default: 'bfp8'
+      release_tag:
+        description: 'Optional: publish a GitHub pre-release with this tag (for example v0.1.0) holding the .fwsc package, the starter bank and the licence files'
+        default: ''
 
 permissions:
   contents: read
@@ -81,7 +84,8 @@ jobs:
           path: out/
           if-no-files-found: error
 
-  # The hosted bank: the SoundFont is soundfonts/1mgm.sf2 of the repo, or else fetched from the repository secret SF2_URL (an https address),
+  # The hosted bank is the committed banks/default.fm1b (converted from 1mgm.sf2, which stays on the maintainer's computer and is not in the repo).
+  # Optionally a SoundFont is fetched from the repository secret SF2_URL (an https address),
   # converted with make_bank.js and stored as the artifact "bank" (default.fm1b), which the site then hosts and selects at the start.
   # Without the secret this job does nothing and the site keeps whatever banks/ holds (or the sine test bank).
   bank:
@@ -158,3 +162,36 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # A pre-release (the Firmware Hub marks 0.x, alpha, beta and rc as beta) with the package, the starter bank, the licence and the third-party
+  # notices. Only when "Run workflow" is given a release_tag; the tag is made on the commit that was built.
+  release:
+    needs: build
+    if: ${{ inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: fw
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -e
+          cp LICENSE fm1_open/THIRD_PARTY.md fw/
+          cp banks/default.fm1b fw/gm_32k_bfp8.fm1b
+          cat > notes.md <<'NOTES'
+          Firmware package for the M-VAVE FM-1 (install it with https://mwedmark.github.io/fm1-sf2/install.html): the SF2 player with the live cache, which plays BFP8 banks and MP3-packed banks. Beta: still being tested on the device.
+
+          `gm_32k_bfp8.fm1b`: a General MIDI bank (BFP8, 32 kHz, 454 KB) to get started with; install.html puts it on the FM-1 with the firmware. Its sounds come from a General MIDI SoundFont whose header names E-mu Systems (1993) as the copyright holder; it is included for convenience, and you can replace it with a bank of your own made with the converter.
+
+          Licence: GPL-3.0 with the FM1 SDK linking exception (`LICENSE`). The proprietary engine and the other third-party components keep their own terms (`THIRD_PARTY.md`); the engine may be redistributed in binary form for M-VAVE FM-1 devices only. The corresponding source is this repository at the tag of this release.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "$TAG" --notes-file notes.md \
+            fw/sf2player.fwsc fw/gm_32k_bfp8.fm1b fw/LICENSE fw/THIRD_PARTY.md
