@@ -227,6 +227,9 @@ static struct {
     volatile uint32_t req_head, req_tail, grant_head, grant_tail, unpin_head, unpin_tail;
     struct pk_request pending[PK_PENDING];                    /* control task: asked for, no room yet (or no place in the grant ring) */
     uint32_t pending_count, serial, requested, granted_late, lost;
+    volatile uint8_t squeeze;                                 /* control -> interrupt: 1 + the slot of a releasing voice to cut (packed_squeeze), 0 none */
+    volatile uint16_t squeeze_serial;
+    uint32_t squeezed;                                        /* releasing voices cut for that (interrupt) */
 } pk;
 static FM1_DSP_CODE uint32_t pk_find(uint32_t data)                          /* the sound whose unpacked offset is `data`, or ~0 */
 {
@@ -301,9 +304,24 @@ static FM1_DSP_CODE void packed_free(struct voice *v)
     if (v->has_entry) { pk_unpin_later(v->entry); v->has_entry = 0; }
     v->waiting = 0;
 }
+/* Interrupt: cut the voice the control task chose (packed_squeeze_pick), if it is still that note and releasing: as the voice limit
+ * cuts (about 5 ms, counted as TAIL). When it is over its sound is let go and the cache can make room for a note that waits. */
+static FM1_DSP_CODE void packed_squeeze(void)
+{
+    unsigned slot = pk.squeeze - 1U;
+    pk.squeeze = 0;
+    struct voice *v = &voices[slot];
+    if (!v->active || v->cut || !v->has_entry || v->phase != RELEASE || v->serial != pk.squeeze_serial) return;
+    drop_count(v, 0);
+    v->cut = 1;
+    v->release = CUT_RELEASE;
+    ++voices_cut;
+    ++pk.squeezed;
+}
 /* Interrupt: take the grants that the control task has made. */
 static FM1_DSP_CODE void packed_grants(void)
 {
+    if (pk.squeeze) packed_squeeze();
     while (pk.grant_tail != pk.grant_head) {
         struct pk_grant g = pk.grant[pk.grant_tail % PK_RING];
         __asm__ volatile("" ::: "memory");
@@ -361,6 +379,27 @@ static FM1_DSP_CODE int packed_ready(const struct voice *v, unsigned frames)
     if (last >= v->length) last = v->length - 1U;
     return (last >> 5) < ready;
 }
+/* Control task: a note waits and the pool has no room, all of it held by voices that play. Choose the oldest releasing voice that holds an
+ * MP3 sound, one whose sound no other voice holds if there is one, for the interrupt to cut (once a control cycle while notes wait).
+ * The voices are the interrupt's: read here only, and the interrupt checks again that the voice is still that note. */
+static void packed_squeeze_pick(void)
+{
+    int best = -1;
+    unsigned best_alone = 0;
+    for (unsigned i = 0; i < FM1B_VOICES; ++i) {
+        const volatile struct voice *v = &voices[i];
+        if (!v->active || v->cut || !v->has_entry || v->phase != RELEASE) continue;
+        unsigned alone = pk.cache.entry[v->entry].pins == 1U;
+        if (best < 0 || alone > best_alone || (alone == best_alone && (uint32_t)(bank.age - v->age) > (uint32_t)(bank.age - voices[best].age))) {
+            best = (int)i;
+            best_alone = alone;
+        }
+    }
+    if (best < 0) return;
+    pk.squeeze_serial = voices[best].serial;
+    __asm__ volatile("" ::: "memory");
+    pk.squeeze = (uint8_t)(best + 1);
+}
 /* Control task. */
 unsigned fm1b_cache_service(unsigned mp3_frames)
 {
@@ -376,7 +415,7 @@ unsigned fm1b_cache_service(unsigned mp3_frames)
         pk.req_tail = pk.req_tail + 1U;
         ++pk.requested;
     }
-    uint32_t keep = 0;
+    uint32_t keep = 0, no_room = 0;
     for (uint32_t i = 0; i < pk.pending_count; ++i) {
         struct pk_request r = pk.pending[i];
         const volatile struct voice *v = &voices[r.slot];
@@ -384,13 +423,14 @@ unsigned fm1b_cache_service(unsigned mp3_frames)
         if (pk.grant_head - pk.grant_tail >= PK_RING) { pk.pending[keep++] = r; continue; }
         const uint8_t *direct;
         int entry = sound_cache_request(&pk.cache, r.sound, &direct);
-        if (entry < 0) { pk.pending[keep++] = r; continue; }          /* no room: try again when a voice has let go of a sound */
+        if (entry < 0) { pk.pending[keep++] = r; no_room = 1; continue; }   /* no room: try again when a voice has let go of a sound */
         struct pk_grant *g = &pk.grant[pk.grant_head % PK_RING];
         g->slot = r.slot; g->serial = r.serial; g->entry = (uint8_t)entry;
         __asm__ volatile("" ::: "memory");
         pk.grant_head = pk.grant_head + 1U;
     }
     pk.pending_count = keep;
+    if (no_room && !pk.squeeze) packed_squeeze_pick();         /* the interrupt cuts a releasing voice, so a sound can go */
     sound_cache_step(&pk.cache, mp3_frames);
     return sound_cache_pending(&pk.cache) + pk.pending_count;
 }
@@ -398,7 +438,7 @@ void fm1b_cache_stats(struct fm1b_cache_stats *s)
 {
     s->hits = pk.cache.stats.hits; s->misses = pk.cache.stats.misses; s->evictions = pk.cache.stats.evictions;
     s->no_room = pk.cache.stats.no_room; s->decoded_mp3_frames = pk.cache.stats.decoded_mp3_frames;
-    s->requested = pk.requested; s->lost = pk.lost; s->waiting = pk.pending_count;
+    s->requested = pk.requested; s->lost = pk.lost; s->waiting = pk.pending_count; s->squeezed = pk.squeezed;
     s->pinned = 0;
     for (unsigned i = 0; i < SOUND_CACHE_ENTRIES; ++i) s->pinned += pk.cache.entry[i].pins;
 }

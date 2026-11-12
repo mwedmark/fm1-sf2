@@ -130,6 +130,41 @@ so far"). Det skiljer inte helt "inget SDRAM" från "SDRAM avstängt i bootkonfi
 gör det. Testet, `sdram_test.c` och `test_sdram.js` är borttagna; SAVE nollställer nu bara räknaren för tappade noter. Det som finns är
 de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 
+## H. Live-cachen: mätningar (packad bank)
+
+Firmware `dist\sf2player_live84.fwsc` (2026-11-11, `-LiveCache -CacheKB 84 -CacheFrames 2`, minimp3 trimmad för mono 32 kHz, 84 KB cache med samma lediga heap som 72 KB hade förut; firmwarens CRC32 `E3468A2D` sedan den också skickar mätvärdena över MIDI till `stats.html`, RUNNING.md 3d; se `dist\sf2player_live84.txt`)
+med banken `dist\gm_32k_packed.fm1b` (241 520 byte). Kontrollerad i fm1-emu (startar, spelar, infosidan räknar); **inte på FM-1 än**.
+Startar den inte: säkert läge (håll OCT- och OCT+ vid start, FIRMWARE.md) och flasha tillbaka. Infosidans två nedersta rader räknar från att REC trycktes:
+
+- `CACHE H M E F L P W`: träffar (ljudet fanns i cachen), missar (avkodades), ljud som slängts ur cachen, gånger utan plats,
+  toner som tog slut innan ljudet hann bli klart (raden blir orange), lås just nu, ljud som väntar just nu.
+- `MP3 n FR u US/FR CYC c MAX m MS`: avkodade MP3-ramar, mikrosekunder per ram (ljudavbrottets andel av tiden ingår), styrtaskens varv i ms, snitt och längsta.
+  En ram är 36 ms ljud. **K** (miljoner cykler per sekund ljud) = 240 × `u` / 36 000. Emulatorn (240 MHz): 1 800 US/FR, alltså K ≈ 12, CYC 10, MAX 42.
+
+Emulatorn, 2026-11-11, första 60 s av Never gonna give you up (`node midi_script.js ... --seconds=60`, REC först): `CACHE H1622 M159 E144 F937 L8 P16 W0`,
+`MP3 878 FR 2191 US/FR CYC 11 MAX 43 MS` (K ≈ 15; `P16`: skriptet klipper låten mitt i, så 16 toner ligger kvar). Programsidan vid 40 s / 54 s: packad bank
+`CPU 43% MAX 49%` / `39% MAX 39%`, `DROPPED HELD 122 TAIL 1320`; BFP8-banken med samma firmware `CPU 45% MAX 60%` / `39% MAX 40%`, `HELD 121 TAIL 1330`.
+Cachen kostar alltså ingen CPU i ljudavbrottet, men 72 KB räcker inte helt: 8 toner kom för sent. `-CacheFrames 4` hjälpte inte (`L10`).
+Med 84 KB (`sf2player_live84.fwsc`, efter att cachens egna buffertar krympts 10,9 KB): `CACHE H1696 M89 E73 F276 L4 P0 W0`, `MP3 517 FR 2203 US/FR CYC 11 MAX 43 MS`.
+
+**På FM-1, 2026-11-11** (`sf2player_live84.fwsc` utan MIDI-mätvärden, CRC32 `24D0C78C`, installerad med `install.html`): startar och spelar. Infosidan:
+`CACHE H1990 M27 E19 F0 L0 P0 W0`, `MP3 144 FR 6493 US/FR CYC 10 MAX 214 MS`. Inga toner för sent. Avkodningen tar 6,5 ms per ram, tre gånger
+emulatorns tid (K ≈ 43). `MAX 214 MS` är inte förklarat. Spelat efter REC: Never gonna give you up i 31 s och lite Eine kleine Nachtmusik.
+
+**Hela Never gonna give you up på FM-1, mätvärdena över MIDI** (`E3468A2D`, `stats.html`, 214 s spelat): 6 627 träffar, 426 avkodningar, 407 slängda ljud,
+373 gånger utan plats, **25 toner för sent**, alltid i täta partier och samtidigt som "utan plats": cachen är full av ljud som klingande röster håller fast.
+Ljudavbrottet tar 63 % av CPU:n (topp 83 %) under låten, och den tiden ingår i 6,8 ms per ram: avkodaren själv tar cirka 2,5 ms (K ≈ 15, som i emulatorn).
+Styrcykeln: 10 ms i vila, 33 ms under låten och cirka 90 ms (upp till 128) en gång i sekunden. DROPPED: held 502, tail 5 131, CPU 3.
+Med högst två skärmrader per uppdatering (`95FCED19`): längsta styrcykel 55 ms i stället för 90, men 33 toner för sent. Med klippta utklingningar
+när cachen saknar plats (`85D99FA6`): **19 toner för sent**, 245 utklingningar klippta.
+
+| # | Steg | Väntat | Resultat |
+| --- | --- | --- | --- |
+| H1 | Flasha firmwaren och banken. Tryck REC och spela några toner på panelen, olika program. | Infosidan visar `GM_32K_BFP8.FM1B`, 241 520 byte. `M` och `MP3` ökar vid första tonen på ett nytt ljud, `H` när samma ton spelas igen. | |
+| H2 | Tryck REC två gånger (räknarna nollställs), spela `MIDIs\R.ASTLEY.Never gonna give you up K.mid` från Windows i en minut. Skriv av båda raderna. | `L` 0 eller nära; notera `US/FR`, `CYC`, `MAX`. | |
+| H3 | Samma låt, titta på programsidans `CPU n% MAX m%` och `DROPPED`. Jämför med samma låt på BFP8-banken (C16). | Ungefär samma CPU som BFP8-banken (avkodningen går i styrtasken, inte i ljudavbrottet). | |
+| H4 | Lyssna: hörs fördröjning på första tonen av ett nytt ljud? | Högst några ms (en ram avkodas på ungefär 2 ms). | |
+
 ## G. Avsluta
 
 | # | Steg | Resultat |
@@ -137,20 +172,20 @@ de cirka 514 KB SRAM, och live-cachen (FORMAT.md) använder dem.
 | G1 | Behåll SF2-firmwaren eller flasha tillbaka `FM-1_015.fwsc`. | |
 | G2 | Skriv ned resultat och avvikelser i RUNNING.md avsnitt 5. | |
 
-## H. Banken i början av användarflashen (2026-11-11)
+## I. Banken i början av användarflashen (2026-11-11)
 
 Banken ligger nu på användarpartitionens början (`FM1B_FLASH_OFFSET` 0, upp till 536 576 byte) i stället för efter M-VAVE:s 68 KiB projektyta (69 632, upp till 466 944).
 Prova i fm1-emu (`start_emu.ps1 -Tap`) före FM-1:an, och ha `FM-1_015.fwsc` till hands.
 
 | # | Steg | Resultat |
 | --- | --- | --- |
-| H1 | Bygg och starta den nya firmwaren i fm1-emu med en bank på ca 450 KB som `make_flash_overlay.js` lagt i början (`&flash=`). Spelas den? | |
-| H2 | Samma firmware, bank lagd på det gamla stället (69 632: kör `make_flash_overlay.js` med startadress `0x8D000`). Spelas den? (Äldre bank ska fortfarande fungera.) | |
-| H3 | På FM-1:an med en bank från förut: flasha den nya firmwaren (utan att installera om banken). Spelas den gamla banken fortfarande? | |
-| H4 | install.html: installera en bank på över 466 944 byte (t.ex. en 500 KB BFP8-bank). Skrivs den, och skippas en andra installation (samma storlek och CRC)? | |
-| H5 | Efter H4: ligger inget kvar av den gamla banken som spelar (stäng av, sätt på)? Spelar den nya banken? | |
-| H6 | Försök installera en bank på över 524 KB. Vägrar sidan? | |
-| H7 | Äldre firmware (före detta ändring) och en bank på över 456 KB: vägras uppladdningen med ett fel, utan att skriva? | |
+| I1 | Bygg och starta den nya firmwaren i fm1-emu med en bank på ca 450 KB som `make_flash_overlay.js` lagt i början (`&flash=`). Spelas den? | |
+| I2 | Samma firmware, bank lagd på det gamla stället (69 632: kör `make_flash_overlay.js` med startadress `0x8D000`). Spelas den? (Äldre bank ska fortfarande fungera.) | |
+| I3 | På FM-1:an med en bank från förut: flasha den nya firmwaren (utan att installera om banken). Spelas den gamla banken fortfarande? | |
+| I4 | install.html: installera en bank på över 466 944 byte (t.ex. en 500 KB BFP8-bank). Skrivs den, och skippas en andra installation (samma storlek och CRC)? | |
+| I5 | Efter H4: ligger inget kvar av den gamla banken som spelar (stäng av, sätt på)? Spelar den nya banken? | |
+| I6 | Försök installera en bank på över 524 KB. Vägrar sidan? | |
+| I7 | Äldre firmware (före detta ändring) och en bank på över 456 KB: vägras uppladdningen med ett fel, utan att skriva? | |
 
 ## Det emulatorn inte kunde visa
 

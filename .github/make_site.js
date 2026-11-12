@@ -3,7 +3,8 @@
 //   node .github/make_site.js <outdir> <firmware.fwsc> [version] [build-identity.json] [live-cache.fwsc live-cache-identity.json]
 // The same steps as start_emu.ps1 (RUNNING.md section 4), for a Pages site instead of a local server. With the build's
 // build-identity.json the site also gets install.html, which installs that firmware and the first bank on an FM-1 (make_install.js);
-// with the live-cache build's package and identity too, the install page offers that build as well (for MP3 banks).
+// with the live-cache build's package and identity too, the install page offers that build as well (for MP3 banks). Since 2026-11-11 the
+// workflow builds one firmware, with the live cache (its identity says live_cache), and passes no second package.
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
 const [out, fwsc, version = String(Date.now()), identity, liveFwsc, liveIdentity] = process.argv.slice(2);
 if (!out || !fwsc) throw new Error('usage: node .github/make_site.js <outdir> <firmware.fwsc> [version]');
@@ -126,7 +127,8 @@ async function get(url) {
       `--out=${path.join(out, 'dist', 'install')}`, `--name=sf2player (build ${version.slice(0, 7)})`,
       ...(liveFwsc && fs.existsSync(liveFwsc) && liveIdentity && fs.existsSync(liveIdentity)
         ? [`--live-fwsc=${liveFwsc}`, `--live-identity=${liveIdentity}`, `--live-name=sf2player live cache (build ${version.slice(0, 7)})`]
-        : (console.warn('No live-cache package: the install page offers only the plain firmware'), []))], { stdio: 'inherit' });
+        : (JSON.parse(fs.readFileSync(identity, 'utf8').replace(/^\uFEFF/, '')).live_cache ? []
+          : (console.warn('No live-cache package: the install page offers only the plain firmware'), [])))], { stdio: 'inherit' });
     fs.copyFileSync(path.join(root, 'install.html'), path.join(out, 'install.html'));
     fs.mkdirSync(path.join(out, 'fm1_open', 'sdk'), { recursive: true });
     fs.copyFileSync(path.join(root, 'fm1_open', 'sdk', 'WebUpdate.js'), path.join(out, 'fm1_open', 'sdk', 'WebUpdate.js'));

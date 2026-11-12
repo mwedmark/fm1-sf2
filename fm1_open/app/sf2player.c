@@ -12,6 +12,9 @@
 #define FM1B_CACHE_FRAMES 2U                             /* MP3 frames (1152 samples) decoded in one control cycle */
 #endif
 #endif
+#ifndef FM1_STATS_MIDI
+#define FM1_STATS_MIDI FM1B_PACKED                       /* the player's figures once a second as SysEx to USB (stats_midi_poll): on in the live-cache build */
+#endif
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sf2out.h"
@@ -162,11 +165,24 @@ static void text_line(unsigned y, const char *s, unsigned scale, uint16_t color)
     }
     (void)fm1_screen_blit(0, y, FM1_SCREEN_WIDTH, h, row_pixels, FM1_SCREEN_WIDTH * h);
 }
+/* A screen update draws at most LINES_PER_UPDATE changed lines (a page that was just cleared draws all of them): while a song plays,
+ * the program page's lines change with every note, and drawing them all took the control task about 75 ms with the audio interrupt
+ * busy (measured on the FM-1 over MIDI, 2026-11-11), which kept the live cache from decoding. The changed lines take turns: an update
+ * starts with the changed line after the last one the update before drew. Lines not drawn stay as they are until a later update. */
+enum { LINES_PER_UPDATE = 2 };
+static uint8_t lines_limited, lines_drawn, lines_changed, lines_start, lines_last;
 /* Draw line `n` at y only when its text or colour is not what is on the screen. */
 static void line_show(unsigned n, unsigned y, const char *s, unsigned scale, uint16_t color)
 {
     if (!strncmp(shown[n], s, LINE_CHARS) && shown_color[n] == color && shown_back[n] == line_back)
         return;
+    if (lines_limited) {
+        uint8_t k = lines_changed++;
+        if (k < lines_start || lines_drawn >= LINES_PER_UPDATE)
+            return;
+        ++lines_drawn;
+        lines_last = k;
+    }
     text_line(y, s, scale, color);
     strncpy(shown[n], s, LINE_CHARS);
     shown[n][LINE_CHARS] = 0;
@@ -308,10 +324,85 @@ static struct fm1b_info info_bank;
 #if FM1_MIDIPLAY
 static uint32_t info_free_ram;
 #endif
+#if FM1B_PACKED
+/* The live cache, measured from when REC opened the info page: the cache's counters then (shown as the change since), the ms the
+ * control task spent in fm1b_cache_service (nearly all of it decoding; the audio interrupt's share of that time is in it), and the
+ * control task's cycle, from one call to the next, average and longest. */
+static struct fm1b_cache_stats cache_base;
+static uint32_t cache_busy_ms, cycle_at, cycle_sum, cycle_count, cycle_max;
+#if FM1_STATS_MIDI
+static uint32_t total_busy_ms, total_cycles, total_cycle_ms, window_cycle_max;   /* since start, and the longest cycle since the last stats message */
+#endif
+static void cache_service_timed(void)
+{
+    uint32_t start = fm1_millis();
+    if (cycle_at) {
+        uint32_t gap = start - cycle_at;
+        cycle_sum += gap;
+        ++cycle_count;
+        if (gap > cycle_max) cycle_max = gap;
+#if FM1_STATS_MIDI
+        total_cycle_ms += gap;
+        ++total_cycles;
+        if (gap > window_cycle_max) window_cycle_max = gap;
+#endif
+    }
+    cycle_at = start;
+    fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+    uint32_t busy = fm1_millis() - start;
+    cache_busy_ms += busy;
+#if FM1_STATS_MIDI
+    total_busy_ms += busy;
+#endif
+}
+#endif
+#if FM1_STATS_MIDI
+/* Once a second, the player's figures as one SysEx to the USB MIDI port (RUNNING.md, "Live figures over MIDI"; stats.html reads them):
+ * F0 7D 46 4D 53 02 (non-commercial id, "FMS", version 3), then 23 values of 32 bits, each 5 bytes of 7 bits, lowest first, then F7.
+ * Totals since start, so a reader takes differences: 0 ms since start; the cache's 1 hits 2 misses 3 dropped sounds 4 no room 5 MP3 frames decoded
+ * 6 notes that asked for a sound 7 notes over before their sound 8 waiting now 9 pins now; 10 ms in fm1b_cache_service 11 control cycles 12 their ms
+ * 13 the longest cycle since the last message; 14 CPU % average 15 CPU % peak (as the screen shows them) 16 voices sounding; 17..19 DROPPED HELD, TAIL, CPU;
+ * 20 the longest control step (groove_screen_control) and 21 the longest screen update, both since the last message; 22 releasing voices cut
+ * so that a waiting note's sound got room (fm1b.c, packed_squeeze). Version 1 had 0..19, version 2 0..21.
+ * Without the live cache the cache's values are 0. */
+static uint32_t stats_sent_at, window_step_max, window_screen_max;
+static void stats_midi_poll(void)
+{
+    uint32_t now = fm1_millis();
+    if (now - stats_sent_at < 1000U)
+        return;
+    stats_sent_at = now;
+    uint32_t v[23] = {now};
+#if FM1B_PACKED
+    struct fm1b_cache_stats cs;
+    fm1b_cache_stats(&cs);
+    v[1] = cs.hits; v[2] = cs.misses; v[3] = cs.evictions; v[4] = cs.no_room; v[5] = cs.decoded_mp3_frames;
+    v[6] = cs.requested; v[7] = cs.lost; v[8] = cs.waiting; v[9] = cs.pinned; v[22] = cs.squeezed;
+    v[10] = total_busy_ms; v[11] = total_cycles; v[12] = total_cycle_ms; v[13] = window_cycle_max;
+    window_cycle_max = 0;
+#endif
+    struct fm1b_status st;
+    fm1b_status(&st);
+    v[14] = cpu_average; v[15] = cpu_peak; v[16] = st.voices;
+    v[17] = st.drops_held; v[18] = st.drops_tail; v[19] = st.drops_guard;
+    v[20] = window_step_max; v[21] = window_screen_max;
+    window_step_max = window_screen_max = 0;
+    uint8_t m[6 + 23 * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x03}, *d = m + 6;
+    for (unsigned i = 0; i < 23; ++i)
+        for (unsigned k = 0; k < 5; ++k)
+            *d++ = (uint8_t)((v[i] >> (7 * k)) & 0x7fU);
+    *d = 0xf7;
+    (void)fm1_midi_send_port(FM1_MIDI_USB, m, sizeof m);      /* -1 when no USB host, -2 when the queue is full: the next second tries again */
+}
+#endif
 static void info_compute(void)
 {
 #if FM1_MIDIPLAY
     info_free_ram = song_free_ram();
+#endif
+#if FM1B_PACKED
+    fm1b_cache_stats(&cache_base);
+    cache_busy_ms = cycle_sum = cycle_count = cycle_max = 0;
 #endif
     if (!firmware_crc_done) {
         firmware_bytes = (uint32_t)(uintptr_t)text_size + (uint32_t)(uintptr_t)data_size + (uint32_t)(uintptr_t)_ram0_data_size +
@@ -391,6 +482,32 @@ static void info_update(void)
     d = put_text(d, " KB FOR A SONG");
     *d = 0;
     line_show(14, 217, line, 1, GREY);
+#elif FM1B_PACKED
+    {   /* "CACHE H1234 M56 E7 F0 L0 P3 W0": hits, misses, sounds dropped, no room, notes lost, pins now, waiting now;
+         * "MP3 5678 FR 1234 US/FR CYC 4 MAX 37 MS": frames decoded, ms in the service per frame (as us), the control cycle. FM1_TEST.md. */
+        struct fm1b_cache_stats cs;
+        char wide[80];
+        fm1b_cache_stats(&cs);
+        d = put_number(put_text(wide, "CACHE H"), (int32_t)(cs.hits - cache_base.hits), 0);
+        d = put_number(put_text(d, " M"), (int32_t)(cs.misses - cache_base.misses), 0);
+        d = put_number(put_text(d, " E"), (int32_t)(cs.evictions - cache_base.evictions), 0);
+        d = put_number(put_text(d, " F"), (int32_t)(cs.no_room - cache_base.no_room), 0);
+        d = put_number(put_text(d, " L"), (int32_t)(cs.lost - cache_base.lost), 0);
+        d = put_number(put_text(d, " P"), (int32_t)cs.pinned, 0);
+        d = put_number(put_text(d, " W"), (int32_t)cs.waiting, 0);
+        *d = 0;
+        wide[LINE_CHARS] = 0;
+        line_show(13, 206, wide, 1, cs.lost != cache_base.lost ? ORANGE : GREY);
+        uint32_t frames = cs.decoded_mp3_frames - cache_base.decoded_mp3_frames;
+        d = put_number(put_text(wide, "MP3 "), (int32_t)frames, 0);
+        d = put_number(put_text(d, " FR "), frames ? (int32_t)((uint64_t)cache_busy_ms * 1000U / frames) : 0, 0);
+        d = put_number(put_text(d, " US/FR CYC "), cycle_count ? (int32_t)(cycle_sum / cycle_count) : 0, 0);
+        d = put_number(put_text(d, " MAX "), (int32_t)cycle_max, 0);
+        d = put_text(d, " MS");
+        *d = 0;
+        wide[LINE_CHARS] = 0;
+        line_show(14, 217, wide, 1, GREY);
+    }
 #endif
     line_show(11, 228, "REC BACK", 1, GREY);
 }
@@ -401,6 +518,7 @@ static void page_clear(void)
     memset(shown_color, 0, sizeof shown_color);
     memset(shown_back, 0, sizeof shown_back);
     bar_drawn = 1000;
+    lines_start = 255;                                        /* the next update draws the whole page */
 }
 /* Bend in semitones, right aligned in 4 characters: one decimal below 10 (+2.0), whole ones above (+12); blank at the centre. */
 static char *put_bend(char *d, int32_t cents)
@@ -732,6 +850,7 @@ void groove_screen_init(void)
     memset(shown_color, 0, sizeof shown_color);
     memset(shown_back, 0, sizeof shown_back);
     bar_drawn = 1000;
+    lines_start = 255;
 }
 /* ARP and SEQ light while the selected channel is muted / soloed (on the channel page only), PLAY while a song plays. */
 enum { BUTTON_EDIT = 6, BUTTON_GLO = 7, BUTTON_SAVE = 9, BUTTON_ARP = 10, BUTTON_SEQ = 11, BUTTON_PLAY = 12, BUTTON_REC = 13 };
@@ -788,13 +907,20 @@ static int safe_start(void)
     return 0;
 }
 
+#if FM1_STATS_MIDI
+static void control_step(void)
+#else
 void groove_screen_control(void)
+#endif
 {
     sf2_upload_poll();                                        /* a bank frame that arrived over MIDI */
     if (safe_start())
         return;
 #if FM1B_PACKED
-    fm1b_cache_service(FM1B_CACHE_FRAMES);                    /* the live cache: answers the notes' requests, decodes a few MP3 frames */
+    cache_service_timed();
+#endif
+#if FM1_STATS_MIDI
+    stats_midi_poll();
 #endif
 #if FM1_MIDIPLAY
     song_poll();                                              /* the song's events that are due */
@@ -930,9 +1056,29 @@ void groove_screen_control(void)
     uint32_t now = fm1_millis();
     if (now - last_draw >= 40U) {                             /* the LCD is slow; 25 updates a second is plenty */
         last_draw = now;
+        lines_limited = lines_start != 255;                   /* line_show: at most LINES_PER_UPDATE changed lines, in turn */
+        if (!lines_limited) lines_start = 0;
+        lines_drawn = lines_changed = 0;
         screen_update();
+        /* the next update starts after the last line drawn, if changed lines were left; else from the top */
+        lines_start = lines_limited && lines_drawn >= LINES_PER_UPDATE && lines_changed > lines_last + 1U ? (uint8_t)(lines_last + 1U) : 0;
+        lines_limited = 0;                                    /* line_show outside a screen update (safe mode) draws at once */
+#if FM1_STATS_MIDI
+        uint32_t took = fm1_millis() - now;
+        if (took > window_screen_max) window_screen_max = took;
+#endif
     }
 }
+#if FM1_STATS_MIDI
+/* The control task's step, timed: the longest step and the longest screen update since the last stats message (values 20 and 21). */
+void groove_screen_control(void)
+{
+    uint32_t start = fm1_millis();
+    control_step();
+    uint32_t took = fm1_millis() - start;
+    if (took > window_step_max) window_step_max = took;
+}
+#endif
 
 /* ---- the bank --------------------------------------------------------------------------------------------- */
 void groove_midi_init(void)

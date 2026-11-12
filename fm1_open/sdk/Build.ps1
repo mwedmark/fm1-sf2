@@ -3,10 +3,12 @@
 param(
     [switch]$Package,
     [switch]$FirmwareOnly,
-    # The live cache (FORMAT.md, "Calculation: a live cache of decoded sounds"): plays banks packed as MP3 (pack_bank.js). Off by default; with it the build adds
-    # live_cache/*.c and third_party/mp3 (minimp3), defines FM1B_PACKED=1, and puts a static pool of CacheKB KB in the SRAM, taken from the runtime heap.
-    [switch]$LiveCache,
-    [int]$CacheKB = 96,
+    # The live cache (FORMAT.md, "Calculation: a live cache of decoded sounds"): plays banks packed as MP3 (pack_bank.js) and BFP8 banks. On by default since
+    # 2026-11-11 (one firmware for both kinds of bank); the build adds live_cache/*.c and third_party/mp3 (minimp3), defines FM1B_PACKED=1, and puts a static
+    # pool of CacheKB KB in the SRAM, taken from the runtime heap. It leaves out, by their defines (the code stays), the MIDI file player (FM1_MIDIPLAY=0) and
+    # the 8-, 12-, 16-bit and SEA formats (FM1B_BFP8_ONLY=1): with them the image or the heap does not fit. -LiveCache:$false builds without it, with both.
+    [switch]$LiveCache = $true,
+    [int]$CacheKB = 84,
     [int]$CacheFrames = 2,
     [string]$Toolchain = $env:FM1_PI32_TOOLCHAIN,
     [string]$SourceUrl = $env:FM1_SOURCE_URL
@@ -435,7 +437,7 @@ try {
     Write-Text (Join-Path $build 'generated/build_identity.c') $identitySource
     Run (Join-Path $bin 'clang.exe') (@($flags) + @('-c','generated/build_identity.c','-o','obj/build_identity.obj'))
     $objects += 'obj/build_identity.obj'
-    Write-Text (Join-Path $build 'build-identity.json') (@{profile=$Profile; family=$variantName; release_version=$releaseVersion; build_id=$buildIdentity} | ConvertTo-Json)
+    Write-Text (Join-Path $build 'build-identity.json') (@{profile=$Profile; family=$variantName; release_version=$releaseVersion; build_id=$buildIdentity; live_cache=[bool]$LiveCache} | ConvertTo-Json)
     $sbcRoot = 'sbc_decoder' + [char]10
     $aclTx = ' + 1024'
     $aclRx = ' + 4096'

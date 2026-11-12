@@ -68,12 +68,78 @@ one block (4 ms) later. Known weakness: the voices of one note with stacked laye
   included (the user): "sounds very good", about the same as the unpacked BFP8 bank. Step 3 below (measurements) is next.
   The heap check in `Build.ps1` is now 111 468. `fm1_device_recovery()` exists in the SDK, undocumented and not used (it may enter the loader; try it in fm1-emu first, never first on the FM-1).
 
+- **2026-11-11 (local session, branch `claude/live-cache-stats`, measured on the user's machine):** minimp3 trimmed for mono 32 kHz MPEG-1 layer 3
+  (`MINIMP3_FM1_MONO_32K`, see `fm1_open/third_party/mp3/README.md`): `-LiveCache` 451 612 bytes, **2 309 to spare** (was 5); `test_sound_cache.js` gives the same
+  figures with and without it, `test_pack_bank.js` and `test_packed_engine.js` pass. Then the cache's counters and timing on the info page (two lines, `#elif FM1B_PACKED`
+  in `sf2player.c`, read in FM1_TEST.md section H): **452 924 bytes, 997 to spare**, heap 113 260 at `-CacheKB 72`. Base build 439 516 (14 405 to spare).
+  `dist\sf2player_live72.fwsc` (CRC32 `4549A7A9`) booted in fm1-emu with `gm_32k_packed.fm1b` (`test_emu\live_cache.script`): `CACHE H7 M4 E0 F0 L0 P0 W0`,
+  `MP3 45 FR 1800 US/FR CYC 10 MAX 42 MS` (emulator timing, not the device's). **Not flashed on the FM-1 yet**: that is step 3's measurement (FM1_TEST.md H1-H4).
+  A song in fm1-emu (60 s of Never gonna give you up, `-CacheKB 72`): **8 notes lost**, 144 sounds dropped, 159 decodes, 2 191 µs per MP3 frame (K ≈ 15), control
+  cycle 11 ms (longest 43); the audio interrupt's CPU the same as with the BFP8 bank (FM1_TEST.md H). So the pool, which the heap holds to about 72 KB, is
+  the limit: next, find SRAM for a bigger pool (`-CacheKB 128` gave 0 dropped on the PC for ABBA) or decode more frames a cycle (`-CacheFrames`).
+  Bigger pools in fm1-emu (heap check lowered for the test only, not committed): **84 KB** (heap 100 972) boots, same song: `H1696 M89 E73 F275 L4`, half the lost
+  notes; **90 KB** (heap 94 828) and **96 KB** (88 684) do not (blank screen, 306 % load). So the SDK needs between 94 828 and 100 972 bytes of heap at boot in the
+  emulator; the device has only been seen to boot with 111 468, so 84 KB is untried there (`dist\sf2player_live84.fwsc`, built with the check lowered). More pool
+  than that needs SRAM from elsewhere: the live cache's own buffers are 16 KB minimp3 scratch, 4 KB crossfade, 2.3 KB PCM, about 6.7 KB decoder state; the
+  crossfade's 4 KB could share the minimp3 scratch (never in use at the same time; not checked), and mono-only minimp3 state would save about 3.4 KB.
+- **2026-11-11, later: RAM freed, 84 KB pool within the proven heap.** `-CacheFrames 4` at 72 KB did not help (`L10`), so the pool is the limit, not the decoder's
+  speed. Then: the crossfade's blended samples are int16 and share one 2.3 KB buffer with the decoded frame (`mp3_sound.c`, was 2.3 + 4 KB); minimp3's state and
+  scratch hold one channel and a 1440-byte frame under `MINIMP3_FM1_MONO_32K` (now set in `mp3_sound.h`, since it sizes `mp3dec_t`); the cache's table has one
+  entry per KB of pool in the firmware (`SOUND_CACHE_ENTRIES`, 160 in the tests). Heap at 72 KB 113 260 -> 124 140 (10 880 freed). **`-CacheKB 84` now builds
+  with the normal check** (heap 111 500, image 997 to spare): `dist\sf2player_live84.fwsc`, CRC32 `24D0C78C`. Same song in fm1-emu: `H1696 M89 E73 F276 L4 P0 W0`,
+  as the 84 KB test with the check lowered: the smaller table cost nothing. All three PC tests pass with the same figures. **Not on the FM-1 yet.**
+  More would need SRAM from the SDK's own buffers (effects 49 KB, Bluetooth audio 16 KB, groove engine) or the 4 KB `groove_project` scratch in `sf2player.c` (who uses it: not checked).
+  **On the FM-1, 2026-11-11** (`sf2player_live84.fwsc`, CRC32 `24D0C78C`, installed with `install.html` from another computer with `gm_32k_packed.fm1b`;
+  install.html needs the plain build as `firmware` and the live one as `--live-fwsc`, else it refuses an MP3 bank): it boots (heap 111 500) and plays. The info page
+  after the user played (photo): `CACHE H1990 M27 E19 F0 L0 P0 W0`, `MP3 144 FR 6493 US/FR CYC 10 MAX 214 MS`. **No note lost.** The decoder is about 3 times
+  slower than in fm1-emu: 6.5 ms per MP3 frame (36 ms of audio), so K is about 43 at 240 MHz with the audio interrupt's share in it (the design assumed 5 to 12):
+  a sound decodes at about 5.5 times real time. The longest control cycle, 214 ms, is not explained (a decode is 2 frames, 13 ms); played (the user):
+  REC first, then Never gonna give you up for 31 s and some of Eine kleine Nachtmusik, so fewer new sounds than the emulator's 60 s (27 decodes
+  against 89; some sounds may have been in the cache from before REC). CPU and DROPPED figures not taken. Next: those, and a longer song with many new sounds, where the slower decoder may make notes late.
+  **Live figures over MIDI** (2026-11-11): the `-LiveCache` build sends all its figures once a second as SysEx to USB (`FM1_STATS_MIDI`, RUNNING.md 3d);
+  `stats.html` shows them and posts them to `dist\stats_log.jsonl` here (the `-Lan` server). Image 453 212 bytes, **709 to spare**; heap unchanged.
+  `dist\sf2player_live84.fwsc` is now this build (CRC32 `E3468A2D`), packed in `dist\install` with the plain build. Boots and plays in fm1-emu; the MIDI
+  output itself is not checked yet (the emulator has none).
+  **The whole of Never gonna give you up on the FM-1 over MIDI** (2026-11-11, `stats.html` from the computer the FM-1 is on, log here in `dist\stats_log.jsonl`,
+  255 messages, 214 s playing): 6 627 hits, 426 decodes, 407 sounds dropped, **373 no room, 25 notes late**, 2 482 MP3 frames. The late notes come in the busy
+  parts (s 89-92, 132-157, 208-238) and always with no room: the pool is full of sounds that sounding voices pin (up to 26 pins, 31 of 32 voices), so at 84 KB the
+  pool is the limit again for a whole song, not the decoder. 6.8 ms per frame **with the audio interrupt's time in it: the interrupt takes 63 % (median, peak
+  83 %) while the song plays**, so the decoder itself takes about 2.5 ms a frame (K about 15, like fm1-emu; the 6.5 ms of the info page was not three times slower
+  after all). At most 59 frames decoded in a second (1.7 times real time). The control cycle: 10 ms idle, 33 ms median while playing, and **about 90 ms (up to
+  128) once every second** even when nothing is decoded: something else in the control task (the screen?) holds it, which slows how fast a new sound is
+  ready. The voice limit: DROPPED held 502, tail 5 131, CPU guard 3. Next, in order: what the 90 ms cycle is; then RAM or fewer pins (a voice pins its sound
+  for as long as it sounds) for the pool.
+  **The 90 ms cycle is the screen** (message version 2 adds the longest control step and screen update a second): playing the song on the program page, the
+  longest screen update was 75 ms (median a second; 1 ms idle), nearly all of the step's 79 and the cycle's 90. The program page shows the last note's
+  zone, keys, sample, loop and envelope, so a new note changed 7 or 8 lines at once, about 10 ms each with the interrupt at 63 %. Now a screen update draws at most
+  2 changed lines, in turn (`line_show`, `LINES_PER_UPDATE`; a cleared page draws whole; the plain build too). Same song on the FM-1 (`95FCED19`): longest
+  cycle 90 -> 55 ms, screen 75 -> 39, cycle average 33 -> 26 ms. **The late notes did not go down** (25, 30, 33 in three runs; no room 373, 508, 660): they are
+  the pool's, not the control task's. Two lines still take about 40 ms (each line is drawn and sent the full 240 pixels wide). Logs: `dist\stats_log_astley_v1.jsonl`,
+  `_v2.jsonl` and `_v3.jsonl` (not in git). Next for the late notes: when there is no room, let a new note take the room of a sound that only releasing
+  voices hold (cut their tails, as the voice limit does), rather than wait.
+  **Releasing voices cut for room** (`packed_squeeze_pick` in the control task chooses the oldest releasing voice that holds an MP3 sound, one whose
+  sound no other voice holds first; `packed_squeeze` in the interrupt cuts it as the voice limit does, counted as TAIL; once a control cycle while a note
+  waits with no room). To fit the heap, the cache's table is 7 entries per 8 KB (73 at 84 KB; heap 111 660, image 165 bytes to spare). Stats SysEx
+  version 3 adds the count. fm1-emu, 60 s: 2 late against 4. **On the FM-1, the whole song** (`85D99FA6`): **19 late** (25, 30, 33 before), no room 545,
+  245 tails cut, 477 decodes, TAIL 5 247 (5 138 before). Logs `dist\stats_log_astley_v1..v4.jsonl`. Left: notes still late when no voice is releasing
+  (all held) or while the cut voice fades and the sound decodes; more room needs more pool.
+  **One firmware** (2026-11-11, the user's choice): the live-cache build is the default of `sdk\Build.ps1` (`-LiveCache` on, `-CacheKB 84`), `build_fw.ps1`
+  and `build_firmware.ps1`; `-LiveCache:$false` / `-NoLiveCache` still builds the plain one. The MIDI file player and the 8/12/16-bit and SEA formats are out
+  by their defines (`FM1_MIDIPLAY=0`, `FM1B_BFP8_ONLY=1`), the code stays: with all formats the heap was 3.7 KB short (107 916), the player does not fit
+  the image. The GitHub workflow builds one firmware; `build-identity.json` has `live_cache`, `make_install.js` writes `main_live` in the manifest and
+  `install.html` installs that firmware for BFP8 and MP3 banks (checked in the browser with the packed bank; not yet on the FM-1 from a fresh page, and
+  the workflow and `make_site.js` not run). A plain `sdk\Build.ps1` has 69 bytes to spare (the compiler's date string), `build_fw.ps1` 165.
+  The song scripts now end with all notes off (`test_emu\astley60_rec.script`, made by `midi_script.js` plus REC first and CC 123/64 at 63.5 s).
+
 ## Not done, in the order I would do it
+
+0. (2026-11-11) Steps 1 and 2 are done (the build fits, the packed bank plays on the FM-1, 2026-11-08). Step 3 now has its page: flash `dist\sf2player_live72.fwsc`
+   and run FM1_TEST.md section H; the user's figures go into `FORMAT.md` and here.
 
 1. Get the `-LiveCache` build under the limit (above), flash `dist\sf2player_live.fwsc` (keep `fm1_open\sdk\firmware\FM-1_015.fwsc` at hand), and check it still boots and plays an ordinary bank... **but it refuses non-BFP8 banks**, so use a BFP8 bank (`node make_bank.js bfp8 32000 1mgm.sf2 dist/gm_32k_bfp8.fm1b`).
 2. Make a packed bank: `node pack_bank.js dist/gm_32k_bfp8.fm1b dist/gm_32k_packed.fm1b` (`1mgm.sf2`: 241 520 bytes, 120 MP3 sounds, 45 lossless). Flash it as any bank.
 3. **Measure on the FM-1:** the decoder's speed (K, million cycles per second of mono audio; the design assumes 5 to 12; the cache must decode 20 to 48 times real time) and the control task's cycle time (it decodes `-CacheFrames` MP3 frames per cycle),
-   the latency of a note whose sound is not cached, notes lost with a 96/128/160 KB pool (`-CacheKB`), the CPU load against the BFP8 bank in flash. The info page shows nothing about the cache yet: `fm1b_cache_stats()` has hits, misses, decoded frames, lost notes, pins; put it on a page.
+   the latency of a note whose sound is not cached, notes lost with a 96/128/160 KB pool (`-CacheKB`; the heap allows about 72 KB, see above), the CPU load against the BFP8 bank in flash. The info page shows the cache's counters, µs per MP3 frame and the control cycle since 2026-11-11 (FM1_TEST.md H).
 4. For the 4 MB font: `make_bank.js` writes all 138 presets (about 516 KB packed, 50 KB over); it needs an option for the 128 melodic presets + kit 0 (what the calculation used, 429 KB) — `index.html`'s `buildBank` takes a preset index list; `test_sound_cache.js` shows how to pick them.
 5. Listening: re-render and listen to the 4 MB font from the real packed file on the device (the earlier tests were simulated on the PC).
 6. Layered notes starting together; note-off while a voice still waits for its sound; a web page description of the bank format and the cache (the user asked "later").

@@ -1,9 +1,9 @@
 # Builds the firmware and packs it with the matching bank for install.html: build_firmware.ps1, then build_install.ps1.
-#   .\build_all.ps1                              live cache (72 KB) and the packed bank
+#   .\build_all.ps1                              live cache (84 KB) and the packed bank
 #   .\build_all.ps1 -Name sf2player_arm72        another firmware name
-#   .\build_all.ps1 -NoLiveCache                 without the live cache, with the BFP8 bank
+#   .\build_all.ps1 -NoLiveCache                 without the live cache (all formats, the MIDI file player), with the BFP8 bank
 #   .\build_all.ps1 -Serve                       then starts the server and opens install.html
-param([string]$Name = ('sf2player_' + (Get-Date -Format 'yyyyMMdd_HHmm')), [switch]$NoLiveCache, [int]$CacheKB = 72,
+param([string]$Name = ('sf2player_' + (Get-Date -Format 'yyyyMMdd_HHmm')), [switch]$NoLiveCache, [int]$CacheKB = 84,
       [int]$CacheFrames = 2, [string]$Toolchain = 'D:\JL\pi32', [switch]$Serve)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot

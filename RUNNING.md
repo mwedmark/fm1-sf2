@@ -29,9 +29,14 @@ It writes the name and time to `fm1_open\app\build_info.h` (git ignores it), run
 copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prints next to it. A plain build shows
 `FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
 
-**With the live cache** (2026-11-08, **not built yet**; `-LiveCache` on `build_fw.ps1` or `sdk\Build.ps1`): plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
+**One firmware, with the live cache** (the default since 2026-11-11; `build_fw.ps1`, `build_firmware.ps1` and `sdk\Build.ps1` build it without a switch, the
+GitHub workflow builds only it, and `install.html` installs it for BFP8 and MP3 banks alike; `-LiveCache:$false` on `build_fw.ps1` or `sdk\Build.ps1`, or
+`-NoLiveCache` on `build_firmware.ps1`, builds the firmware without it, which has every bank format and the MIDI file player). With all the formats
+and the cache, the heap was 3.7 KB short (their voice loops run from SRAM); the MIDI file player does not fit the image (2.4 KB). Pool 84 KB:
+image 453 756 bytes with a name from `build_fw.ps1` (165 to spare), 453 852 from a plain `sdk\Build.ps1` (69: the compiler's date string), heap 111 660.
+It plays banks packed as MP3 by `pack_bank.js` (FORMAT.md, "Calculation: a live cache of decoded sounds").
 The image is at the layout's limit, so this build also plays BFP8 banks only (`FM1B_BFP8_ONLY`: one voice loop in place of ten; the packed bank is BFP8 after decoding; SEA, 8-, 12- and 16-bit banks are refused), and leaves out the MIDI file player (`FM1_MIDIPLAY=0`; the code stays and the plain build has it: with it the image was 2 235 bytes over, and a song takes its RAM from the heap the cache leaves short). (The SDRAM test of the info page is gone from every build since 2026-11-08: on the FM-1 it restarted the device, there is no SDRAM.)
-It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 96, 16 to 400) in the SRAM, which the link takes from the
+It adds `live_cache\mp3_sound.c` and `sound_cache.c` and minimp3, defines `FM1B_PACKED=1`, and puts a static pool of `-CacheKB` KB (default 84, 16 to 400; 90 and more did not boot) in the SRAM, which the link takes from the
 runtime heap; `-CacheFrames` (default 2) is the MP3 frames (1152 samples) decoded in one control cycle. The build prints the heap that is left (`runtime_heap_bytes` in `firmware-report.json`), and stops under 49 152
 bytes, which is how the free SRAM is found: raise `-CacheKB` until it stops. Without the switch the firmware is what it was. What to look at in the first build, none of it known:
 the compiler's warnings (`-Wframe-larger-than`: minimp3's decode takes about 16 KB of stack, and the control task that calls `fm1b_cache_service` must have it), the image size against the 30 KB or so spare
@@ -266,6 +271,18 @@ In fm1-emu (`test_emu\song_test.js`, MIDI into the DIN jack, which takes about 3
 much faster): `R.ASTLEY.Never gonna give you up K.mid` (63 209 bytes, 15 771 events) arrived whole (`UPLOAD 154 R0`), played in time
 (20 s of the page's clock were 20 s of the song), with 16-30 voices and `DROPPED HELD 46` after 31 s; PLAY started and stopped it, the
 info page showed the song. Not yet run on the FM-1.
+
+### 3d. Live figures over MIDI (2026-11-11, the live-cache build)
+
+Built with `FM1_STATS_MIDI` (`sf2player.c`; on when `FM1B_PACKED` is, i.e. in `-LiveCache` builds; `-DFM1_STATS_MIDI=0` leaves it out, 288 bytes), the
+player sends its figures once a second as one SysEx to the USB MIDI port: `F0 7D 46 4D 53 01`, 20 values of 32 bits (5 bytes of 7 bits each, lowest first),
+`F7` (version 3, 2026-11-11: 23 values, 122 bytes; version 2 had the first 22, version 1 the first 20). Totals since start: ms, the cache's hits, misses, dropped sounds, no room, MP3 frames decoded, requests, notes late, waiting, pins; ms in
+`fm1b_cache_service`, control cycles and their ms, the longest cycle since the last message; CPU % average and peak; voices; DROPPED held, tail, CPU; the longest control step and the longest screen update since the last message; releasing voices cut so that a waiting note's sound got room.
+`stats.html` (Chrome or Edge, Web MIDI with SysEx) shows them live, per second and since a moment you pick, and posts each message to `/stats-log`
+of the server that serves the page: `test_emu\cors_server.py` (the `-Lan` server of `start_web.ps1`) appends it to `dist\stats_log.jsonl`, so the
+figures can be read on this computer while the FM-1 is on another. `python -m http.server` (the plain 8765 server) takes no posts: the page then
+says so and only shows them. From another computer: `.\start_web.ps1 -Lan`, then `https://<this computer>:8766/stats.html`.
+Not on the FM-1 yet; fm1-emu does not pass the firmware's MIDI output on, so there it only shows that the build boots and plays.
 
 ## 4. fm1-emu, the CPU emulator (run 2026-11-01 with the multitimbral build)
 

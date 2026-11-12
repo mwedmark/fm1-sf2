@@ -1,9 +1,8 @@
 # Builds the FM-1 firmware on a Windows runner (JieLi toolchain 2.5.3, as RUNNING.md section 1) and publishes the emulator page.
-#   plain       the default build
-#   live-cache  the -LiveCache build, the one that is close to the image's limit (the build stops if it does not fit). -CacheKB 72:
-#               with 96 the runtime heap is 88 716 bytes and Build.ps1 stops under 111 468 (HANDOVER_LIVE_CACHE.md)
+# One firmware since 2026-11-11: the default build, with the live cache (84 KB pool), which plays BFP8 and MP3 banks; it is close to the
+# image's limit and to the smallest heap seen to boot, and Build.ps1 stops if it does not fit (HANDOVER_LIVE_CACHE.md).
 # Runs only when started by hand (Actions > firmware > Run workflow); pushes and pull requests no longer build.
-# It builds both and uploads the .fwsc packages; run on main it also deploys the emulator to GitHub Pages
+# It builds it and uploads the .fwsc package; run on main it also deploys the emulator to GitHub Pages
 # (Settings > Pages > Source: GitHub Actions, once).
 name: firmware
 
@@ -13,22 +12,16 @@ on:
       bank_format:
         description: 'Sample format of the hosted bank (make_bank.js): sea5, sea6, bfp8, pcm8, pcm12 or pcm16'
         default: 'bfp8'
+      release_tag:
+        description: 'Optional: publish a GitHub pre-release with this tag (for example v0.1.0) holding the .fwsc package, the starter bank and the licence files'
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: build (${{ matrix.variant }})
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: plain
-            flags: ''
-          - variant: live-cache
-            flags: '-LiveCache -CacheKB 72 -CacheFrames 2'
     steps:
       - uses: actions/checkout@v4
 
@@ -61,14 +54,14 @@ jobs:
         working-directory: fm1_open
         run: |
           $env:FM1_PI32_TOOLCHAIN = Join-Path $env:GITHUB_WORKSPACE 'jl-toolchain\pi32'
-          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN ${{ matrix.flags }} 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
+          ./sdk/Build.ps1 -FirmwareOnly -Toolchain $env:FM1_PI32_TOOLCHAIN 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
           if (!$?) { throw 'The build failed.' }
 
       - name: Sizes
         if: always()
         shell: pwsh
         run: |
-          "### firmware (${{ matrix.variant }})" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "### firmware" | Out-File $env:GITHUB_STEP_SUMMARY -Append
           if (Test-Path build.log) {
             $lines = Select-String -Path build.log -Pattern 'app image|fits|does not fit|runtime_heap|heap' | ForEach-Object { $_.Line }
             '```' + "`n" + ($lines -join "`n") + "`n" + '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append
@@ -80,18 +73,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item fm1_open/build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc "out/sf2player_${{ matrix.variant }}.fwsc"
-          Copy-Item fm1_open/build/dx7/firmware-report.json "out/firmware-report_${{ matrix.variant }}.json"
-          Copy-Item fm1_open/build/dx7/build-identity.json "out/build-identity_${{ matrix.variant }}.json"   # the install page's manifest needs the build id
-          Copy-Item build.log "out/build_${{ matrix.variant }}.log"
+          Copy-Item fm1_open/build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc out/sf2player.fwsc
+          Copy-Item fm1_open/build/dx7/firmware-report.json out/firmware-report.json
+          Copy-Item fm1_open/build/dx7/build-identity.json out/build-identity.json   # the install page's manifest needs the build id
+          Copy-Item build.log out/build.log
 
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.variant }}
+          name: firmware
           path: out/
           if-no-files-found: error
 
-  # The hosted bank: the SoundFont is soundfonts/1mgm.sf2 of the repo, or else fetched from the repository secret SF2_URL (an https address),
+  # The hosted bank is the committed banks/default.fm1b (converted from 1mgm.sf2, which stays on the maintainer's computer and is not in the repo).
+  # Optionally a SoundFont is fetched from the repository secret SF2_URL (an https address),
   # converted with make_bank.js and stored as the artifact "bank" (default.fm1b), which the site then hosts and selects at the start.
   # Without the secret this job does nothing and the site keeps whatever banks/ holds (or the sine test bank).
   bank:
@@ -125,7 +119,7 @@ jobs:
   # page, the firmware and the bank, so the emulator can fetch them (RUNNING.md section 4).
   site:
     needs: [build, bank]
-    if: ${{ !cancelled() }}   # the site needs only the plain package; a live-cache failure must not hide it
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,13 +128,7 @@ jobs:
           node-version: 20
       - uses: actions/download-artifact@v4
         with:
-          name: firmware-plain
-          path: fw
-      - name: The live-cache package (the install page's choice for MP3 banks; missing when that build failed)
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: firmware-live-cache
+          name: firmware
           path: fw
       - name: The converted bank (when the bank job made one)
         uses: actions/download-artifact@v4
@@ -151,7 +139,7 @@ jobs:
       - name: JZZ.js (pinned in .github/site/package-lock.json)
         run: npm ci --ignore-scripts --prefix .github/site
       - name: Make the site
-        run: node .github/make_site.js site fw/sf2player_plain.fwsc "${GITHUB_SHA}" fw/build-identity_plain.json fw/sf2player_live-cache.fwsc fw/build-identity_live-cache.json
+        run: node .github/make_site.js site fw/sf2player.fwsc "${GITHUB_SHA}" fw/build-identity.json
       - uses: actions/upload-artifact@v4
         with:
           name: emulator-site
@@ -174,3 +162,36 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # A pre-release (the Firmware Hub marks 0.x, alpha, beta and rc as beta) with the package, the starter bank, the licence and the third-party
+  # notices. Only when "Run workflow" is given a release_tag; the tag is made on the commit that was built.
+  release:
+    needs: build
+    if: ${{ inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: fw
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -e
+          cp LICENSE fm1_open/THIRD_PARTY.md fw/
+          cp banks/default.fm1b fw/gm_32k_bfp8.fm1b
+          cat > notes.md <<'NOTES'
+          Firmware package for the M-VAVE FM-1 (install it with https://mwedmark.github.io/fm1-sf2/install.html): the SF2 player with the live cache, which plays BFP8 banks and MP3-packed banks. Beta: still being tested on the device.
+
+          `gm_32k_bfp8.fm1b`: a General MIDI bank (BFP8, 32 kHz, 454 KB) to get started with; install.html puts it on the FM-1 with the firmware. Its sounds come from a General MIDI SoundFont whose header names E-mu Systems (1993) as the copyright holder; it is included for convenience, and you can replace it with a bank of your own made with the converter.
+
+          Licence: GPL-3.0 with the FM1 SDK linking exception (`LICENSE`). The proprietary engine and the other third-party components keep their own terms (`THIRD_PARTY.md`); the engine may be redistributed in binary form for M-VAVE FM-1 devices only. The corresponding source is this repository at the tag of this release.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "$TAG" --notes-file notes.md \
+            fw/sf2player.fwsc fw/gm_32k_bfp8.fm1b fw/LICENSE fw/THIRD_PARTY.md

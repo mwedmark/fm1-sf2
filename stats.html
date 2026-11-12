@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FM-1 live figures</title>
+<!-- Shows the figures an FM-1 running the SF2 player sends once a second over USB MIDI when it is built with FM1_STATS_MIDI (on in the
+     -LiveCache build; sf2player.c, stats_midi_poll): the live cache, the decoder's time, the control cycle, CPU, voices, dropped notes.
+     Each message is also posted to /stats-log of the server that serves this page (test_emu/cors_server.py: dist/stats_log.jsonl), so it can be
+     read on that computer. Serve the repository (start_web.ps1, -Lan from another computer) and open stats.html. RUNNING.md, "Live figures over MIDI". -->
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66;
+    --line: #dcdcd5; --accent: #1f6feb; --ok: #1a7f37; --bad: #c62828; --warn: #b26a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92;
+      --line: #34342f; --accent: #5b9bff; --ok: #56d364; --bad: #ff7b72; --warn: #e3a33a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 10px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .tile .k { color: var(--muted); font-size: 12px; }
+  .tile .v { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .tile .v.bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: normal; }
+  .scroll { overflow-x: auto; }
+  button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  #status { min-height: 1.5em; margin: 10px 0 0; color: var(--muted); }
+  #status.bad { color: var(--bad); }
+  label { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>FM-1 live figures</h1>
+  <p class="sub">What the SF2 player measures, once a second over USB MIDI (a build with <code>FM1_STATS_MIDI</code>: the live-cache build).</p>
+
+  <div class="panel">
+    <div class="actions">
+      <button id="zero">Count from now</button>
+      <label><input type="checkbox" id="post" checked> send to the computer that serves this page</label>
+    </div>
+    <p id="status">Waiting for Web MIDI…</p>
+  </div>
+
+  <div class="panel">
+    <h2>Since <span id="since">start</span></h2>
+    <div class="tiles" id="tiles"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Each second (newest first)</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>s</th><th>hits</th><th>decodes</th><th>frames</th><th>µs/frame</th><th>cycle ms</th><th>max ms</th><th>step</th><th>screen</th><th>lost</th><th>wait</th><th>CPU %</th><th>peak</th><th>voices</th><th>held</th><th>cut</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </div>
+</main>
+<script>
+  // The message (sf2player.c, stats_midi_poll): F0 7D 46 4D 53 <version>, values of 32 bits as 5 bytes of 7 bits, lowest first, F7.
+  // Version 1 has 20 values, version 2 22 (the longest control step and screen update since the last message), version 3 23 (releasing voices
+  // cut so that a waiting note's sound got room).
+  const NAMES = ['ms', 'hits', 'misses', 'evictions', 'noRoom', 'frames', 'requested', 'lost', 'waiting', 'pinned',
+                 'busyMs', 'cycles', 'cycleMs', 'cycleMax', 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard', 'stepMax', 'screenMax', 'squeezed'];
+  const COUNT = { 1: 20, 2: 22, 3: 23 };
+  const $ = id => document.getElementById(id);
+  let base = null, last = null, count = 0;
+
+  function decode(data) {
+    const n = COUNT[data[5]];
+    if (!n || data.length !== 6 + n * 5 + 1 || data[0] !== 0xf0 || data[1] !== 0x7d || data[2] !== 0x46 || data[3] !== 0x4d || data[4] !== 0x53) return null;
+    const r = { stepMax: '–', screenMax: '–', squeezed: 0 };
+    NAMES.slice(0, n).forEach((n, i) => { let v = 0; for (let k = 4; k >= 0; --k) v = v * 128 + data[6 + i * 5 + k]; r[n] = v >>> 0; });
+    return r;
+  }
+  const d = (a, b, n) => (a[n] - b[n]) >>> 0;
+  const perFrame = (a, b) => d(a, b, 'frames') ? Math.round(1000 * d(a, b, 'busyMs') / d(a, b, 'frames')) : '–';
+  const perCycle = (a, b) => d(a, b, 'cycles') ? (d(a, b, 'cycleMs') / d(a, b, 'cycles')).toFixed(1) : '–';
+
+  function tiles(r) {
+    const b = base || Object.fromEntries(NAMES.map(n => [n, 0]));
+    const items = [
+      ['Hits', d(r, b, 'hits')], ['Decodes (misses)', d(r, b, 'misses')], ['Sounds dropped', d(r, b, 'evictions')],
+      ['No room', d(r, b, 'noRoom')], ['Notes late (lost)', d(r, b, 'lost'), d(r, b, 'lost') > 0], ['MP3 frames', d(r, b, 'frames')],
+      ['µs per frame', perFrame(r, b)], ['Cycle ms, average', perCycle(r, b)], ['CPU % now / peak', r.cpu + ' / ' + r.cpuPeak],
+      ['Voices now', r.voices], ['DROPPED held / tail / cpu', d(r, b, 'held') + ' / ' + d(r, b, 'tail') + ' / ' + d(r, b, 'guard'), d(r, b, 'held') > 0],
+      ['Waiting / pins now', r.waiting + ' / ' + r.pinned], ['Tails cut for room', d(r, b, 'squeezed')],
+    ];
+    $('tiles').innerHTML = items.map(([k, v, bad]) => `<div class="tile"><div class="k">${k}</div><div class="v${bad ? ' bad' : ''}">${v}</div></div>`).join('');
+  }
+
+  function row(r, p) {
+    const tr = document.createElement('tr');
+    const cells = [(r.ms / 1000).toFixed(0), d(r, p, 'hits'), d(r, p, 'misses'), d(r, p, 'frames'), perFrame(r, p), perCycle(r, p), r.cycleMax, r.stepMax, r.screenMax,
+                   d(r, p, 'lost'), r.waiting, r.cpu, r.cpuPeak, r.voices, d(r, p, 'held'), d(r, p, 'squeezed')];
+    tr.innerHTML = cells.map(c => `<td>${c}</td>`).join('');
+    $('rows').prepend(tr);
+    while ($('rows').children.length > 120) $('rows').lastChild.remove();
+  }
+
+  function received(r) {
+    if (last && r.ms < last.ms) { base = null; $('rows').innerHTML = ''; }   // the FM-1 started again
+    if (last && r.ms >= last.ms) row(r, last);
+    last = r; ++count;
+    tiles(r);
+    $('status').className = '';
+    $('status').textContent = `${count} messages; the FM-1 has run ${(r.ms / 1000).toFixed(0)} s.`;
+    if ($('post').checked)
+      fetch('stats-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ at: new Date().toISOString(), ...r }) })
+        .then(res => { if (!res.ok) throw new Error(res.status); })
+        .catch(() => { $('post').checked = false; $('status').textContent += ' (the server takes no posts: not sent on)'; });
+  }
+
+  $('zero').addEventListener('click', () => { if (last) { base = last; $('since').textContent = (last.ms / 1000).toFixed(0) + ' s'; tiles(last); } });
+
+  (async () => {
+    if (!navigator.requestMIDIAccess) { $('status').className = 'bad'; $('status').textContent = 'No Web MIDI here: use Chrome or Edge, from localhost or HTTPS.'; return; }
+    try {
+      const access = await navigator.requestMIDIAccess({ sysex: true });
+      const listen = () => {
+        const names = [];
+        for (const input of access.inputs.values()) {
+          input.onmidimessage = e => { const r = decode(e.data); if (r) received(r); };
+          names.push(input.name);
+        }
+        if (!count) $('status').textContent = names.length ? 'Listening on ' + names.join(', ') + '. The FM-1 sends once a second.' : 'No MIDI input: connect the FM-1 over USB.';
+      };
+      access.onstatechange = listen;
+      listen();
+    } catch (e) {
+      $('status').className = 'bad';
+      $('status').textContent = 'Web MIDI was refused (' + e.message + '). Allow MIDI and SysEx for this page.';
+    }
+  })();
+</script>
+</body>
+</html>
