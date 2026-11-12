@@ -89,7 +89,16 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
 
 #ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: only MPEG-1 layer 3, mono, 32 kHz, not free format (what the FM-1's packed banks hold). hdr_valid refuses every
                               other header, so the rest of the decoder may take these as known and the stereo, MPEG-2/2.5 and free-format paths drop out. */
-#define FM1_HDR_IS_MONO_32K(h)      (((h[1]) & 0xFE) == 0xFA && ((h[2]) & 0x0C) == 0x08 && ((h[2]) & 0xF0) != 0 && ((h[3]) & 0xC0) == 0xC0)
+#ifdef MINIMP3_FM1_44K /* fm1-sf2: the same at 44.1 kHz (sample rate bits 00, table row 5) */
+#define FM1_RATE_BITS 0x00
+#define FM1_RATE_HZ 44100
+#define FM1_MY_SAMPLE_RATE 6
+#else
+#define FM1_RATE_BITS 0x08
+#define FM1_RATE_HZ 32000
+#define FM1_MY_SAMPLE_RATE 8
+#endif
+#define FM1_HDR_IS_MONO_32K(h)      (((h[1]) & 0xFE) == 0xFA && ((h[2]) & 0x0C) == FM1_RATE_BITS && ((h[2]) & 0xF0) != 0 && ((h[3]) & 0xC0) == 0xC0)
 #undef HDR_IS_MONO
 #undef HDR_IS_MS_STEREO
 #undef HDR_IS_FREE_FORMAT
@@ -107,7 +116,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
 #define HDR_TEST_NOT_MPEG25(h)      1
 #define HDR_TEST_I_STEREO(h)        0
 #define HDR_TEST_MS_STEREO(h)       0
-#define HDR_GET_MY_SAMPLE_RATE(h)   8
+#define HDR_GET_MY_SAMPLE_RATE(h)   FM1_MY_SAMPLE_RATE
 #define HDR_IS_FRAME_576(h)         0
 #define HDR_IS_LAYER_1(h)           0
 #endif /* MINIMP3_FM1_MONO_32K */
@@ -333,7 +342,7 @@ static unsigned hdr_sample_rate_hz(const uint8_t *h)
 {
 #ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2 */
     (void)h;
-    return 32000;
+    return FM1_RATE_HZ;
 #endif
     static const unsigned g_hz[3] = { 44100, 48000, 32000 };
     return g_hz[HDR_GET_SAMPLE_RATE(h)] >> (int)!HDR_TEST_MPEG1(h) >> (int)!HDR_TEST_NOT_MPEG25(h);
@@ -530,9 +539,15 @@ static void L12_apply_scf_384(L12_scale_info *sci, const float *scf, float *dst)
 static int L3_read_side_info(bs_t *bs, L3_gr_info_t *gr, const uint8_t *hdr)
 {
 #ifdef MINIMP3_FM1_MONO_32K /* fm1-sf2: the rows for MPEG-1 32 kHz (row 7 below) only */
+#ifdef MINIMP3_FM1_44K /* row 5 below: MPEG-1 44.1 kHz */
+    static const uint8_t g_scf_long[1][23] = { { 4,4,4,4,4,4,6,6,8,8,10,12,16,20,24,28,34,42,50,54,76,158,0 } };
+    static const uint8_t g_scf_short[1][40] = { { 4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,8,8,8,10,10,10,12,12,12,14,14,14,18,18,18,22,22,22,30,30,30,56,56,56,0 } };
+    static const uint8_t g_scf_mixed[1][40] = { { 4,4,4,4,4,4,6,6,4,4,4,6,6,6,8,8,8,10,10,10,12,12,12,14,14,14,18,18,18,22,22,22,30,30,30,56,56,56,0 } };
+#else
     static const uint8_t g_scf_long[1][23] = { { 4,4,4,4,4,4,6,6,8,10,12,16,20,24,30,38,46,56,68,84,102,26,0 } };
     static const uint8_t g_scf_short[1][40] = { { 4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,8,8,8,12,12,12,16,16,16,20,20,20,26,26,26,34,34,34,42,42,42,12,12,12,0 } };
     static const uint8_t g_scf_mixed[1][40] = { { 4,4,4,4,4,4,6,6,4,4,4,6,6,6,8,8,8,12,12,12,16,16,16,20,20,20,26,26,26,34,34,34,42,42,42,12,12,12,0 } };
+#endif
     const int sr_idx = 0;
 #else
     static const uint8_t g_scf_long[8][23] = {

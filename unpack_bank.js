@@ -9,10 +9,11 @@ if (!inFile || !outFile) { console.error('usage: node unpack_bank.js packed.fm1b
 const wasiClang = path.join(root, 'fm1_open/build/tools/wasi-sdk-27.0-x86_64-windows/bin/clang.exe');
 const clang = process.env.FM1_CLANG || (fs.existsSync(wasiClang) ? wasiClang : 'clang');
 const lc = path.join(root, 'fm1_open/live_cache'), mp3 = path.join(root, 'fm1_open/third_party/mp3'), dir = path.join(root, 'test_sound_cache');
-const wasmPath = path.join(dir, 'harness.wasm');
+const rate = fs.readFileSync(inFile).readUInt32LE(8);                                  // 32000, or 44100 for the experiment build (RUNNING.md, 2e): the decoder is built for one rate
+const wasmPath = path.join(dir, rate === 44100 ? 'harness_44k.wasm' : 'harness.wasm');
 const sources = [path.join(dir, 'harness.c'), path.join(lc, 'mp3_sound.c'), path.join(lc, 'sound_cache.c'), path.join(dir, 'libc_min.c')];
 if (!fs.existsSync(wasmPath) || sources.concat(path.join(lc, 'mp3_sound.h'), path.join(lc, 'sound_cache.h')).some(s => fs.statSync(s).mtimeMs > fs.statSync(wasmPath).mtimeMs))
-  execFileSync(clang, ['--target=wasm32', '-nostdlib', '-O2', '-Wall', '-Wextra', '-Wno-unused-function', '-ffreestanding', '-fno-builtin', '-I' + path.join(dir, 'stubs'), '-I' + lc, '-I' + mp3,
+  execFileSync(clang, ['--target=wasm32', '-nostdlib', '-O2', '-Wall', '-Wextra', '-Wno-unused-function', '-ffreestanding', '-fno-builtin', ...(rate === 44100 ? ['-DFM1B_RATE=44100U'] : []), '-I' + path.join(dir, 'stubs'), '-I' + lc, '-I' + mp3,
     '-Wl,--no-entry', '-Wl,-z,stack-size=262144', '-Wl,--initial-memory=8388608', ...sources, '-o', wasmPath], { stdio: 'inherit' });
 const m = new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(wasmPath)), {}).exports;
 const P = new Uint8Array(fs.readFileSync(inFile)), dv = new DataView(P.buffer, P.byteOffset), u32 = o => dv.getUint32(o, true);

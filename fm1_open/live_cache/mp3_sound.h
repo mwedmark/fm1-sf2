@@ -12,6 +12,15 @@
 #ifndef FM1_MP3_SOUND_H
 #define FM1_MP3_SOUND_H
 #include <stdint.h>
+/* An experiment build may set the rate with a header of its own (app/fm1b_rate.h, not committed): #define FM1B_RATE 44100U. RUNNING.md, 2e. */
+#if defined(__has_include)
+#if __has_include("fm1b_rate.h")
+#include "fm1b_rate.h"
+#endif
+#endif
+#if defined(FM1B_RATE) && FM1B_RATE == 44100U
+#define MINIMP3_FM1_44K          /* the packed stream is at 44.1 kHz instead (a bank made and packed at that rate) */
+#endif
 #define MINIMP3_FM1_MONO_32K    /* the packed stream is MPEG-1 layer 3, mono, 32 kHz (pack_bank.js); other frames are refused. Here, not in mp3_sound.c: it sizes mp3dec_t */
 #include "minimp3.h"            /* ../third_party/mp3 */
 

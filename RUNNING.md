@@ -242,7 +242,7 @@ and program 31's offset.
 ### 2d. Would 44.1 kHz help? MP3 at 32 and 44.1 kHz, and where the treble is (2026-11-12)
 
 The bank and the player work at 32 kHz, so everything above 16 kHz is gone before any codec. Two measurements on the samples of `soundfonts/1mgm.sf2` (44.1 kHz source) and a first
-listening. Nothing was built for the device, and the CPU and RAM figures below are estimates.
+listening. Nothing was built for the device, and the CPU and RAM figures below are estimates (measured in the emulator since: 2e).
 
 **MP3 at 32 against 44.1 kHz** (`node test_fluid/rate_mp3.js`; ffmpeg/libmp3lame, mono; all 152 samples joined, 26.9 s; the 32 kHz rows are resampled first, as the converter does;
 decoded and compared with the 44.1 kHz source):
@@ -284,6 +284,41 @@ So the codec is not what is heard; the 32 kHz limit is.
 **Ways to find the RAM, none tried:** SRAM the SDK holds for things this firmware may not use (effects 49 KB, Bluetooth audio 16 KB, the 4 KB `groove_project` scratch; who uses them is not checked);
 a smaller code in the cache (SEA5 or SEA6, 24 or 12 % smaller, about one point of CPU a voice); a rate of its own for each sound; voices that do not pin a whole sound (decoding ahead of the
 voice, a bigger change). To measure the CPU for real: a firmware with `FM1B_RATE=44100`, minimp3 and the packer at 44.1 kHz, a 44.1 kHz bank, and the load scripts in fm1-emu (section 7b).
+
+### 2e. A 44.1 kHz build in fm1-emu: the CPU holds, the pool does not (2026-11-12)
+
+The estimates of 2d, measured. Emulator only: nothing was put on the FM-1 and nothing was listened to, and fm1-emu decodes MP3 faster than the device does.
+
+**How.** A file `fm1_open\app\fm1b_rate.h` with `#define FM1B_RATE 44100U` turns the engine, the live cache and minimp3 to 44.1 kHz (`fm1b.h` and `mp3_sound.h` include it when it is there; minimp3 then
+takes the 44.1 kHz band table). The file is not in the repository, and without it the build is the 32 kHz one, byte for byte the same size. `pack_bank.js` and `unpack_bank.js` read the rate from the bank.
+
+```
+node make_bank.js bfp8 44100 soundfonts/1mgm.sf2 test_fluid/cmp/bfp8_44k.fm1b
+node pack_bank.js test_fluid/cmp/bfp8_44k.fm1b test_fluid/cmp/mp3_64_44k_packed.fm1b --kbit 64
+.\build_fw.ps1 -Name rate44k -CacheKB 81        (with fm1b_rate.h in place)
+.\start_emu.ps1 -Tap -Script astley60_rec.script -NoBrowser -Bank test_fluid\cmp\mp3_64_44k_packed.fm1b
+```
+
+With the 84 KB pool the 44.1 kHz build stops on the heap check (109 516 bytes against the 111 468 needed: the rate takes 2 144 bytes more), so its pool is 81 KB. That makes the comparison
+a little unfair to 44.1 kHz.
+
+**Result** (fm1-emu at 240 MHz, MP3 64 kbit/s, the first 60 s of "Never gonna give you up", figures from the info page and the emulator's load each second; each build run twice with the same figures):
+
+| | 32 kHz, 84 KB pool | 44.1 kHz, 81 KB pool |
+| --- | --- | --- |
+| Notes that came late (`L`) | 2 | 50 |
+| Times with no room in the pool (`F`) | 162 | 1 593 |
+| Hits / decodes / dropped sounds (`H` `M` `E`) | 1697 / 90 / 74 | 1261 / 207 / 197 |
+| MP3 frames decoded | 508 | 1 159 |
+| Time for one MP3 frame | 2 185 us | 2 659 us |
+| Longest control cycle | 43 ms | 46 ms |
+| Load while the song plays, mean / peak | 44.0 % / 49.9 % | 53.1 % / 64.3 % |
+| Load at rest | about 23 % | about 22 % |
+| Image (limit 453 921) | 453 724 bytes | 446 684 bytes (no resampler) |
+| Packed bank | 241 520 bytes (120 MP3, 45 lossless) | 317 788 bytes (96 MP3, 69 lossless) |
+
+The CPU is not the problem: 53 % in the mean is under the guess of 2d and far from the guard's 80 %. The pool is: every sound is 1.38 times bigger, and 25 times more notes come late. So
+44.1 kHz is of no use before the pool grows, and the next step is the RAM (the list at the end of 2d), not more work on the rate.
 
 ## 3. The converter and browser simulator (verified)
 

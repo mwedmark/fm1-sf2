@@ -15,7 +15,7 @@
 // The converter page (index.html) loads this file too, as FM1_PACK: there opt.encode is LAME in JavaScript (lamejs, bit reservoir off) and
 // opt.decode the firmware's minimp3 (mp3_decoder_wasm.js). In Node they default to ffmpeg.
 (function () {
-const FRAME = 1152, RATE_BYTES_PER_FRAME = kbit => Math.floor(144 * kbit * 1000 / 32000), LEAD = 1, XFADE = 256, MIN_LOOP = 16, NEW_HEADER = 92, ENTRY = 24;
+const FRAME = 1152, LEAD = 1, XFADE = 256, MIN_LOOP = 16, NEW_HEADER = 92, ENTRY = 24;
 const bfpBytes = n => Math.ceil(n / 32) * 33, align4 = n => (n + 3) & ~3;
 
 function unpackBfp8(b, off, n) {                 // n samples from a BFP8 run at b[off]
@@ -24,10 +24,10 @@ function unpackBfp8(b, off, n) {                 // n samples from a BFP8 run at
   return out.subarray(0, n);
 }
 const ffmpeg = (args, input) => require('child_process').execFileSync('ffmpeg', ['-v', 'error', ...args], { input, maxBuffer: 1 << 29 });
-function ffmpegEncode(pcm, kbit) {
-  return ffmpeg(['-f', 's16le', '-ar', '32000', '-ac', '1', '-i', '-', '-c:a', 'libmp3lame', '-b:a', kbit + 'k', '-reservoir', '0', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', '-'], Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+function ffmpegEncode(pcm, kbit, rate = 32000) {
+  return ffmpeg(['-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', '-', '-c:a', 'libmp3lame', '-b:a', kbit + 'k', '-reservoir', '0', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', '-'], Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
 }
-function ffmpegDecode(stream) { const d = ffmpeg(['-f', 'mp3', '-i', '-', '-ar', '32000', '-f', 's16le', '-'], stream); return new Int16Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.length)); }
+function ffmpegDecode(stream, rate = 32000) { const d = ffmpeg(['-f', 'mp3', '-i', '-', '-ar', String(rate), '-f', 's16le', '-'], stream); return new Int16Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.length)); }
 const snr = (a, c) => { let s = 0, e = 0; for (let i = 0; i < a.length; i++) { s += a[i] * a[i]; e += (a[i] - c[i]) ** 2; } return 10 * Math.log10(Math.max(s, 1e-9) / Math.max(e, 1e-9)); };
 
 function pack(src, opt = {}) {
@@ -35,7 +35,10 @@ function pack(src, opt = {}) {
   const MIN = opt["min-loop"] === undefined ? MIN_LOOP : opt["min-loop"], kbit = opt.kbit || 64, flash = opt.flash || 466944, margin = opt.margin === undefined ? 3072 : opt.margin;
   const dv = new DataView(src.buffer, src.byteOffset, src.byteLength), u32 = o => dv.getUint32(o, true);
   if (String.fromCharCode(...src.subarray(0, 4)) !== 'FM1B' || dv.getUint16(4, true) !== 1 || dv.getUint16(6, true) !== 8) throw new Error('not a version 1 BFP8 bank');
-  if (dv.getUint32(8, true) !== 32000) throw new Error('the MP3 stream is coded at 32 kHz; the bank is at ' + u32(8));
+  const rate = dv.getUint32(8, true);            // the stream is coded at the bank's rate: 32 kHz for the firmware, 44.1 kHz for the experiment build (RUNNING.md, 2e)
+  if (rate !== 32000 && rate !== 44100) throw new Error('the MP3 stream is coded at 32 or 44.1 kHz; the bank is at ' + rate);
+  // where each frame starts: at 32 kHz every frame has the same bytes, at 44.1 kHz some carry a padding byte (bit 1 of the third header byte)
+  const frameStarts = mp3 => { const at = [0], base = Math.floor(144 * kbit * 1000 / rate); let p = 0; while (p < mp3.length) { if (mp3[p] !== 0xff) throw new Error('the stream is not whole frames from byte 0 (an ID3 tag?)'); p += base + ((mp3[p + 2] >> 1) & 1); at.push(p); } if (p !== mp3.length) throw new Error('the stream does not end on a frame'); return at; };
   const nz = dv.getUint16(14, true), offZone = u32(32), offSmp = u32(36), pitch = u32(16), hasInfo = pitch >= 80 && u32(76) !== 0, oldHdr = hasInfo ? 80 : pitch;
   if (oldHdr < 76 || oldHdr > NEW_HEADER) throw new Error('header of ' + oldHdr + ' bytes');
   const shift = NEW_HEADER - oldHdr, ZS = 24;
@@ -53,9 +56,9 @@ function pack(src, opt = {}) {
   function stream(list) {
     let total = 0; for (const s of list) { s.t = total; total += s.pcm.length; }
     const all = new Int16Array(total + 3 * FRAME); for (const s of list) all.set(s.pcm, s.t);
-    const mp3 = encode(all, kbit);
-    if (mp3.length % RATE_BYTES_PER_FRAME(kbit) || mp3[0] !== 0xff) throw new Error('the stream is not whole frames from byte 0 (an ID3 tag?)');
-    const back = decode(mp3), n = Math.min(6000, total);   // the 3 frames of silence after the last sound give the encoder its flush and the decoder its last samples
+    const mp3 = encode(all, kbit, rate);
+    frameStarts(mp3);
+    const back = decode(mp3, rate), n = Math.min(6000, total);   // the 3 frames of silence after the last sound give the encoder its flush and the decoder its last samples
     let delay = 0, best = -Infinity;
     for (let lag = 0; lag < 2400; lag++) { let c = 0; for (let i = 0; i < n; i++) c += back[lag + i] * all[i]; if (c > best) { best = c; delay = lag; } }
     return { mp3, back, delay };
@@ -63,15 +66,15 @@ function pack(src, opt = {}) {
   let first = stream(sounds);
   for (const s of sounds) { s.snr = snr(s.pcm, first.back.subarray(s.t + first.delay, s.t + first.delay + s.n)); s.why = (s.loop && s.loop[1] - s.loop[0] < MIN) ? "loop" : s.mixed ? "mixed" : s.n < 64 ? "short" : ""; s.always = !!s.why; }
   // lossless: always the ones that must be; then the worst by dB under 12 per byte of extra, while the file fits
-  const mp3Bytes = sounds.length ? RATE_BYTES_PER_FRAME(kbit) : 0, perSecond = mp3Bytes * 32000 / 1152;
-  const extra = s => s.bytes - s.n / 32000 * perSecond;
+  const perSecond = sounds.length ? kbit * 125 : 0;
+  const extra = s => s.bytes - s.n / rate * perSecond;
   const tables = offSmp + shift, entriesBytes = sounds.length * ENTRY;
   let lossless = new Set(sounds.filter(s => s.always));
   let rest = sounds.filter(s => !lossless.has(s)), pk = rest.length ? stream(rest) : { mp3: new Uint8Array(0), back: new Int16Array(0), delay: 0 };
   const sizeNow = () => tables + align4(pk.mp3.length) + [...lossless].reduce((a, s) => a + align4(s.bytes), 0) + entriesBytes;
   const weak = sounds.filter(s => !lossless.has(s) && s.snr < 12).sort((a, b) => (12 - b.snr) / Math.max(extra(b), 1) - (12 - a.snr) / Math.max(extra(a), 1));
   let budget = flash - margin - sizeNow();
-  for (const s of weak) { const cost = align4(s.bytes) - s.n / 32000 * perSecond; if (cost <= budget) { lossless.add(s); budget -= cost; } }
+  for (const s of weak) { const cost = align4(s.bytes) - s.n / rate * perSecond; if (cost <= budget) { lossless.add(s); budget -= cost; } }
   if (lossless.size > sounds.filter(s => s.always).length) { rest = sounds.filter(s => !lossless.has(s)); pk = rest.length ? stream(rest) : pk; }
   // the file
   let end = tables; const mp3At = end; end += align4(pk.mp3.length);
@@ -85,14 +88,14 @@ function pack(src, opt = {}) {
   o.setUint32(40, end, true); o.setUint32(80, offPack, true); o.setUint32(84, sounds.length, true); o.setUint32(88, ENTRY, true);
   for (let i = 0; i < nz; i++) { const p = offZone + shift + i * ZS; o.setUint32(p, o.getUint32(p, true) + shift, true); }
   out.set(pk.mp3, mp3At);
-  const frameBytes = RATE_BYTES_PER_FRAME(kbit), mp3Frames = Math.floor(pk.mp3.length / frameBytes);
+  const starts = frameStarts(pk.mp3), mp3Frames = starts.length - 1;
   sounds.forEach((s, i) => {
     const e = offPack + i * ENTRY;
     o.setUint32(e, s.off + shift, true); o.setUint32(e + 4, s.bytes, true);
     if (lossless.has(s)) { out.set(src.subarray(s.off, s.off + s.bytes), s.stored); o.setUint32(e + 8, s.stored - tables, true); o.setUint32(e + 12, s.bytes, true); out[e + 16] = 0; return; }
     const t0 = s.t + pk.delay, f0 = Math.max(0, Math.floor(t0 / FRAME) - LEAD), f1 = Math.min(mp3Frames - 1, Math.floor((t0 + s.n - 1) / FRAME));
     s.discard = t0 - f0 * FRAME;
-    o.setUint32(e + 8, mp3At - tables + f0 * frameBytes, true); o.setUint32(e + 12, (f1 - f0 + 1) * frameBytes, true);
+    o.setUint32(e + 8, mp3At - tables + starts[f0], true); o.setUint32(e + 12, starts[f1 + 1] - starts[f0], true);
     out[e + 16] = 2; o.setUint16(e + 18, s.discard, true); o.setUint16(e + 20, s.loop && s.loop[0] >= 64 ? XFADE : 0, true);
   });
   // heard: what the device plays for each MP3 sound (its unpacked offset and samples), for a preview of the packed bank
