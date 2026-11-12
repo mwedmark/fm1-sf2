@@ -34,7 +34,8 @@ const instance = new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync
 const w = instance.exports;
 if (w._initialize) w._initialize();
 const mem = () => new Uint8Array(w.memory.buffer);
-const OFFSET = 69632;
+const OFFSET = 0;                                      // fm1b_config.h: FM1B_FLASH_OFFSET, the start of the user partition
+const BANK_MAX = 536576, LEGACY_MAX = 466944;          // FM1B_FLASH_BYTES, and the limit before the bank moved to the start (FM1B_LEGACY_BYTES)
 let failed = 0;
 const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') + name + (extra ? ' ' + extra : '')); if (!ok) failed++; };
 
@@ -71,6 +72,14 @@ let frames = uploadFrames(bin, 448);
 check('data before begin is refused (status 5)', send(frames[1])?.status === 5);
 check('end before begin is refused (status 5)', send(frames[frames.length - 1])?.status === 5);
 check('begin with a size over the flash is refused (status 2)', send(Uint8Array.from([0xf0, 0x7d, 0x53, 0x46, 2, 1, 127, 127, 127, 127, 15, 0xf7]))?.status === 2);
+const beginFrame = size => Uint8Array.from([0xf0, 0x7d, 0x53, 0x46, 2, 1, ...num35(size), 0xf7]);
+check('begin with one byte over the flash is refused (status 2)', send(beginFrame(BANK_MAX + 1))?.status === 2);
+w.test_reset();
+check('begin with a size over the old limit but within the flash is accepted (status 0)', send(beginFrame(LEGACY_MAX + 1))?.status === 0);
+w.test_reset();
+check('begin with exactly the flash is accepted (status 0)', send(beginFrame(BANK_MAX))?.status === 0);
+check('  it erased every sector of the flash', w.test_counter(0) === BANK_MAX / 4096, `erases ${w.test_counter(0)}`);
+w.test_reset();
 check('begin with a tiny size is refused (status 2)', send(Uint8Array.from([0xf0, 0x7d, 0x53, 0x46, 2, 1, 5, 0, 0, 0, 0, 0xf7]))?.status === 2);
 check('an unknown command is refused (status 1)', send(Uint8Array.from([0xf0, 0x7d, 0x53, 0x46, 2, 99, 1, 7, 0xf7, 0xf7].slice(0, 9).concat([0xf7]).slice(0, 10)))?.status === 1);
 

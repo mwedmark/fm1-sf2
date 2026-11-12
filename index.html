@@ -616,7 +616,7 @@ const MOD_DEFAULTS = [0, 0, 0, -12000, 0, -12000, 0, 0, 0, 13500, 0, 0, 0, -1200
 //   header (76) | pitch table (128 x u32) | bank map (256 x u16) | presets (24 each) | key maps (128 bytes per preset) |
 //   zones (24 each) | zone levels (8 each) | envelopes (12 each) | modulation (40 each) | layers (4 a preset, 4 an entry) |
 //   sample data (each sample padded to 4 bytes)
-const FM1_SAMPLE_BANK = 466944;   // bytes of flash the FM-1 has for samples
+const FM1_SAMPLE_BANK = 536576;   // bytes of flash the FM-1 has for samples (the whole user partition; 466 944 before the bank moved to its start)
 const FM1B_HEADER = 76, FM1B_PRESET = 24, FM1B_ZONE = 24, FM1B_ZONE_EXTRA = 8, FM1B_ENV = 12, FM1B_MOD = 40;
 const FM1B_INFO_HEADER = 80, FM1B_INFO = 52;                 // with an info block: an 80-byte header, then name[32] and date[20]
 // The info block a bank carries for the panel's info page: the file's name and when it was made ("2026-11-05 14:32", local time).

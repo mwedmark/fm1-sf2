@@ -6,7 +6,7 @@
 const fs = require('fs'), path = require('path');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const A = new Function(html.match(/<script id="core">([\s\S]*?)<\/script>/)[1] + '\nreturn { parseSf2, buildBank };')();
-const FLASH_KB = 456;                                               // FM1B_FLASH_BYTES 466 944
+const FLASH_KB = 456;                                               // the flash the figures below were made for: 466 944 bytes (FM1B_FLASH_BYTES is 536 576 since the bank moved to the start of the user partition)
 const bfp = frames => Math.ceil(frames / 32) * 33;
 const kb = bytes => Math.round(bytes / 1024);
 function presetsOf(file) {

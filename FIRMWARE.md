@@ -66,10 +66,11 @@ from 0 ms: the screen shows it, a note gives no sound, load 13 %) and `mt.script
 ### The bank in the user flash (`dist/sf2player_flash.fwsc`)
 
 The package carries the firmware image only, so a bank too big for the image lives in the user flash, the region the stock firmware used for samples
-(`FM1B_FLASH_OFFSET` 69 632, up to 466 944 bytes, `fm1b_config.h`). `fm1b_bank.c` looks for an FM1B bank there at start (`fm1_flash_map()`, magic, size from
+(`FM1B_FLASH_OFFSET` 0, up to 536 576 bytes, `fm1b_config.h`; until 2026-11-11 it was 69 632 and 466 944, after the stock firmware's 68 KiB of projects, which the
+SF2 player does not use. `fm1b_device_bind()` still plays a bank an earlier firmware left at `FM1B_LEGACY_OFFSET`, if there is none at the start). `fm1b_bank.c` looks for an FM1B bank there at start (`fm1_flash_map()`, magic, size from
 the header) and plays it in place; without one it uses a bank compiled into the image if the build has one (`fm1b_bank_data.inc`), else the panel says NO BANK.
 The flash build has no built-in bank (image 398 140 bytes, 56 KB room to spare). The whole 1mgm.sf2 at 32 kHz SEA5 (335.7 KB) plays from it in fm1-emu:
-`node make_flash_overlay.js bank.fm1b gm.flash` makes the sector file for `&flash=` (the user partition starts at 0x7C000 of the flash image).
+`node make_flash_overlay.js bank.fm1b gm.flash` makes the sector file for `&flash=` (the user partition starts at 0x7C000 of the flash image, and the bank at its start).
 Since 2026-11-02 the standard bank is SEA6 (397 532 bytes) and the player has 16 voices: RUNNING.md, section 7b.
 
 **Upload over MIDI SysEx** (`fm1_open/app/sf2_upload.c`, host side in `index.html`, button "Skicka till FM-1", Web MIDI): `F0 7D 'S' 'F' 02 cmd ... F7`,

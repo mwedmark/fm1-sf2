@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 /* The bank the firmware plays. First choice is an FM1B bank in the user flash (where the stock firmware keeps its
- * samples: FM1B_FLASH_OFFSET, up to FM1B_FLASH_BYTES), used in place through fm1_flash_map(); the whole GM bank of a
+ * samples and projects: FM1B_FLASH_OFFSET, up to FM1B_FLASH_BYTES), used in place through fm1_flash_map(); the whole GM bank of a
  * SoundFont fits there, which the firmware image does not. Without one, the bank compiled into the image
  * (fm1b_bank_data.inc, from fm1-sf2's make_bank_c.js) is used if there is one. The browser simulator gets its bank
  * from the page instead, so it compiles this to nothing. */
@@ -24,17 +24,25 @@
 static uint8_t cache_pool[FM1B_CACHE_KB * 1024U] __attribute__((aligned(4)));
 #endif
 
-/* Bind the bank in flash: 1 if there is a usable one, else 0. A bank is trusted for its magic, version and size only: fm1b_bind() checks the rest. */
-int fm1b_bind_flash(void)
+/* Bind the bank at `offset` in the user flash, at most `limit` bytes: 1 if there is a usable one, else 0. A bank is trusted for its magic,
+ * version and size only: fm1b_bind() checks the rest. */
+static int bind_at(uint32_t offset, uint32_t limit)
 {
-    const uint8_t *header = fm1_flash_map(FM1B_FLASH_OFFSET, 48);
+    const uint8_t *header = fm1_flash_map(offset, 48);
     if (!header || memcmp(header, "FM1B", 4))
         return 0;
     uint32_t bytes = (uint32_t)header[40] | (uint32_t)header[41] << 8 | (uint32_t)header[42] << 16 | (uint32_t)header[43] << 24;
-    if (bytes < 48 || bytes > FM1B_FLASH_BYTES)
+    if (bytes < 48 || bytes > limit)
         return 0;
-    const uint8_t *image = fm1_flash_map(FM1B_FLASH_OFFSET, bytes);
+    const uint8_t *image = fm1_flash_map(offset, bytes);
     return image && fm1b_bind(image, bytes, fm1b_dqt) == 0;
+}
+
+/* Bind the bank at the start of the user partition: 1 if there is a usable one, else 0. The upload uses this one: a bank that was just
+ * written must be the one that plays, never an older one. */
+int fm1b_bind_flash(void)
+{
+    return bind_at(FM1B_FLASH_OFFSET, FM1B_FLASH_BYTES);
 }
 
 void fm1b_device_init(void)
@@ -47,7 +55,7 @@ void fm1b_device_init(void)
 /* Control task: the player binds the bank once it knows the FM-1 was not started in safe mode (sf2player.c). */
 void fm1b_device_bind(void)
 {
-    if (fm1b_bind_flash())
+    if (fm1b_bind_flash() || bind_at(FM1B_LEGACY_OFFSET, FM1B_LEGACY_BYTES))   /* a bank installed by an earlier firmware lies after the 68 KiB of projects */
         return;
 #ifdef HAVE_BUILT_IN
     (void)fm1b_bind(fm1b_bank_data, sizeof fm1b_bank_data, fm1b_dqt);
