@@ -239,6 +239,52 @@ mallets and bells (Music Box, Glockenspiel, Marimba, Tubular Bells), organs, sax
 **Not done:** the listening itself (so no word on what MP3 64 sounds like beyond the figures), a bank with MP3 on every sound (the pack keeps 45 sounds lossless), the tiers' thresholds (FORMAT.md),
 and program 31's offset.
 
+### 2d. Would 44.1 kHz help? MP3 at 32 and 44.1 kHz, and where the treble is (2026-11-12)
+
+The bank and the player work at 32 kHz, so everything above 16 kHz is gone before any codec. Two measurements on the samples of `soundfonts/1mgm.sf2` (44.1 kHz source) and a first
+listening. Nothing was built for the device, and the CPU and RAM figures below are estimates.
+
+**MP3 at 32 against 44.1 kHz** (`node test_fluid/rate_mp3.js`; ffmpeg/libmp3lame, mono; all 152 samples joined, 26.9 s; the 32 kHz rows are resampled first, as the converter does;
+decoded and compared with the 44.1 kHz source):
+
+| Rate, bit rate | SNR against the source | SNR under 15.5 kHz | Energy above 16 kHz against the source |
+| --- | --- | --- | --- |
+| 32 kHz, 64 kbit/s (today) | 9.2 dB | 15.4 dB | -32 dB (gone) |
+| 32 kHz, 128 kbit/s | 9.7 dB | 18.1 dB | -32 dB (gone) |
+| 44.1 kHz, 64 kbit/s | 9.9 dB | 16.5 dB | -8.4 dB |
+| 44.1 kHz, 128 kbit/s | 14.8 dB | 22.1 dB | -1.6 dB |
+| 44.1 kHz, 192 kbit/s | 16.0 dB | 29.4 dB | -1.4 dB |
+
+The MP3 codec does not throw the treble away by itself: at 44.1 kHz and 128 kbit/s nearly all of it is kept, at 64 kbit/s part of it. At 32 kHz it is lost in the resampling, and a
+higher bit rate only helps below 16 kHz. In this join 6 % of the energy is above 16 kHz. The stream's bytes per second of audio are the same at both rates (8 KB at 64 kbit/s, 16 KB at 128).
+
+**Where the treble is** (`node test_fluid/hf_share.js`; the share of each sample's energy above 16 kHz; 139 samples of 256 frames or more):
+
+| A sample is kept at 44.1 kHz when its share above 16 kHz is at least | Samples | Of the frames | BFP8 sample data |
+| --- | --- | --- | --- |
+| (none: all at 32 kHz, today) | 0 | 0 % | 376 KB |
+| 1 % (-20 dB) | 62 | 45 % | 439 KB |
+| 0.1 % (-30 dB) | 85 | 65 % | 468 KB |
+| 0.01 % (-40 dB) | 113 | 84 % | 495 KB |
+| (all at 44.1 kHz) | 139 | 100 % | 518 KB |
+
+Most above 16 kHz: guiro 98.9 %, bell tree 93.9 %, a vibraphone loop 84.6 %, clave and cabasa 75.2 %, open hi-hat 74.1 %, crash 66.8 %, ride 60.2 %. A plain BFP8 bank at 44.1 kHz does not
+fit the 456 KB of flash, and a rate of its own for each sound saves less than hoped: with the -20 dB rule the data grows 1.17 times instead of 1.38.
+
+**Listening, 2026-11-12** (one listener, not blind; closed, pedal and open hi-hat, crash and ride, each as FluidSynth, plain BFP8, MP3 64; `test_fluid/cmp/listen/drums_ABC.flac`, made with
+`compare_fluid.js spectra --programs=0 --notes=60 --drums=42,44,46,49,51`): BFP8 and MP3 64 sound almost identical; FluidSynth differs clearly from both, most on the hi-hats, least on the ride.
+So the codec is not what is heard; the 32 kHz limit is.
+
+**What 44.1 kHz would cost (estimates, not measured).**
+- CPU: mixing and decoding grow with the rate, 1.38 times; the resampler to 44.1 kHz goes away (the move to 32 kHz took 16 SEA6 voices from 49-51 % to 44-48 %). A rough guess for 32 BFP8 voices is 55-62 %
+  against 42-48 % today; the CPU guard acts at 80 %. The MP3 decoder's share comes on top.
+- RAM: the live cache's pool (84 KB, already the limit for a whole song: HANDOVER_LIVE_CACHE.md) would hold 1.38 times less, as about 61 KB does today.
+- Code: `FM1B_RATE`, minimp3's `MINIMP3_FM1_MONO_32K`, `pack_bank.js` (frame bytes from 32 000) and the converter's rate all assume 32 kHz.
+
+**Ways to find the RAM, none tried:** SRAM the SDK holds for things this firmware may not use (effects 49 KB, Bluetooth audio 16 KB, the 4 KB `groove_project` scratch; who uses them is not checked);
+a smaller code in the cache (SEA5 or SEA6, 24 or 12 % smaller, about one point of CPU a voice); a rate of its own for each sound; voices that do not pin a whole sound (decoding ahead of the
+voice, a bigger change). To measure the CPU for real: a firmware with `FM1B_RATE=44100`, minimp3 and the packer at 44.1 kHz, a 44.1 kHz bank, and the load scripts in fm1-emu (section 7b).
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell
