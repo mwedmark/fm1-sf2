@@ -170,6 +170,156 @@ Found, 2026-11-04:
   limit with both, and in fm1-emu the CPU guard never cut in (80 s). So on the device the dearer voices likely brought the guard on.
   The panel's `DROPPED` line (section 5) now shows which it is.
 
+### 2c. Plain BFP8 and MP3 64 kbit/s against FluidSynth (2026-11-12, issue 26)
+
+Both banks come from `soundfonts/1mgm.sf2` at 32 kHz and go through `compare_fluid.js` against FluidSynth 2.6.1 (default 4-point interpolation, reverb and chorus off).
+The engine is the current `fm1b.c` (32 voices, layers, filter, LFOs, pan), built on WebAssembly with the WASI SDK. **Nothing here was listened to**; these are figures.
+
+- **BFP8:** `node make_bank.js bfp8 32000 soundfonts/1mgm.sf2 test_fluid/cmp/bfp8.fm1b` (464 636 bytes).
+- **MP3 64:** `node pack_bank.js test_fluid/cmp/bfp8.fm1b test_fluid/cmp/mp3_64_packed.fm1b --kbit 64` is the bank the live-cache firmware gets (241 520 bytes: 120 sounds as MP3,
+  45 kept lossless, mean 17.1 dB against the source). `node unpack_bank.js` (new) decodes it with the live cache's own C decoder into a plain BFP8 bank, and `compare_fluid.js` plays that
+  with the plain engine. `test_packed_engine.js` shows the packed engine gives the same samples, one block later, so this is what the live-cache firmware plays. It is the shipped
+  mix (some sounds lossless), not MP3 on every sound.
+- Runs, per bank: `notes`, `spectra` (all 128 programs at notes 48, 60, 72, velocity 100) and `midi --seconds=60` on six songs. `test_fluid/render_snr.js`, `spectra_diff.js`,
+  `program_distance.js` and `song_snr.js` compare the two banks' results; the WAVs and texts are in `test_fluid/cmp/` (git ignores it).
+
+**Result: MP3 64 sits within a few tenths of a dB of BFP8 against FluidSynth. It is worse for a handful of programs.**
+
+| | BFP8 | MP3 64 |
+| --- | --- | --- |
+| `notes`: mean level error against FluidSynth over velocity | 0.03 dB | 0.02 dB |
+| `spectra`: mean RMS distance to FluidSynth over the octave bands, 128 programs | 3.14 dB | 3.27 dB |
+| `spectra`: mean FM-1 minus FluidSynth, 63 / 250 / 1k / 4k / 8k / 16k Hz | +1.9 / -0.1 / -1.2 / -3.0 / -3.3 / -5.5 dB | +2.5 / -0.1 / -1.1 / -2.7 / -3.1 / -5.3 dB |
+
+Both lose treble against FluidSynth in the same way, and it comes from the 32 kHz player, not from the codec (see #4); the codec adds about 0.1 dB to it.
+
+**The MP3 render against the BFP8 render** (same notes, same engine, gain undone), signal to difference over the 3 x 1 s notes of each program:
+mean 21.7 dB, median 20.4 dB, worst 2.8 dB, best 46.6 dB. 63 programs are under 20 dB, 50 between 20 and 25, 3 between 25 and 40, and 12 above 40 (probably programs whose sounds
+are all lossless). This is a waveform measure, close to the 17 dB per sample of the pack, and says little about what is heard (an MP3 hides its noise under the signal).
+
+**Programs where MP3 64 is farther from FluidSynth than BFP8** (RMS over the bands; 23 programs by 0.5 dB or more, 9 by 1 dB or more, 2 by 2 dB or more; 8 are closer by 0.5 dB or more):
+
+| Program | BFP8 | MP3 64 |
+| --- | --- | --- |
+| 10 Music Box | 5.8 | 9.0 |
+| 29 Overdriven Guitar | 1.4 | 3.6 |
+| 9 Glockenspiel | 2.4 | 4.2 |
+| 80 Square Lead | 3.3 | 4.9 |
+| 65 Alto Sax | 2.4 | 4.0 |
+| 19 Church Organ | 0.8 | 2.3 |
+| 12 Marimba | 2.8 | 4.2 |
+| 69 English Horn | 2.0 | 3.2 |
+| 23 Tango Accordion | 3.5 | 4.6 |
+
+Lowest signal to difference: 31 Guitar Harmonics (2.8 dB), 9 Glockenspiel (10.0), 14 Tubular Bells (11.8), 27 Clean Guitar (12.1), 16 Drawbar Organ (12.4), 19 Church Organ (12.5),
+111 Shanai (12.8), 12 Marimba (13.2), 109 Bagpipe (13.3). Program 31 is odd: its spectrum is close to the BFP8's (bands within 3 dB) but the waveform correlates only 0.67, with the MP3
+render about 670 samples (15 ms) early; the other programs checked lie within 1 sample of the BFP8's. Not investigated; it may be a sound whose start or loop the MP3 path moves.
+
+**Whole songs, 60 s, `midi`** (spectral distance to FluidSynth in dB, mean level error per 100 ms, MP3 render against BFP8 render):
+
+| Song | Distance BFP8 | Distance MP3 | Level error BFP8 / MP3 | SNR MP3 vs BFP8 |
+| --- | --- | --- | --- | --- |
+| TOTO Africa | 4.43 | 4.41 | 1.07 / 1.02 dB | 22.1 dB |
+| ABBA Dancing Queen | 4.79 | 4.73 | 0.96 / 0.94 dB | 19.2 dB |
+| Star Wars theme | 3.94 | 3.94 | 0.72 / 0.67 dB | 19.2 dB |
+| Eine kleine Nachtmusik | 3.90 | 4.19 | 0.58 / 0.62 dB | 16.9 dB |
+| Bach 846 | 1.96 | 2.09 | 0.72 / 0.72 dB | 22.6 dB |
+| Into the Groove | 4.99 | 5.20 | 0.85 / 0.85 dB | 17.7 dB |
+
+The octave bands of every song differ by at most 0.5 dB between the banks. The strings (Eine kleine) and the synth and drum song (Into the Groove) move most, 0.2-0.3 dB. The limit of 32 voices cuts
+the same notes with both banks (for example 509 in Africa, 1 140 in Dancing Queen), so part of every song's distance to FluidSynth (256 voices) is the limit, the same for both.
+
+**Reading it.** On figures MP3 64 is as good as BFP8 for the whole font and for songs, and 241 520 bytes against 464 636 is a bank half the size. The risk is in the 9 to 20 programs above:
+mallets and bells (Music Box, Glockenspiel, Marimba, Tubular Bells), organs, saxes, an overdriven guitar and the square lead. Those are the ones to listen to first.
+
+**To listen to** (level matched to FluidSynth by each run, so the three differ by 0.3-0.5 dB in gain at most):
+- `test_fluid/cmp/out_bfp8/spectra_fluid.wav`, `.../spectra_fm1.wav` (BFP8) and `test_fluid/cmp/out_mp3/spectra_fm1.wav` (MP3 64): every program, three notes each, 4.85 s a program from 0.1 s.
+- The songs: `test_fluid/cmp/out_bfp8/<song>_fluid.wav`, `<song>_fm1.wav` and `test_fluid/cmp/out_mp3/<song>_fm1.wav`.
+
+**Not done:** the listening itself (so no word on what MP3 64 sounds like beyond the figures), a bank with MP3 on every sound (the pack keeps 45 sounds lossless), the tiers' thresholds (FORMAT.md),
+and program 31's offset.
+
+### 2d. Would 44.1 kHz help? MP3 at 32 and 44.1 kHz, and where the treble is (2026-11-12)
+
+The bank and the player work at 32 kHz, so everything above 16 kHz is gone before any codec. Two measurements on the samples of `soundfonts/1mgm.sf2` (44.1 kHz source) and a first
+listening. Nothing was built for the device, and the CPU and RAM figures below are estimates (measured in the emulator since: 2e).
+
+**MP3 at 32 against 44.1 kHz** (`node test_fluid/rate_mp3.js`; ffmpeg/libmp3lame, mono; all 152 samples joined, 26.9 s; the 32 kHz rows are resampled first, as the converter does;
+decoded and compared with the 44.1 kHz source):
+
+| Rate, bit rate | SNR against the source | SNR under 15.5 kHz | Energy above 16 kHz against the source |
+| --- | --- | --- | --- |
+| 32 kHz, 64 kbit/s (today) | 9.2 dB | 15.4 dB | -32 dB (gone) |
+| 32 kHz, 128 kbit/s | 9.7 dB | 18.1 dB | -32 dB (gone) |
+| 44.1 kHz, 64 kbit/s | 9.9 dB | 16.5 dB | -8.4 dB |
+| 44.1 kHz, 128 kbit/s | 14.8 dB | 22.1 dB | -1.6 dB |
+| 44.1 kHz, 192 kbit/s | 16.0 dB | 29.4 dB | -1.4 dB |
+
+The MP3 codec does not throw the treble away by itself: at 44.1 kHz and 128 kbit/s nearly all of it is kept, at 64 kbit/s part of it. At 32 kHz it is lost in the resampling, and a
+higher bit rate only helps below 16 kHz. In this join 6 % of the energy is above 16 kHz. The stream's bytes per second of audio are the same at both rates (8 KB at 64 kbit/s, 16 KB at 128).
+
+**Where the treble is** (`node test_fluid/hf_share.js`; the share of each sample's energy above 16 kHz; 139 samples of 256 frames or more):
+
+| A sample is kept at 44.1 kHz when its share above 16 kHz is at least | Samples | Of the frames | BFP8 sample data |
+| --- | --- | --- | --- |
+| (none: all at 32 kHz, today) | 0 | 0 % | 376 KB |
+| 1 % (-20 dB) | 62 | 45 % | 439 KB |
+| 0.1 % (-30 dB) | 85 | 65 % | 468 KB |
+| 0.01 % (-40 dB) | 113 | 84 % | 495 KB |
+| (all at 44.1 kHz) | 139 | 100 % | 518 KB |
+
+Most above 16 kHz: guiro 98.9 %, bell tree 93.9 %, a vibraphone loop 84.6 %, clave and cabasa 75.2 %, open hi-hat 74.1 %, crash 66.8 %, ride 60.2 %. A plain BFP8 bank at 44.1 kHz does not
+fit the 456 KB of flash, and a rate of its own for each sound saves less than hoped: with the -20 dB rule the data grows 1.17 times instead of 1.38.
+
+**Listening, 2026-11-12** (one listener, not blind; closed, pedal and open hi-hat, crash and ride, each as FluidSynth, plain BFP8, MP3 64; `test_fluid/cmp/listen/drums_ABC.flac`, made with
+`compare_fluid.js spectra --programs=0 --notes=60 --drums=42,44,46,49,51`): BFP8 and MP3 64 sound almost identical; FluidSynth differs clearly from both, most on the hi-hats, least on the ride.
+So the codec is not what is heard; the 32 kHz limit is.
+
+**What 44.1 kHz would cost (estimates, not measured).**
+- CPU: mixing and decoding grow with the rate, 1.38 times; the resampler to 44.1 kHz goes away (the move to 32 kHz took 16 SEA6 voices from 49-51 % to 44-48 %). A rough guess for 32 BFP8 voices is 55-62 %
+  against 42-48 % today; the CPU guard acts at 80 %. The MP3 decoder's share comes on top.
+- RAM: the live cache's pool (84 KB, already the limit for a whole song: HANDOVER_LIVE_CACHE.md) would hold 1.38 times less, as about 61 KB does today.
+- Code: `FM1B_RATE`, minimp3's `MINIMP3_FM1_MONO_32K`, `pack_bank.js` (frame bytes from 32 000) and the converter's rate all assume 32 kHz.
+
+**Ways to find the RAM, none tried:** SRAM the SDK holds for things this firmware may not use (effects 49 KB, Bluetooth audio 16 KB, the 4 KB `groove_project` scratch; who uses them is not checked);
+a smaller code in the cache (SEA5 or SEA6, 24 or 12 % smaller, about one point of CPU a voice); a rate of its own for each sound; voices that do not pin a whole sound (decoding ahead of the
+voice, a bigger change). To measure the CPU for real: a firmware with `FM1B_RATE=44100`, minimp3 and the packer at 44.1 kHz, a 44.1 kHz bank, and the load scripts in fm1-emu (section 7b).
+
+### 2e. A 44.1 kHz build in fm1-emu: the CPU holds, the pool does not (2026-11-12)
+
+The estimates of 2d, measured. Emulator only: nothing was put on the FM-1 and nothing was listened to, and fm1-emu decodes MP3 faster than the device does.
+
+**How.** A file `fm1_open\app\fm1b_rate.h` with `#define FM1B_RATE 44100U` turns the engine, the live cache and minimp3 to 44.1 kHz (`fm1b.h` and `mp3_sound.h` include it when it is there; minimp3 then
+takes the 44.1 kHz band table). The file is not in the repository, and without it the build is the 32 kHz one, byte for byte the same size. `pack_bank.js` and `unpack_bank.js` read the rate from the bank.
+
+```
+node make_bank.js bfp8 44100 soundfonts/1mgm.sf2 test_fluid/cmp/bfp8_44k.fm1b
+node pack_bank.js test_fluid/cmp/bfp8_44k.fm1b test_fluid/cmp/mp3_64_44k_packed.fm1b --kbit 64
+.\build_fw.ps1 -Name rate44k -CacheKB 81        (with fm1b_rate.h in place)
+.\start_emu.ps1 -Tap -Script astley60_rec.script -NoBrowser -Bank test_fluid\cmp\mp3_64_44k_packed.fm1b
+```
+
+With the 84 KB pool the 44.1 kHz build stops on the heap check (109 516 bytes against the 111 468 needed: the rate takes 2 144 bytes more), so its pool is 81 KB. That makes the comparison
+a little unfair to 44.1 kHz.
+
+**Result** (fm1-emu at 240 MHz, MP3 64 kbit/s, the first 60 s of "Never gonna give you up", figures from the info page and the emulator's load each second; each build run twice with the same figures):
+
+| | 32 kHz, 84 KB pool | 44.1 kHz, 81 KB pool |
+| --- | --- | --- |
+| Notes that came late (`L`) | 2 | 50 |
+| Times with no room in the pool (`F`) | 162 | 1 593 |
+| Hits / decodes / dropped sounds (`H` `M` `E`) | 1697 / 90 / 74 | 1261 / 207 / 197 |
+| MP3 frames decoded | 508 | 1 159 |
+| Time for one MP3 frame | 2 185 us | 2 659 us |
+| Longest control cycle | 43 ms | 46 ms |
+| Load while the song plays, mean / peak | 44.0 % / 49.9 % | 53.1 % / 64.3 % |
+| Load at rest | about 23 % | about 22 % |
+| Image (limit 453 921) | 453 724 bytes | 446 684 bytes (no resampler) |
+| Packed bank | 241 520 bytes (120 MP3, 45 lossless) | 317 788 bytes (96 MP3, 69 lossless) |
+
+The CPU is not the problem: 53 % in the mean is under the guess of 2d and far from the guard's 80 %. The pool is: every sound is 1.38 times bigger, and 25 times more notes come late. So
+44.1 kHz is of no use before the pool grows, and the next step is the RAM (the list at the end of 2d), not more work on the rate.
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell
