@@ -4,7 +4,7 @@
 //   node make_flash_overlay.js <bank.bin> <out> [user partition start in the flash image, default 0x7C000]
 const fs = require('fs');
 const [inPath, outPath, baseArg = '0x7C000'] = process.argv.slice(2);
-const SECTOR = 4096, BANK_OFFSET = 69632;                 // fm1b_config.h: FM1B_FLASH_OFFSET inside the user partition
+const SECTOR = 4096, BANK_OFFSET = 0;                     // fm1b_config.h: FM1B_FLASH_OFFSET inside the user partition (69632 before the bank moved to its start)
 const bank = fs.readFileSync(inPath);
 const start = Number(baseArg) + BANK_OFFSET;
 if (start % SECTOR) throw new Error('the bank must start on a sector');

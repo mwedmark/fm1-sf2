@@ -172,6 +172,21 @@ när cachen saknar plats (`85D99FA6`): **19 toner för sent**, 245 utklingningar
 | G1 | Behåll SF2-firmwaren eller flasha tillbaka `FM-1_015.fwsc`. | |
 | G2 | Skriv ned resultat och avvikelser i RUNNING.md avsnitt 5. | |
 
+## I. Banken i början av användarflashen (2026-11-11)
+
+Banken ligger nu på användarpartitionens början (`FM1B_FLASH_OFFSET` 0, upp till 536 576 byte) i stället för efter M-VAVE:s 68 KiB projektyta (69 632, upp till 466 944).
+Prova i fm1-emu (`start_emu.ps1 -Tap`) före FM-1:an, och ha `FM-1_015.fwsc` till hands.
+
+| # | Steg | Resultat |
+| --- | --- | --- |
+| I1 | Bygg och starta den nya firmwaren i fm1-emu med en bank på ca 450 KB som `make_flash_overlay.js` lagt i början (`&flash=`). Spelas den? | |
+| I2 | Samma firmware, bank lagd på det gamla stället (69 632: kör `make_flash_overlay.js` med startadress `0x8D000`). Spelas den? (Äldre bank ska fortfarande fungera.) | |
+| I3 | På FM-1:an med en bank från förut: flasha den nya firmwaren (utan att installera om banken). Spelas den gamla banken fortfarande? | |
+| I4 | install.html: installera en bank på över 466 944 byte (t.ex. en 500 KB BFP8-bank). Skrivs den, och skippas en andra installation (samma storlek och CRC)? | |
+| I5 | Efter H4: ligger inget kvar av den gamla banken som spelar (stäng av, sätt på)? Spelar den nya banken? | |
+| I6 | Försök installera en bank på över 524 KB. Vägrar sidan? | |
+| I7 | Äldre firmware (före detta ändring) och en bank på över 456 KB: vägras uppladdningen med ett fel, utan att skriva? | |
+
 ## Det emulatorn inte kunde visa
 
 - Att workbenchen godtar paketet och att vi kan flasha tillbaka (A).

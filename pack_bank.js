@@ -3,7 +3,7 @@
 // the sounds go into the flash as ONE constant-bit-rate mono MP3 stream (ffmpeg, bit reservoir off), a few that MP3 handles badly stay BFP8,
 // and a pack table (FORMAT.md, "Proposal: packed sample data") says where each sound is and how to decode it. The zone table is unchanged but
 // for the 12 or 16 bytes the longer header moves everything by, so a zone still addresses the sound as in the unpacked bank.
-//   node pack_bank.js in.fm1b out.fm1b [--kbit 64] [--flash 466944] [--margin 3072]
+//   node pack_bank.js in.fm1b out.fm1b [--kbit 64] [--flash 536576] [--margin 3072]
 // Needs ffmpeg with libmp3lame. The sounds are taken out of the BFP8 bank (its 44 dB noise is far below the MP3's), so no .sf2 is needed.
 // Sounds go lossless (codec 0, the BFP8 as it is) when MP3 would be badly wrong for them (SNR under 12 dB, worst first by dB per byte it costs),
 // as many as fit in --flash minus the packed file without them minus --margin; sounds with a very short loop (under 16 samples; the renderings listened to had every shorter-than-512 loop as MP3, crossfade clipped to half the loop) or zones that
@@ -32,7 +32,7 @@ const snr = (a, c) => { let s = 0, e = 0; for (let i = 0; i < a.length; i++) { s
 
 function pack(src, opt = {}) {
   const encode = opt.encode || ffmpegEncode, decode = opt.decode || ffmpegDecode;
-  const MIN = opt["min-loop"] === undefined ? MIN_LOOP : opt["min-loop"], kbit = opt.kbit || 64, flash = opt.flash || 466944, margin = opt.margin === undefined ? 3072 : opt.margin;
+  const MIN = opt["min-loop"] === undefined ? MIN_LOOP : opt["min-loop"], kbit = opt.kbit || 64, flash = opt.flash || 536576, margin = opt.margin === undefined ? 3072 : opt.margin;
   const dv = new DataView(src.buffer, src.byteOffset, src.byteLength), u32 = o => dv.getUint32(o, true);
   if (String.fromCharCode(...src.subarray(0, 4)) !== 'FM1B' || dv.getUint16(4, true) !== 1 || dv.getUint16(6, true) !== 8) throw new Error('not a version 1 BFP8 bank');
   if (dv.getUint32(8, true) !== 32000) throw new Error('the MP3 stream is coded at 32 kHz; the bank is at ' + u32(8));
@@ -108,10 +108,10 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.m
   const fs = require('fs');
   const a = process.argv.slice(2), pos = a.filter((x, i) => !x.startsWith('--') && !(i && a[i - 1].startsWith('--')));
   const opt = {}; for (let i = 0; i < a.length; i++) if (a[i].startsWith('--')) opt[a[i].slice(2)] = Number(a[++i]);
-  if (pos.length !== 2) { console.error('usage: node pack_bank.js in.fm1b out.fm1b [--kbit 64] [--flash 466944] [--margin 3072]'); process.exit(1); }
+  if (pos.length !== 2) { console.error('usage: node pack_bank.js in.fm1b out.fm1b [--kbit 64] [--flash 536576] [--margin 3072]'); process.exit(1); }
   const r = pack(new Uint8Array(fs.readFileSync(pos[0])), opt);
   fs.writeFileSync(pos[1], r.bytes);
   console.log(`${pos[1]}: ${r.bytes.length} bytes (the unpacked bank would be ${r.unpackedBytes}); ${r.sounds} sounds, ${r.sounds - r.lossless} in a ${r.mp3Bytes}-byte MP3 stream (mean ${r.meanSnr.toFixed(1)} dB), ${r.lossless} lossless (because of: ${JSON.stringify(r.why)})` +
-    (r.bytes.length > (opt.flash || 466944) ? ' - TOO BIG' : ''));
+    (r.bytes.length > (opt.flash || 536576) ? ' - TOO BIG' : ''));
 }
 })();

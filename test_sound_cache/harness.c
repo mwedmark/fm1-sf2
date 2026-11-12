@@ -21,6 +21,20 @@ EXPORT("loop_ptr") uint32_t loop_ptr(void) { return (uint32_t)(uintptr_t)g_loop;
 EXPORT("out_ptr") uint32_t out_ptr(void) { return (uint32_t)(uintptr_t)g_out; }
 EXPORT("set_stream_bytes") void set_stream_bytes(uint32_t n) { g_mp3.bytes = n; }
 
+/* One frame at g_stream + at, n bytes available, a decoder that starts fresh: the samples decoded (0 for a frame that was refused). */
+static int32_t g_probe_bytes;
+EXPORT("probe") int32_t probe(uint32_t at, uint32_t n)
+{
+    static int16_t pcm[MP3_SOUND_FRAME_SAMPLES];
+    mp3dec_t d;
+    mp3dec_frame_info_t info;
+    mp3dec_init(&d);
+    int32_t r = mp3dec_decode_frame(&d, g_stream + at, (int)n, pcm, &info);
+    g_probe_bytes = info.frame_bytes;
+    return r;
+}
+EXPORT("probe_frame_bytes") int32_t probe_frame_bytes(void) { return g_probe_bytes; }
+
 EXPORT("pack_group") void pack_group(const int16_t *pcm, uint8_t *out) { bfp8_pack_group(pcm, out); }
 
 /* Decode one sound in slices of `step` MP3 frames into g_out; returns the groups written, or -1 on error. */
