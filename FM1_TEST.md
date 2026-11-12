@@ -179,11 +179,11 @@ Prova i fm1-emu (`start_emu.ps1 -Tap`) före FM-1:an, och ha `FM-1_015.fwsc` til
 
 | # | Steg | Resultat |
 | --- | --- | --- |
-| I1 | Bygg och starta den nya firmwaren i fm1-emu med en bank på ca 450 KB som `make_flash_overlay.js` lagt i början (`&flash=`). Spelas den? | |
-| I2 | Samma firmware, bank lagd på det gamla stället (69 632: kör `make_flash_overlay.js` med startadress `0x8D000`). Spelas den? (Äldre bank ska fortfarande fungera.) | |
+| I1 | Bygg och starta den nya firmwaren i fm1-emu med en bank på ca 450 KB som `make_flash_overlay.js` lagt i början (`&flash=`). Spelas den? | Ja i fm1-emu 2026-11-12 (`main` med PR 19, bild 453 756 byte, CRC32 `D6E63696`; BFP8-bank 464 636 byte, 60 s av `astley60_rec.script`, 240 MHz): last ca 48 % under låten, 23 % i vila, infosidan visar banken med CRC32 `BCC6ED6B`. Utan bank: tyst, last 11 %. Ingen bank över 466 944 byte provad. |
+| I2 | Samma firmware, bank lagd på det gamla stället (69 632: kör `make_flash_overlay.js` med startadress `0x8D000`). Spelas den? (Äldre bank ska fortfarande fungera.) | Ja i fm1-emu 2026-11-12 (samma bygge och bank; de första 68 KiB tömda till 0xFF så att bara det gamla stället har en bank): last ca 50 % under låten, samma bank och CRC på infosidan. |
 | I3 | På FM-1:an med en bank från förut: flasha den nya firmwaren (utan att installera om banken). Spelas den gamla banken fortfarande? | |
 | I4 | install.html: installera en bank på över 466 944 byte (t.ex. en 500 KB BFP8-bank). Skrivs den, och skippas en andra installation (samma storlek och CRC)? | |
-| I5 | Efter H4: ligger inget kvar av den gamla banken som spelar (stäng av, sätt på)? Spelar den nya banken? | |
+| I5 | Efter I4: ligger inget kvar av den gamla banken som spelar (stäng av, sätt på)? Spelar den nya banken? | |
 | I6 | Försök installera en bank på över 524 KB. Vägrar sidan? | |
 | I7 | Äldre firmware (före detta ändring) och en bank på över 456 KB: vägras uppladdningen med ett fel, utan att skriva? | |
 
