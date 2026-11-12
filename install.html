@@ -388,7 +388,7 @@
   async function install(leaving = false) {
     if (busy) return;
     const doFw = leaving || $('doFirmware').checked, doBank = !leaving && $('doBank').checked;
-    if (!leaving && doBank && doFw && packedBank(bank) && fw !== 'live') { message('The bank is an MP3 bank: choose the firmware with the live cache above.', 'bad'); return; }
+    if (!leaving && doBank && doFw && packedBank(bank) && !isLive()) { message('The bank is an MP3 bank: choose the firmware with the live cache above.', 'bad'); return; }
     if (!leaving && doBank && isLive() && !(bank[6] & 8)) { message('The firmware with the live cache plays only BFP8 and MP3 banks: convert the bank to one of them, or choose the SF2 player.', 'bad'); return; }
     if (leaving && !stockPkg) { message('The original firmware V15 could not be loaded. Use Workbench (Restore original V15).', 'bad'); return; }
     if (!doFw && !doBank) { message('Choose firmware, sound bank or both.', 'bad'); return; }
@@ -472,7 +472,7 @@
   $('fwChoice').addEventListener('change', () => {
     if (busy) { $('fwChoice').value = fw; return; }
     chooseFw($('fwChoice').value);
-    message(packedBank(bank) && fw !== 'live' ? 'The bank is an MP3 bank: it plays only on the firmware with the live cache.' : '', 'bad');
+    message(packedBank(bank) && !isLive() ? 'The bank is an MP3 bank: it plays only on the firmware with the live cache.' : '', 'bad');
   });
   $('leaveOk').addEventListener('change', () => { $('leaveBtn').disabled = busy || !$('leaveOk').checked; });
   $('leaveBtn').addEventListener('click', () => { if ($('leaveOk').checked) install(true); });
