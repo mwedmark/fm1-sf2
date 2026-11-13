@@ -31,6 +31,15 @@
 #include "fm1b_rate.h"
 #endif
 #endif
+/* FM1B_FLASH_PROBE 1 (a measurement build; set it in the same header): the info page's ARP switches every voice between its samples in the
+ * flash and a 2 KB BFP8 tone in SRAM, the same code either way, so the CPU figures of the two tell what the flash reads cost. RUNNING.md, 2g. */
+#ifndef FM1B_FLASH_PROBE
+#define FM1B_FLASH_PROBE 0
+#endif
+#if FM1B_FLASH_PROBE
+void fm1b_probe_set(unsigned ram);
+unsigned fm1b_probe(void);
+#endif
 #ifndef FM1B_RATE
 #ifdef FM1_HOST_TEST
 #define FM1B_RATE 44100U
