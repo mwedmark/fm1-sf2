@@ -181,3 +181,11 @@ always in reach (the audio is started by our own function, last), and the boot s
 the same late start from the info page, with bits 8 and 9 clear until CPU1 reports in (at most 20 ms, a click in the sound), then CPU1 held
 again, so each press is a start of its own as before (3 of 10 then). Many starts in a row would mean the cause is found without touching the
 start-up; if not, an `.early.initcall` start (step 5) is the next candidate, only with the owner's say-so.
+
+**The late start with bits 8 and 9 off, on the FM-1 (2026-11-13, PR 34, `build_fw.ps1 -Rate 44100 -Cpu1Test -CacheKB 79`).** Ten presses of
+ARP with bits 8 and 9 off, one after the other without a restart: 0 of 10, all `NO START` (20 ms); the first press of the session had
+already made the sound go wrong. Then one press from a cold start each: mask 8, the sound went wrong after about a second and the unit had
+to be switched off; mask 8 and 9, it hung; mask 8 and 9 again, the sound went wrong after 3 s and it hung. No restart of its own in any of
+them. So the interrupts are not the cause: with either mask a late start does not report in, and the try itself breaks the running system a
+second or more later (what it disturbs is not known). Worse than 2026-11-05 (3 of 10), not explained. In line with Felucca: a late start does
+not work in this build. No more late starts on the device. Next: a start in an `.early.initcall` (step 5 above), with the owner's consent.
