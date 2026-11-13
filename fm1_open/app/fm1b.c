@@ -112,6 +112,29 @@ static FM1_DSP_CODE void drop_count(const struct voice *v, unsigned guard)
 enum { CUT_RELEASE = 13500 };
 enum { FORMAT_PCM8, FORMAT_PCM16, FORMAT_PCM12, FORMAT_SEA, FORMAT_BFP8 };
 enum { BFP_GROUP = 32, BFP_GROUP_BYTES = 33 };   /* BFP8: a shift byte, then 32 signed 8-bit mantissas */
+#if FM1B_FLASH_PROBE
+#if FM1B_INTERP4
+#error "FM1B_FLASH_PROBE is for the linear voice loop"
+#endif
+/* The probe (fm1b.h): 64 BFP8 groups in SRAM, a triangle of 64 frames at about -24 dBFS. With it on, each voice reads there instead of
+ * its own samples, its position masked to the 2 048 frames; with it off the mask is all ones: the same instructions, only the memory differs. */
+enum { PROBE_GROUPS = 64, PROBE_FRAMES = PROBE_GROUPS * BFP_GROUP };
+static uint8_t probe_ram[PROBE_GROUPS * BFP_GROUP_BYTES];
+static volatile unsigned probe_on;
+void fm1b_probe_set(unsigned ram)
+{
+    if (ram && !probe_ram[0]) {
+        for (unsigned f = 0; f < PROBE_FRAMES; ++f) {
+            unsigned g = f / BFP_GROUP, t = f % 64U;
+            int m = t < 32U ? (int)t * 8 - 128 : 128 - ((int)t - 32) * 8;
+            probe_ram[g * BFP_GROUP_BYTES] = 4;
+            probe_ram[g * BFP_GROUP_BYTES + 1U + f % BFP_GROUP] = (uint8_t)(int8_t)(m > 127 ? 127 : m);
+        }
+    }
+    probe_on = ram ? 1U : 0U;
+}
+unsigned fm1b_probe(void) { return probe_on; }
+#endif
 enum { MOD_RECORD_LFO = 20, MOD_RECORD_FILTER = 40 };
 enum { NOTE_LAYERS = 4 };   /* the zones one note starts at most: the key map's and up to three stacked on it */   /* a modulation record: up to its LFOs, up to its filter (i16 in SF2 units) */
 enum { MENV_DELAY, MENV_ATTACK, MENV_HOLD, MENV_DECAY, MENV_SUSTAIN, MENV_RELEASE, MENV_ONE = 1 << 24 };
@@ -1600,6 +1623,13 @@ static inline __attribute__((always_inline)) void voice_run(struct voice *v, int
 #else
     const uint8_t *pcm = bank.image + v->data;
 #endif
+#if FM1B_FLASH_PROBE
+    const unsigned ram = probe_on;
+    const uint32_t mask = ram ? PROBE_FRAMES - 1U : ~0U;
+    if (ram) pcm = probe_ram;
+#else
+    const uint32_t mask = ~0U;
+#endif
     const uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
     uint32_t position = v->position, fraction = v->fraction, step = v->step;
     int32_t level = v->level, level_step = v->level_step;
@@ -1646,7 +1676,7 @@ static inline __attribute__((always_inline)) void voice_run(struct voice *v, int
                 x = (p * w[0] + a * w[1] + b * w[2] + c * w[3]) >> 10;   /* Q4; the weights' sum of magnitudes under 1.25 */
             }
 #else
-            int32_t a = sample_at(v, pcm, position, format), b = next < length ? sample_at(v, pcm, next, format) : 0;
+            int32_t a = sample_at(v, pcm, position & mask, format), b = next < length ? sample_at(v, pcm, next & mask, format) : 0;
             int32_t x = a * 16 + (((b - a) * (int32_t)(fraction >> 1)) >> 11);   /* Q4; (b - a) * 15 bits stays in 32 */
 #endif
             int32_t y = (int32_t)(((int64_t)x * level) >> 25);

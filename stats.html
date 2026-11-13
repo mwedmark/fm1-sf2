@@ -73,8 +73,8 @@
   // Version 1 has 20 values, version 2 22 (the longest control step and screen update since the last message), version 3 23 (releasing voices
   // cut so that a waiting note's sound got room).
   const NAMES = ['ms', 'hits', 'misses', 'evictions', 'noRoom', 'frames', 'requested', 'lost', 'waiting', 'pinned',
-                 'busyMs', 'cycles', 'cycleMs', 'cycleMax', 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard', 'stepMax', 'screenMax', 'squeezed'];
-  const COUNT = { 1: 20, 2: 22, 3: 23 };
+                 'busyMs', 'cycles', 'cycleMs', 'cycleMax', 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard', 'stepMax', 'screenMax', 'squeezed', 'probe'];
+  const COUNT = { 1: 20, 2: 22, 3: 23, 4: 24 };   // 4: a FM1B_FLASH_PROBE build, 'probe' 1 while the voices read the SRAM (RUNNING.md, 2g)
   const $ = id => document.getElementById(id);
   let base = null, last = null, count = 0;
 
