@@ -30,10 +30,11 @@ async function get(url) {
   // (?v= below) is the same, so a new build is fetched (start_emu.ps1, 1b).
   const mainPath = path.join(out, 'main.js');
   let main = fs.readFileSync(mainPath, 'utf8');
-  const kept = /(  const kept = await keptEntry\(f\.id\);\r?\n)  if \(kept\) \{/;
-  if (kept.test(main))
-    main = main.replace(kept, '$1  if (kept && (f.id !== "sf2" || kept.url === f.package)) {   // a new build of sf2 is fetched');
-  else console.warn('WARNING: main.js changed upstream: a browser may boot an older sf2 build');
+  // (upstream changed the line on 2026-11-11 to `!f.link && await keptEntry(f.id)`: accept both forms, and fail the build if neither matches,
+  // since a stale kept sf2 package boots an old firmware that looks for the bank at the wrong flash offset: no bank, no song.)
+  const kept = /(  const kept = (?:!f\.link && )?await keptEntry\(f\.id\);[^\r\n]*\r?\n)  if \(kept\) \{/;
+  if (!kept.test(main)) throw new Error('main.js changed upstream: the kept-package patch no longer applies');
+  main = main.replace(kept, '$1  if (kept && (f.id !== "sf2" || kept.url === f.package)) {   // a new build of sf2 is fetched');
   // window.__midi(bytes): MIDI into the emulator's DIN jack, for player.html (JZZ). Same line as start_emu.ps1 adds.
   if (!/window\.__midi/.test(main))
     main = main.trimEnd() + '\nwindow.__midi = (bytes) => send({ type: "midi", bytes: Array.from(bytes) });   // local addition: the page plays MIDI into the DIN jack\n';
