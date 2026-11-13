@@ -20,3 +20,14 @@ struct cpu1_tries {
     uint32_t last_state, last_mask, last_start_us;   /* the last try: CPU1_*, its mask, the us from release to CPU1's report */
 };
 void cpu1_test_try(struct cpu1_tries *t);
+
+/* The boot start (FM1_CPU1_TEST 2, build_fw.ps1 -Cpu1Boot): in an .early.initcall, before power, Bluetooth, the flash driver, USB and the
+ * audio, CPU1 is started only while ARP is held at power-on; it is then left running its RAM loop. ARP on the info page gives it one job. */
+struct cpu1_boot {
+    uint32_t asked;                    /* ARP was held at power-on */
+    uint32_t state;                    /* CPU1_*: NOT_RUN when not asked */
+    uint32_t loops;                    /* the wait's turns until CPU1 reported in (no timer runs that early) */
+    uint32_t jobs_tried, jobs_ok;
+};
+extern struct cpu1_boot cpu1_boot_state;
+void cpu1_boot_job(struct cpu1_boot *b);

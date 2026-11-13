@@ -176,4 +176,72 @@ void cpu1_test_try(struct cpu1_tries *t)
     if (state == CPU1_OK) t->ok[mask]++;
     t->last_state = state; t->last_mask = mask; t->last_start_us = start_us;
 }
+
+#if FM1_CPU1_TEST == 2
+/* The boot start: as felucca-bsp's at power-on, but in the earliest place this build gives us (an .early.initcall: the scheduler and the
+ * system timer run already; power, Bluetooth, the flash driver, USB and the audio do not). Only while ARP is held: a normal start never
+ * touches CPU1, so a start that hangs is undone by switching off and on without ARP. Interrupts (ICFG bits 8 and 9) off meanwhile. */
+struct cpu1_boot cpu1_boot_state;
+enum { BOOT_WAIT_LOOPS = 4000000 };          /* the wait for CPU1's report: tens of ms at 320 MHz */
+int fm1_board_key_held_at_boot(unsigned key);
+static int cpu1_boot(void)
+{
+    struct cpu1_boot *b = &cpu1_boot_state;
+    uint32_t icfg, div, pc[4], top, i, n;
+    b->asked = fm1_board_key_held_at_boot(10U) ? 1U : 0U;   /* ARP */
+    if (!b->asked)
+        return 0;
+    icfg = icfg_read();
+    icfg_write(icfg & ~0x300U);
+    cpu1_stop();
+    mb.request = mb.complete = mb.ready = mb.rejected = mb.misread = mb.jobs = mb.result = 0;
+    mb.fn = 0;
+    SYNC();
+    for (i = 0; i < 32U; i++) ICFG(i) = 0;
+    dbg_unlock();
+    pc[0] = PC_LIMIT0_L; pc[1] = PC_LIMIT0_H; pc[2] = PC_LIMIT1_L; pc[3] = PC_LIMIT1_H;
+    PC_LIMIT0_L = 0U; PC_LIMIT0_H = 0xFFFFFFFFU; PC_LIMIT1_L = 0U; PC_LIMIT1_H = 0xFFFFFFFFU;
+    top = WR_LIMIT_EN & 4U;
+    WR_LIMIT_EN &= ~4U;
+    dbg_lock();
+    ENTRY_WORD = (uint32_t)(uintptr_t)cpu1_entry;
+    div = SYS_DIV;
+    SYS_DIV = div | 8U;
+    SYNC();
+    C1_CON |= 8U;
+    C1_CON &= ~2U;
+    for (n = 0; !mb.ready && n < BOOT_WAIT_LOOPS; ++n) SYNC();
+    SYS_DIV = div;
+    b->loops = n;
+    if (mb.ready) b->state = CPU1_OK;        /* left running its loop in RAM */
+    else { cpu1_stop(); b->state = CPU1_NO_START; }
+    dbg_unlock();                            /* the limits back as soon as it has reported (or not) */
+    DBG_MSG_CLR = 0xFFFFFFFFU;
+    PC_LIMIT0_L = pc[0]; PC_LIMIT0_H = pc[1]; PC_LIMIT1_L = pc[2]; PC_LIMIT1_H = pc[3];
+    WR_LIMIT_EN |= top;
+    dbg_lock();
+    icfg_write(icfg);
+    return 0;
+}
+static int (*const cpu1_boot_call)(void) __attribute__((section(".early.initcall"), used)) = cpu1_boot;
+
+/* ARP on the info page: one job on the running CPU1 beside CPU0's own run of it, compared; a failure holds CPU1 */
+void cpu1_boot_job(struct cpu1_boot *b)
+{
+    if (b->state != CPU1_OK)
+        return;
+    uint32_t arg = JOB_LOOPS + b->jobs_tried, a = job_sum(arg), request = mb.request + 1U, c, t0, state;
+    mb.fn = job_sum; mb.arg = arg; mb.check = CHECK(job_sum, arg, request);
+    SYNC();
+    t0 = T4;
+    mb.request = request;
+    SYNC();
+    c = job_sum(arg);
+    while (mb.complete != request && !mb.rejected && us_since(t0) < JOB_TIMEOUT_US) SYNC();
+    state = mb.rejected ? CPU1_MISREAD : mb.complete != request ? CPU1_LATE : (mb.result != a || c != a) ? CPU1_BAD_SUM : CPU1_OK;
+    b->jobs_tried++;
+    if (state == CPU1_OK) b->jobs_ok++;
+    else { uint32_t f = fm1_device_irq_save(); cpu1_stop(); fm1_device_irq_restore(f); b->state = state; }
+}
+#endif
 #endif

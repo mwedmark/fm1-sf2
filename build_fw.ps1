@@ -10,8 +10,10 @@
 # -FlashProbe (a measurement build) adds FM1B_FLASH_PROBE 1 to it: ARP on the info page switches the voices between flash and SRAM (RUNNING.md, 2g).
 # -Cpu1Test (a test build) adds FM1_CPU1_TEST 1: ARP on the info page starts the second core once, SEQ chooses the interrupts off meanwhile
 # (app\cpu1_test.c; PLAN_DUALCORE_CLOCK.md on branch sf2-dualcore, section 7). Never started at power-on.
+# -Cpu1Boot (a test build) adds FM1_CPU1_TEST 2: CPU1 started in an .early.initcall, only while ARP is held at power-on; ARP on the info page
+# then gives it a job. A start that hangs: switch off and on without ARP.
 param([Parameter(Mandatory)][string]$Name, [string]$Bank = 'dist\gm_32k_packed.fm1b', [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
-      [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test)
+      [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test, [switch]$Cpu1Boot)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 if ($Name -notmatch '^[A-Za-z0-9_.-]{1,27}$') { throw 'Name: letters, digits, _ . - only, at most 27 characters (the screen shows 40 with .fwsc)' }
@@ -22,11 +24,13 @@ if ($Rate -eq 44100 -and !$PSBoundParameters.ContainsKey('CacheKB')) { $CacheKB 
 if (Test-Path $rateFile) { throw "$rateFile is left from another build: remove it (-Rate writes it for one build)" }
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
 Set-Content $info "/* Written by build_fw.ps1 for one build; not committed. */`n#define FM1_BUILD_NAME `"$Name.fwsc`"`n#define FM1_BUILD_DATE `"$date`"`n" -NoNewline
-if ($Rate -ne 32000 -or $FlashProbe -or $Cpu1Test) {
-    $lines = @('/* Written by build_fw.ps1 -Rate / -FlashProbe / -Cpu1Test for one build; not committed. */')
+if ($Cpu1Test -and $Cpu1Boot) { throw '-Cpu1Test and -Cpu1Boot: one or the other' }
+if ($Rate -ne 32000 -or $FlashProbe -or $Cpu1Test -or $Cpu1Boot) {
+    $lines = @('/* Written by build_fw.ps1 -Rate / -FlashProbe / -Cpu1Test / -Cpu1Boot for one build; not committed. */')
     if ($Rate -ne 32000) { $lines += "#define FM1B_RATE ${Rate}U" }
     if ($FlashProbe) { $lines += '#define FM1B_FLASH_PROBE 1' }
     if ($Cpu1Test) { $lines += '#define FM1_CPU1_TEST 1' }
+    if ($Cpu1Boot) { $lines += '#define FM1_CPU1_TEST 2' }
     Set-Content $rateFile (($lines -join "`n") + "`n") -NoNewline
 }
 try {

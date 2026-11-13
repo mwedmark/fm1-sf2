@@ -520,7 +520,22 @@ static void info_update(void)
         line_show(14, 217, wide, 1, GREY);
     }
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
+    {   /* "CPU1 BOOT OK 1234 JOBS 3/3", or what kept it from starting; NOT ASKED: ARP was not held at power-on */
+        static const char *const why[] = {"NOT ASKED", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
+        const struct cpu1_boot *b = &cpu1_boot_state;
+        d = put_text(line, "CPU1 BOOT ");
+        d = put_text(d, why[b->state < 6U ? b->state : 0]);
+        if (b->asked) {
+            d = put_number(put_text(d, " "), (int32_t)b->loops, 0);
+            d = put_number(put_text(d, " JOBS "), (int32_t)b->jobs_ok, 0);
+            d = put_number(put_text(d, "/"), (int32_t)b->jobs_tried, 0);
+        }
+        *d = 0;
+        line_show(15, 140, line, 1, !b->asked ? GREY : b->state == CPU1_OK ? GREEN : ORANGE);
+    }
+    line_show(11, 228, cpu1_boot_state.state == CPU1_OK ? "REC BACK  ARP: A JOB ON CPU1" : "REC BACK  ARP AT POWER-ON: CPU1", 1, GREY);
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
     {   /* "CPU1 M8 3/10 M89 9/10 OK 812US": the tries and starts that worked with each mask, the last try's result and start time */
         static const char *const why[] = {"-", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
         const struct cpu1_tries *t = &cpu1_tries;
@@ -1041,7 +1056,10 @@ void groove_screen_control(void)
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: the voices' samples from the flash or the SRAM probe */
         fm1b_probe_set(!fm1b_probe());
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one job on the CPU1 the start left running */
+        cpu1_boot_job(&cpu1_boot_state);
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one start of the second core */
         cpu1_test_try(&cpu1_tries);
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_SEQ)))      /* SEQ on the info page: the interrupts off while it starts */
