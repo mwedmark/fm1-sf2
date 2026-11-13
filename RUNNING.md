@@ -388,6 +388,45 @@ Built so, the image is the same size as above (446 716 bytes with a 27-character
 same counts: `CACHE H303 M5 E0 F0 L0 P0 W0`, load about 56 % (peak 66 %) against 44 % (peak 50 %) for today's 32 kHz firmware and packed bank (2 late notes, 162 times with no room).
 4-point interpolation at 44.1 kHz (`FM1B_INTERP4 1`) cost about 18 points more (mean 75 %, peak 86 %, over the CPU guard's 80 %) and 2.5 KB of heap (pool 78 KB): not with one core.
 
+### 2g. What the flash reads cost the voices on the FM-1 (2026-11-13)
+
+For the second core (branch `sf2-dualcore`, `PLAN_DUALCORE_CLOCK.md`): if only CPU0 reads the flash, can CPU1 still take the heavy part? That depends on how much of a
+voice's time is reading its samples from the flash. Measured on the device with a probe build:
+
+```
+.\build_fw.ps1 -Name sf2player_44k_probe -Rate 44100 -FlashProbe -CacheKB 79 -Bank dist\gm_44k_fill.fm1b
+node make_install.js dist\gm_44k_fill.fm1b       (then install.html: the bank is skipped)
+```
+
+`-FlashProbe` (`FM1B_FLASH_PROBE 1` in `fm1b_rate.h`) puts 64 BFP8 groups (2 112 bytes, a quiet triangle) in SRAM, and ARP on the info page switches every voice between
+its own samples in the flash and that buffer: the voice's position is masked to the buffer's 2 048 frames, with the mask all ones in the flash mode, so both run the same
+instructions and only the memory differs. The info page's last line says `ARP SAMPLES: FLASH` or `RAM`, and the live figures over MIDI (3d) carry it as a 24th value
+(version 4; `stats.html` reads it as `probe`). The pool is 79 KB to make room for the buffer. The default build is unchanged (453 756 bytes).
+
+The whole of "Never gonna give you up" played twice from Windows, once in each mode (`dist\stats_log.jsonl`, the seconds with voices sounding):
+
+| | Flash | SRAM |
+| --- | --- | --- |
+| Seconds | 215 | 214 |
+| CPU, mean / highest peak | 53.7 % / 115 % | 55.0 % / 117 % |
+| Voices, mean | 18.6 | 18.9 |
+| Voices the CPU guard took | 240 | 238 |
+| CPU against voices (least squares) | 23.4 % + 1.63 % a voice | 20.5 % + 1.83 % a voice |
+
+CPU at the same number of voices, mean of the seconds with that many:
+
+| Voices | 16 | 17 | 18 | 19 | 20 | 21 | 22 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Flash | 49.0 % | 51.0 % | 54.2 % | 55.0 % | 56.0 % | 58.3 % | 57.9 % |
+| SRAM | 49.2 % | 51.8 % | 54.5 % | 55.8 % | 57.2 % | 59.1 % | 61.3 % |
+
+The two are the same within the noise (SRAM if anything a little dearer): reading the samples from the flash costs the voices nothing that shows, most likely
+because the chip's flash cache catches it. The time is the voice's arithmetic: interpolation, envelope, filter, mixing. So a split where CPU0 copies each voice's
+samples for the block into SRAM and CPU1 does the rest from SRAM gives CPU1 nearly all of the work without CPU1 ever reading the flash; the cost is the SRAM for those
+samples (8-16 KB at 44.1 kHz and 32 voices), which the heap does not have to spare today. Not measured: the BFP8 unpacking (one shift a sample, in both modes); the SRAM
+buffer is the best case for the cache (2 KB), and it was not cheaper. fm1-emu showed about 47 % (SRAM) against 55 % (flash) for the first minute, so it models the flash
+slower than the device is here.
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell

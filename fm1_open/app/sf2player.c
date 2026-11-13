@@ -372,7 +372,8 @@ static void stats_midi_poll(void)
     if (now - stats_sent_at < 1000U)
         return;
     stats_sent_at = now;
-    uint32_t v[23] = {now};
+    enum { VALUES = 23 + FM1B_FLASH_PROBE };                  /* version 4 (the probe build): 23 the probe, 1 when the voices read the SRAM */
+    uint32_t v[VALUES] = {now};
 #if FM1B_PACKED
     struct fm1b_cache_stats cs;
     fm1b_cache_stats(&cs);
@@ -387,8 +388,11 @@ static void stats_midi_poll(void)
     v[17] = st.drops_held; v[18] = st.drops_tail; v[19] = st.drops_guard;
     v[20] = window_step_max; v[21] = window_screen_max;
     window_step_max = window_screen_max = 0;
-    uint8_t m[6 + 23 * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x03}, *d = m + 6;
-    for (unsigned i = 0; i < 23; ++i)
+#if FM1B_FLASH_PROBE
+    v[23] = fm1b_probe();
+#endif
+    uint8_t m[6 + VALUES * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, VALUES == 24 ? 0x04 : 0x03}, *d = m + 6;
+    for (unsigned i = 0; i < VALUES; ++i)
         for (unsigned k = 0; k < 5; ++k)
             *d++ = (uint8_t)((v[i] >> (7 * k)) & 0x7fU);
     *d = 0xf7;
@@ -509,7 +513,11 @@ static void info_update(void)
         line_show(14, 217, wide, 1, GREY);
     }
 #endif
+#if FM1B_FLASH_PROBE
+    line_show(11, 228, fm1b_probe() ? "REC BACK  ARP SAMPLES: RAM" : "REC BACK  ARP SAMPLES: FLASH", 1, fm1b_probe() ? ORANGE : GREY);
+#else
     line_show(11, 228, "REC BACK", 1, GREY);
+#endif
 }
 static void page_clear(void)
 {
@@ -1007,6 +1015,10 @@ void groove_screen_control(void)
         if (so.playing) song_stop();
         else song_play();
     }
+#endif
+#if FM1B_FLASH_PROBE
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: the voices' samples from the flash or the SRAM probe */
+        fm1b_probe_set(!fm1b_probe());
 #endif
     if (channels && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
         struct fm1b_channel info;
