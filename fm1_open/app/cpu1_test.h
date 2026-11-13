@@ -30,4 +30,8 @@ struct cpu1_boot {
     uint32_t jobs_tried, jobs_ok;
 };
 extern struct cpu1_boot cpu1_boot_state;
+/* What the panel scan at power-on saw (app/board/panel.c), for the info page: the columns of the 48 whose DMA had finished before the wait
+ * ran out, the columns (bit per column 0..10) where any contact read closed, and the buttons the decode ended with. */
+struct fm1_boot_scan { uint32_t done, columns, buttons; };
+extern struct fm1_boot_scan fm1_boot_scan;
 void cpu1_boot_job(struct cpu1_boot *b);
