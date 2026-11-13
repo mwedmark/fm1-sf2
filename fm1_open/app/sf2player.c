@@ -22,7 +22,9 @@
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
+#include "cpu1_sdk_addr.h"                               /* written by build_fw.ps1 -Cpu1Probe from the link: the SDK's own (local) symbols */
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
 #include "cpu1_test.h"
 #if FM1B_FLASH_PROBE
 #error "FM1_CPU1_TEST and FM1B_FLASH_PROBE both take ARP on the info page"
@@ -520,7 +522,28 @@ static void info_update(void)
         line_show(14, 217, wide, 1, GREY);
     }
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
+    {   /* Read only: does the SDK's CPU1 run? "C1 0000000A U1 W0 F00000000 S00004000": CPU1's control register (bit 3: released, bit 1:
+         * held), the SDK's flag CPU1 sets when its worker runs (is4byte_mode), the flag of the flash hand-over (cpu_wait_flag), the function
+         * the other core's interrupt would run (cpu_do_in_irq_func), and the register cpu_enter_sfc_critical waits on (bit 14).
+         * PLAN_DUALCORE_CLOCK.md (branch sf2-dualcore), section 8. */
+        static const char hex[] = "0123456789ABCDEF";
+        const uint32_t c1 = *(volatile uint32_t *)0x1EEE004U, s = *(volatile uint32_t *)0x1EEE008U;
+        const uint32_t up = *(volatile uint8_t *)(uintptr_t)FM1_SDK_IS4BYTE_MODE, wait = *(volatile uint8_t *)(uintptr_t)FM1_SDK_CPU_WAIT_FLAG;
+        const uint32_t fn = *(volatile uint32_t *)(uintptr_t)FM1_SDK_CPU_DO_IN_IRQ_FUNC;
+        d = put_text(line, "C1 ");
+        for (int k = 28; k >= 0; k -= 4) *d++ = hex[(c1 >> k) & 15U];
+        d = put_number(put_text(d, " U"), (int32_t)up, 0);
+        d = put_number(put_text(d, " W"), (int32_t)wait, 0);
+        d = put_text(d, " F");
+        for (int k = 28; k >= 0; k -= 4) *d++ = hex[(fn >> k) & 15U];
+        d = put_text(d, " S");
+        for (int k = 28; k >= 0; k -= 4) *d++ = hex[(s >> k) & 15U];
+        *d = 0;
+        line_show(15, 140, line, 1, (c1 & 8U) && !(c1 & 2U) ? GREEN : ORANGE);
+    }
+    line_show(11, 228, "REC BACK  CPU1 READ ONLY", 1, GREY);
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
     {   /* "CPU1 BOOT OK 1234 JOBS 3/3", or what kept it from starting; NOT ASKED: ARP was not held at power-on */
         static const char *const why[] = {"NOT ASKED", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
         const struct cpu1_boot *b = &cpu1_boot_state;
@@ -1066,7 +1089,8 @@ void groove_screen_control(void)
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: the voices' samples from the flash or the SRAM probe */
         fm1b_probe_set(!fm1b_probe());
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one job on the CPU1 the start left running */
         cpu1_boot_job(&cpu1_boot_state);
 #elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST

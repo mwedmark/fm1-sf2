@@ -8,7 +8,7 @@
 #include "fm1b_rate.h"
 #endif
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST && FM1_CPU1_TEST < 3
 #define CPU1_USTACK_BYTES 1536	/* the jobs' stack; a multiple of 8 (cpu1_test.c reads the same number) */
 	.section .volatile_ram_code,"ax",@progbits	/* in RAM: CPU1 must not fetch its first instructions from flash */
 	.balign 4

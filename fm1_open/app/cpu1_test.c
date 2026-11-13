@@ -4,7 +4,7 @@
  * (github.com/keremimo/melodee), Charles Vestal, Leo Kuroshita (@kurogedelic) of Hugelton Instruments; written against the public
  * JieLi AC79 SDK (Apache-2.0). From the 2026-11-05 test (cpu1_spike.c, branch sf2-dualcore). */
 #include "fm1b.h"                                /* FM1_CPU1_TEST comes with fm1b_rate.h */
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST && !defined(FM1_HOST_TEST)
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST && FM1_CPU1_TEST < 3 && !defined(FM1_HOST_TEST)
 #include "cpu1_test.h"
 #include "fm1_device.h"
 
