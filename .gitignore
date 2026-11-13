@@ -11,6 +11,7 @@ tools/fluidsynth/
 test_fluid/*.wasm
 test_fluid/out/
 fm1_open/app/build_info.h
+fm1_open/app/fm1b_rate.h
 __pycache__/
 test_sound_cache/*.wasm
 soundfonts/8MBGMGS__UNOFFICIAL_.SF2
