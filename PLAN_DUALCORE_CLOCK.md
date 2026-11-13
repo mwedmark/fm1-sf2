@@ -189,3 +189,30 @@ to be switched off; mask 8 and 9, it hung; mask 8 and 9 again, the sound went wr
 them. So the interrupts are not the cause: with either mask a late start does not report in, and the try itself breaks the running system a
 second or more later (what it disturbs is not known). Worse than 2026-11-05 (3 of 10), not explained. In line with Felucca: a late start does
 not work in this build. No more late starts on the device. Next: a start in an `.early.initcall` (step 5 above), with the owner's consent.
+
+## 8. The SDK starts CPU1 itself, and it can be borrowed (2026-11-13)
+
+**Found in `sdk.elf`.** `main` calls a function of the SDK's library (`fm1_r_7919135c9963`) before `os_init`, unconditionally: it writes
+CPU1's entry into the word at 0x01C7FFF8 (SDK code that sets its stacks and jumps to a RAM loop), sets C1_CON bit 3 and clears bit 1, and
+waits until CPU1 sets a flag byte (the byte after `is4byte_mode`, a local of the library). CPU1 then runs `interrupt_init` and a worker loop
+in RAM that renders the SDK's own FM engine from an `exchange` mailbox (the SF2 player never feeds it), and it answers an inter-core
+interrupt (`another_cpu_irq`, irq 124/125, priority 7). `cpu_enter_sfc_critical(func, priv)`, which the SDK's flash driver calls, sends
+that interrupt and waits for CPU1 to acknowledge (`cpu_wait_flag`); CPU1 then runs `func(priv)` if given, else is held, and waits in its
+interrupt until `cpu_exit_sfc_critical`. So every start of ours (section 7, and 2026-11-05) held and replaced a CPU1 that was running and
+that the flash driver needs: the next flash access waited for an answer that never came. That is the bad sound and the hangs, and the late
+`NO START`.
+
+**On the FM-1.** A read-only build (`build_fw.ps1 -Cpu1Probe`): the flag reads 1 (CPU1 runs); C1_CON reads 0x01000000 (bit 3 does not read
+back). A job borrowed through the SDK's own hand-over (`-Cpu1Borrow`, `app/cpu1_borrow.c`, PR 34): ARP on the info page calls
+`cpu_enter_sfc_critical(job, n)`, CPU1 runs the job (a checksum in RAM) while CPU0 runs the same, `cpu_exit_sfc_critical` lets it go.
+Ten presses: `BORROW OK 10/10 0:2828 2:2626 1:2625us` (CPU0 alone, both at once until both were done, CPU1), no hang, the sound normal.
+The two cores run in parallel; 2 625 us on CPU1 is what the 2026-11-05 test measured. fm1-emu runs CPU1 too (the same result).
+
+**Local symbols.** The hand-over's functions and flags are local to the SDK's library, so the build links once, reads their addresses with
+`llvm-nm` into `fm1_open/app/cpu1_sdk_addr.h` (not committed) and links again until the image has the addresses it was built with (two
+links here).
+
+**Next: the voices on CPU1.** Split as section 3 proposes (voices, per-core buffers, bit exact on the host first), handed over in the audio
+interrupt: enter, then exit at once (CPU1 goes on with the job and returns from its interrupt when done, so CPU0's interrupts are off only for
+the handshake), CPU0 renders its share, waits for CPU1's done flag, adds the buffers. While CPU1 runs the job it cannot answer the flash
+driver, which then waits until it is done (at most one share of the voices). 2g found the flash reads cheap, so CPU1 may read the samples itself.
