@@ -353,7 +353,27 @@ start of the user flash; without them about 70 KB more of the sounds would be MP
 how often a sound is played, and this song uses few of them. `test_pack_bank.js --packed` compares with a 32 kHz bank, so `--fill` has no test of its own on a 44.1 kHz bank.
 
 **On the FM-1, 2026-11-13.** This firmware and bank, installed with `install.html` (`dist\gm_44k_fill.fm1b` as the bank of `make_install.js`), play on the device: the
-first bank over 466 944 bytes on it, and the first at the start of the user flash. Listened to; load and late notes not read off the device yet.
+first bank over 466 944 bytes on it, and the first at the start of the user flash. Listened to: sounds right. A second install skips both.
+
+**The whole of "Never gonna give you up" on the FM-1** (2026-11-13, this firmware `sf2player_44k_20261113.fwsc`, the live figures over MIDI with `stats.html` as in 3d,
+239 s of the song from the first voice to the last; against the same song on the 32 kHz firmware and packed bank of 2026-11-11, `FM1_TEST.md` H):
+
+| | 32 kHz, 84 KB pool, packed bank (2026-11-11) | 44.1 kHz, 81 KB pool, `--fill 1` bank |
+| --- | --- | --- |
+| Notes that came late | 25 (19 with releasing voices cut) | 0 |
+| Times with no room in the pool | 373 | 0 |
+| Decodes / dropped sounds | 426 / 407 | 3 / 0 |
+| CPU, mean of the seconds | 63 % | 49 % |
+| CPU, highest peak | 83 % | 117 % |
+| Voices the CPU guard took (`DROPPED CPU`) | 3 | 257 |
+| Held notes dropped (`DROPPED HELD`) | 502 | 1 551 |
+| Releases cut (`DROPPED TAIL`) | 5 131 | 4 447 |
+| Longest control cycle | 128 ms | 93 ms |
+
+The cache is no longer the limit on the device either: three decodes in the whole song. The CPU is: from 26 s on the peak goes over the guard's 80 % in nearly every
+second (up to 117 %), the guard lowers the voice limit and fades voices out, releasing ones first, which is why `HELD` is three times what it was. The lower mean is most
+likely the guard at work, not a cheaper player. Nothing wrong was heard. fm1-emu at 240 MHz showed 56 % with peaks of 66 % for the first minute, so it reads the device's load
+low here. One MP3 frame took 7.1 ms on the device (22 frames). Next: the voices on the second core (branch `sf2-dualcore`), or fewer voices at 44.1 kHz.
 
 **The build switch** (2026-11-13): `-Rate 44100` on `build_fw.ps1`, `build_firmware.ps1` and `build_all.ps1` writes `fm1_open\app\fm1b_rate.h` for the one build and removes it
 after (git ignores it), and takes an 81 KB pool unless `-CacheKB` says otherwise. `build_firmware.ps1` and `build_all.ps1` then use `dist\gm_44k_fill.fm1b`, which is made by hand:
