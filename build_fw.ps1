@@ -17,8 +17,10 @@
 # (not committed) and links again until the addresses it was built with are the ones in the image.
 # -Cpu1Borrow (a test build) adds FM1_CPU1_TEST 4: ARP on the info page runs one job on CPU1 through the SDK's own hand-over
 # (cpu_enter_sfc_critical / cpu_exit_sfc_critical, app\cpu1_borrow.c), with the same address passes. CPU1 is not started, held or restarted.
+# -Cpu1Split adds FM1B_SPLIT 1: each block's voices shared between CPU0 and the SDK's CPU1 through that hand-over (fm1b.c, app\cpu1_split.c),
+# with the same address passes; the info page switches it (ARP) and sets CPU1's share (SEQ). Its buffers take about 4 KB: give -CacheKB 77 at 44.1 kHz.
 param([Parameter(Mandatory)][string]$Name, [string]$Bank = 'dist\gm_32k_packed.fm1b', [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
-      [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test, [switch]$Cpu1Boot, [switch]$Cpu1Probe, [switch]$Cpu1Borrow)
+      [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test, [switch]$Cpu1Boot, [switch]$Cpu1Probe, [switch]$Cpu1Borrow, [switch]$Cpu1Split)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 if ($Name -notmatch '^[A-Za-z0-9_.-]{1,27}$') { throw 'Name: letters, digits, _ . - only, at most 27 characters (the screen shows 40 with .fwsc)' }
@@ -29,8 +31,8 @@ if ($Rate -eq 44100 -and !$PSBoundParameters.ContainsKey('CacheKB')) { $CacheKB 
 if (Test-Path $rateFile) { throw "$rateFile is left from another build: remove it (-Rate writes it for one build)" }
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
 Set-Content $info "/* Written by build_fw.ps1 for one build; not committed. */`n#define FM1_BUILD_NAME `"$Name.fwsc`"`n#define FM1_BUILD_DATE `"$date`"`n" -NoNewline
-if ([int][bool]$Cpu1Test + [int][bool]$Cpu1Boot + [int][bool]$Cpu1Probe + [int][bool]$Cpu1Borrow -gt 1) { throw '-Cpu1Test, -Cpu1Boot, -Cpu1Probe, -Cpu1Borrow: one of them' }
-$sdkAddr = $Cpu1Probe -or $Cpu1Borrow
+if ([int][bool]$Cpu1Test + [int][bool]$Cpu1Boot + [int][bool]$Cpu1Probe + [int][bool]$Cpu1Borrow + [int][bool]$Cpu1Split -gt 1) { throw '-Cpu1Test, -Cpu1Boot, -Cpu1Probe, -Cpu1Borrow, -Cpu1Split: one of them' }
+$sdkAddr = $Cpu1Probe -or $Cpu1Borrow -or $Cpu1Split
 $addrFile = Join-Path $root 'fm1_open\app\cpu1_sdk_addr.h'
 $sdkSymbols = 'is4byte_mode', 'cpu_wait_flag', 'cpu_do_in_irq_func', 'cpu_do_in_irq_priv', 'exchange', 'cpu_enter_sfc_critical', 'cpu_exit_sfc_critical'
 function Write-SdkAddr($map) {
@@ -52,13 +54,14 @@ function Read-SdkAddr {
     $m
 }
 if ($Rate -ne 32000 -or $FlashProbe -or $Cpu1Test -or $Cpu1Boot -or $sdkAddr) {
-    $lines = @('/* Written by build_fw.ps1 -Rate / -FlashProbe / -Cpu1Test / -Cpu1Boot / -Cpu1Probe / -Cpu1Borrow for one build; not committed. */')
+    $lines = @('/* Written by build_fw.ps1 -Rate / -FlashProbe / -Cpu1Test / -Cpu1Boot / -Cpu1Probe / -Cpu1Borrow / -Cpu1Split for one build; not committed. */')
     if ($Rate -ne 32000) { $lines += "#define FM1B_RATE ${Rate}U" }
     if ($FlashProbe) { $lines += '#define FM1B_FLASH_PROBE 1' }
     if ($Cpu1Test) { $lines += '#define FM1_CPU1_TEST 1' }
     if ($Cpu1Boot) { $lines += '#define FM1_CPU1_TEST 2' }
     if ($Cpu1Probe) { $lines += '#define FM1_CPU1_TEST 3' }
     if ($Cpu1Borrow) { $lines += '#define FM1_CPU1_TEST 4' }
+    if ($Cpu1Split) { $lines += '#define FM1B_SPLIT 1' }
     Set-Content $rateFile (($lines -join "`n") + "`n") -NoNewline
 }
 try {

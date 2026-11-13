@@ -1729,7 +1729,18 @@ static FM1_DSP_CODE __attribute__((noinline)) void voice_play_buses(struct voice
 }
 /* A filtered voice: played into a block of its own, through its filter, then added to the mix and, times rg, cg and sg as
  * voice_run does, to the buses it has. */
+#if FM1B_SPLIT
+/* one block buffer for each core (a filtered voice may run on either at once); cnum is the core this runs on */
+static int32_t filter_blocks[2][FILTER_CHUNK];
+#ifdef FM1_HOST_TEST
+#define filter_block (filter_blocks[0])
+#else
+static inline __attribute__((always_inline)) unsigned core_number(void) { unsigned c; __asm__ volatile("%0 = cnum" : "=r"(c)); return c & 1U; }
+#define filter_block (filter_blocks[core_number()])
+#endif
+#else
 static int32_t filter_block[FILTER_CHUNK];
+#endif
 static FM1_DSP_CODE __attribute__((noinline)) void voice_filtered(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *side,
                                                                  unsigned frames, int32_t rg, int32_t cg, int32_t sg)
 {
@@ -1781,6 +1792,98 @@ static inline __attribute__((always_inline)) int voice_chorus(const struct voice
     int c = channel_chorus[v->channel] + v->zone_chorus;
     return c > 127 ? 127 : c;
 }
+#if FM1B_SPLIT
+/* One voice for one block into the given buffers: the body of fm1b_render_sends' voice loop. */
+static inline __attribute__((always_inline)) void voice_block(struct voice *v, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2],
+                                                              unsigned frames, unsigned buses)
+{
+    if (!buses) {
+        if (v->filtered)
+            voice_filtered(v, out, NULL, NULL, NULL, frames, 0, 0, 0);
+        else
+            voice_play(v, out, frames);
+    } else {
+        int32_t r = voice_reverb(v), c = voice_chorus(v);
+        int32_t rg = buses & 1U ? r + (r >> 6) : 0, cg = buses & 2U ? c + (c >> 6) : 0, sg = v->side ? v->side_gain : 0;
+        int32_t *side = v->side ? sides[v->side - 1U] : NULL;
+        if (v->filtered)
+            voice_filtered(v, out, rev, cho, side, frames, rg, cg, sg);
+        else
+            voice_play_buses(v, out, rev, cho, side, frames, rg, cg, sg);
+    }
+}
+enum { SPLIT_FRAMES = 128 };                                  /* a block's frames at most: 128 at 44.1 kHz, 93 at 32 kHz */
+volatile uint8_t fm1b_split_share = 50;
+static struct {
+    uint8_t list[FM1B_VOICES];
+    unsigned count, frames, buses;
+    int32_t out[SPLIT_FRAMES], rev[SPLIT_FRAMES], cho[SPLIT_FRAMES], left[SPLIT_FRAMES], right[SPLIT_FRAMES];
+} split;
+static struct fm1b_split_stats split_counts;
+void fm1b_split_stats(struct fm1b_split_stats *s) { *s = split_counts; }
+/* The other core's share: its own buffers from zero, its voices into them. Nothing else of the block is touched. */
+static FM1_DSP_CODE void split_job(void *arg)
+{
+    (void)arg;
+    const unsigned frames = split.frames, buses = split.buses;
+    int32_t *sides[2] = {split.left, split.right};
+    for (unsigned i = 0; i < frames; ++i) split.out[i] = 0;
+    if (buses & 1U) for (unsigned i = 0; i < frames; ++i) split.rev[i] = 0;
+    if (buses & 2U) for (unsigned i = 0; i < frames; ++i) split.cho[i] = 0;
+    if (buses & 4U) for (unsigned i = 0; i < frames; ++i) split.left[i] = 0;
+    if (buses & 8U) for (unsigned i = 0; i < frames; ++i) split.right[i] = 0;
+    for (unsigned k = 0; k < split.count; ++k)
+        voice_block(&voices[split.list[k]], split.out, split.rev, split.cho, sides, frames, buses);
+}
+/* The block's voices (those of owner that run: a packed one whose sound is not ready stands still, as on one core) shared by their cost:
+ * a filtered voice counts 3, another 2; the other core takes voices from the end of the list until it has fm1b_split_share % of the cost.
+ * 0: not split (fewer than two voices, the share 0, or a block longer than the buffers): fm1b_render_sends goes on as on one core. */
+static FM1_DSP_CODE int split_render(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames, unsigned buses)
+{
+    uint8_t list[FM1B_VOICES];
+    unsigned count = 0, total = 0, share = fm1b_split_share;
+    if (!share || frames > SPLIT_FRAMES)
+        return 0;
+    for (unsigned n = 0; n < FM1B_VOICES; ++n) {
+        struct voice *v = &voices[n];
+        if (!v->active || v->owner != owner)
+            continue;
+#if FM1B_PACKED
+        if (v->packed && !packed_ready(v, frames))
+            continue;
+#endif
+        list[count++] = (uint8_t)n;
+        total += v->filtered ? 3U : 2U;
+    }
+    if (count < 2U)
+        return 0;
+    unsigned mine = count, theirs = 0;
+    while (mine > 1U && theirs * 100U < total * share) {
+        --mine;
+        theirs += voices[list[mine]].filtered ? 3U : 2U;
+    }
+    split.count = 0;
+    for (unsigned k = mine; k < count; ++k) split.list[split.count++] = list[k];
+    split.frames = frames; split.buses = buses;
+    split_counts.blocks++;
+    split_counts.voices_all += count;
+    split_counts.voices_other += split.count;
+    int handed = fm1b_split_begin(split_job, NULL);
+    for (unsigned k = 0; k < mine; ++k)
+        voice_block(&voices[list[k]], out, rev, cho, sides, frames, buses);
+    if (handed) {
+        split_counts.handed++;
+        if (!fm1b_split_wait()) { split_counts.late++; fm1b_split_share = 0; return 1; }   /* its share left out, and no more splits: it may still be writing */
+    } else
+        split_job(NULL);
+    for (unsigned i = 0; i < frames; ++i) out[i] += split.out[i];
+    if (buses & 1U) for (unsigned i = 0; i < frames; ++i) rev[i] += split.rev[i];
+    if (buses & 2U) for (unsigned i = 0; i < frames; ++i) cho[i] += split.cho[i];
+    if (buses & 4U) for (unsigned i = 0; i < frames; ++i) sides[0][i] += split.left[i];
+    if (buses & 8U) for (unsigned i = 0; i < frames; ++i) sides[1][i] += split.right[i];
+    return 1;
+}
+#endif
 static uint8_t last_sends[2] = {FM1B_REVERB_SEND, FM1B_CHORUS_SEND};                  /* the sends of the latest block that had voices: the tails keep them */
 FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t *rev, int32_t *cho, int32_t *sides[2], unsigned frames,
                                         uint8_t sends[2])
@@ -1815,6 +1918,14 @@ FM1_DSP_CODE unsigned fm1b_render_sends(const void *owner, int32_t *out, int32_t
         last_sends[0] = sends[0] = (uint8_t)r0;
         last_sends[1] = sends[1] = (uint8_t)c0;
     }
+#if FM1B_SPLIT
+    if (split_render(owner, out, rev, cho, sides, frames, buses)) {
+#if FM1B_PACKED
+        if (bank.packed) packed_release();
+#endif
+        return buses;
+    }
+#endif
     for (unsigned n = 0; n < FM1B_VOICES; ++n) {
         struct voice *v = &voices[n];
         if (!v->active || v->owner != owner)
