@@ -320,6 +320,74 @@ a little unfair to 44.1 kHz.
 The CPU is not the problem: 53 % in the mean is under the guess of 2d and far from the guard's 80 %. The pool is: every sound is 1.38 times bigger, and 25 times more notes come late. So
 44.1 kHz is of no use before the pool grows, and the next step is the RAM (the list at the end of 2d), not more work on the rate.
 
+### 2f. 44.1 kHz with the flash filled with plain BFP8: no late notes (2026-11-12)
+
+The pool was the limit in 2e. A sound stored as BFP8 plays in place from the flash and takes no room in the pool, and the packed 44.1 kHz bank of 2e left 219 KB of the 536 576 bytes
+of flash unused: the packer keeps a sound as BFP8 only when MP3 is badly wrong for it. `pack_bank.js --fill 1` goes on after that and stores more sounds as BFP8, worst MP3 first, until the
+flash is full. Without the switch a bank packs to the same bytes as before (checked on the 32 kHz bank). Emulator only: not on the FM-1, and nothing was listened to.
+
+```
+node pack_bank.js test_fluid/cmp/bfp8_44k.fm1b test_fluid/cmp/mp3_64_44k_fill.fm1b --kbit 64 --fill 1
+.\build_fw.ps1 -Name rate44k -CacheKB 81        (with fm1b_rate.h in place, as in 2e; since 2026-11-13: .\build_fw.ps1 -Name sf2player_44k -Rate 44100)
+.\start_emu.ps1 -Tap -Script astley60_rec.script -NoBrowser -Bank test_fluid\cmp\mp3_64_44k_fill.fm1b
+```
+
+**Result** (as 2e: fm1-emu at 240 MHz, MP3 64 kbit/s, the first 60 s of "Never gonna give you up"; the first two columns are 2e's; the filled bank's counts are from one run, its load from a second):
+
+| | 32 kHz, 84 KB pool | 44.1 kHz, 81 KB pool | 44.1 kHz, 81 KB pool, `--fill 1` |
+| --- | --- | --- | --- |
+| Sounds as MP3 / as BFP8 in place | 120 / 45 | 96 / 69 | 16 / 149 |
+| Packed bank | 241 520 bytes | 317 788 bytes | 533 268 bytes |
+| Notes that came late (`L`) | 2 | 50 | 0 |
+| Times with no room in the pool (`F`) | 162 | 1 593 | 0 |
+| Hits / decodes / dropped sounds (`H` `M` `E`) | 1697 / 90 / 74 | 1261 / 207 / 197 | 303 / 5 / 0 |
+| MP3 frames decoded | 508 | 1 159 | 67 |
+| Time for one MP3 frame | 2 185 us | 2 659 us | 3 358 us |
+| Longest control cycle | 43 ms | 46 ms | 60 ms |
+| Load while the song plays, mean / peak | 44.0 % / 49.9 % | 53.1 % / 64.3 % | 56.8 % / 64.9 % |
+
+With 16 sounds left as MP3 the pool is no longer a limit in this song: five decodes and nothing dropped. The bank fills 99 % of the flash, so this needs the 68 KB the bank got at the
+start of the user flash; without them about 70 KB more of the sounds would be MP3. Unpacked with the firmware's decoder (`unpack_bank.js`), 84 % of the sample bytes are the source bank's.
+
+**Not known.** Why one MP3 frame takes longer (3.4 ms) and the longest control cycle is 60 ms. How another song does: which 16 sounds are MP3 follows from the MP3's quality only, not from
+how often a sound is played, and this song uses few of them. `test_pack_bank.js --packed` compares with a 32 kHz bank, so `--fill` has no test of its own on a 44.1 kHz bank.
+
+**On the FM-1, 2026-11-13.** This firmware and bank, installed with `install.html` (`dist\gm_44k_fill.fm1b` as the bank of `make_install.js`), play on the device: the
+first bank over 466 944 bytes on it, and the first at the start of the user flash. Listened to: sounds right. A second install skips both.
+
+**The whole of "Never gonna give you up" on the FM-1** (2026-11-13, this firmware `sf2player_44k_20261113.fwsc`, the live figures over MIDI with `stats.html` as in 3d,
+239 s of the song from the first voice to the last; against the same song on the 32 kHz firmware and packed bank of 2026-11-11, `FM1_TEST.md` H):
+
+| | 32 kHz, 84 KB pool, packed bank (2026-11-11) | 44.1 kHz, 81 KB pool, `--fill 1` bank |
+| --- | --- | --- |
+| Notes that came late | 25 (19 with releasing voices cut) | 0 |
+| Times with no room in the pool | 373 | 0 |
+| Decodes / dropped sounds | 426 / 407 | 3 / 0 |
+| CPU, mean of the seconds | 63 % | 49 % |
+| CPU, highest peak | 83 % | 117 % |
+| Voices the CPU guard took (`DROPPED CPU`) | 3 | 257 |
+| Held notes dropped (`DROPPED HELD`) | 502 | 1 551 |
+| Releases cut (`DROPPED TAIL`) | 5 131 | 4 447 |
+| Longest control cycle | 128 ms | 93 ms |
+
+The cache is no longer the limit on the device either: three decodes in the whole song. The CPU is: from 26 s on the peak goes over the guard's 80 % in nearly every
+second (up to 117 %), the guard lowers the voice limit and fades voices out, releasing ones first, which is why `HELD` is three times what it was. The lower mean is most
+likely the guard at work, not a cheaper player. Nothing wrong was heard. fm1-emu at 240 MHz showed 56 % with peaks of 66 % for the first minute, so it reads the device's load
+low here. One MP3 frame took 7.1 ms on the device (22 frames). Next: the voices on the second core (branch `sf2-dualcore`), or fewer voices at 44.1 kHz.
+
+**The build switch** (2026-11-13): `-Rate 44100` on `build_fw.ps1`, `build_firmware.ps1` and `build_all.ps1` writes `fm1_open\app\fm1b_rate.h` for the one build and removes it
+after (git ignores it), and takes an 81 KB pool unless `-CacheKB` says otherwise. `build_firmware.ps1` and `build_all.ps1` then use `dist\gm_44k_fill.fm1b`, which is made by hand:
+
+```
+node make_bank.js bfp8 44100 <font.sf2> dist\gm_44k.fm1b
+node pack_bank.js dist\gm_44k.fm1b dist\gm_44k_fill.fm1b --kbit 64 --fill 1
+.\build_all.ps1 -Rate 44100 -Serve            firmware, dist\install\ and install.html
+```
+
+Built so, the image is the same size as above (446 716 bytes with a 27-character name, 81 KB pool, heap 112 652), and in fm1-emu it plays the 60 s of the test song with the
+same counts: `CACHE H303 M5 E0 F0 L0 P0 W0`, load about 56 % (peak 66 %) against 44 % (peak 50 %) for today's 32 kHz firmware and packed bank (2 late notes, 162 times with no room).
+4-point interpolation at 44.1 kHz (`FM1B_INTERP4 1`) cost about 18 points more (mean 75 %, peak 86 %, over the CPU guard's 80 %) and 2.5 KB of heap (pool 78 KB): not with one core.
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell
