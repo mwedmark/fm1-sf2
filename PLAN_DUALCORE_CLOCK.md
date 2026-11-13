@@ -149,3 +149,35 @@ them to CPU1 for the previous block would add 2.9 ms of delay and is not needed 
 What must be made per core: `filter_block` (a static buffer shared today), the buses, and `voices_sounding` bookkeeping.
 fm1-emu has one core only: the split is checked there by running both halves one after the other (bit exact with one core), and at
 `&mhz=640` for the load (2 x the clock stands in for "perfectly parallel"); only the device shows contention, caches and misreads.
+
+## 7. When CPU1 can be started, and why the late starts failed (2026-11-13, read off the firmware, nothing run)
+
+**What the others say now.** Felucca 1.8.2 (`firmware/src/main.c`, 2026-11-13) starts CPU1 at power-on, before the audio and the timers, and says
+that started later it "never reaches its entry": our late starts (from the info page) are the case they do not do. MENU > 2ND CORE is OFF by
+default; a crash in the last boot's first 30 s, or no answer, gives one core. No project (Melodee, X0X, NuSaw, Felucca) starts it late.
+felucca-bsp since 2026-11-05: a flash gate (CPU0 must not erase or program the flash while CPU1 may run code from it: `fm1_flash_access.h`,
+CPU1's RAM loop says it is idle); `chip/fm1_cache_ram.h` turns two of the cache's ways into 8 KB of RAM (never run on a device; fewer ways
+make flash reads slower, and 2g found the flash cheap because of the cache).
+
+**The start-up of our firmware** (`build/dx7/sdk.elf` disassembled with the toolchain's `llvm-objdump`; the SDK's start-up is prebuilt):
+
+| Step | Where | Interrupts, timers |
+| --- | --- | --- |
+| 1 `chip_entry`: boot info, RAM, `cache_way_config`, `memory_init` | SDK | off |
+| 2 `main`: `wdt_init`, `clk_early_init`, `interrupt_init`, `request_irq` (2), `os_init`, `task_create(app_task_handler)` | SDK | off |
+| 3 `__local_irq_enable`, `os_start` (FreeRTOS scheduler: its tick timer runs from here) | SDK | on |
+| 4 `app_task_handler`: `sys_timer_init`, `sys_timer_task_init`, `devices_init` | SDK | on, timers running |
+| 5 **`.early.initcall`** (the SDK's: version check, thread fork, sdfile, sys event): the earliest code of ours can run | linker section | on |
+| 6 `.platform.initcall`, `power_init`, ADC, Bluetooth power, `usr_timer_add`, `.initcall`, `.module.initcall`, `.late.initcall` | SDK | on |
+| 7 `fm1_flash_init`, then `groove_midi_init` (where the 2026-11-05 boot start was: the unit did not boot) | SDK, ours | on |
+| 8 `fm1_io_start` (USB, Bluetooth), **`fm1_audio_start`** (ours, `app/board/audio.c`), a 10 ms `tick` timer, the message loop | SDK, ours | on |
+
+So nothing of ours runs before the scheduler and the system timer: "before the timers" is out of reach in this build. "Before the audio" is
+always in reach (the audio is started by our own function, last), and the boot start in `groove_midi_init` was already before it.
+
+**Our interrupts-off was not all of them.** `fm1_device_irq_save` (SDK, `platform_critical_enter`) clears ICFG bit 8 only. felucca-bsp's
+`irq_save` clears bits 8 and 9 (bit 9 is what `cli` clears), because bit 8 alone "leaves priority-7 sources running". The 2026-11-05 test
+(`cpu1_spike.c`) started CPU1 under `fm1_device_irq_save`: priority-7 interrupts could run while CPU1 booted through the ROM. The next test:
+the same late start from the info page, with bits 8 and 9 clear until CPU1 reports in (at most 20 ms, a click in the sound), then CPU1 held
+again, so each press is a start of its own as before (3 of 10 then). Many starts in a row would mean the cause is found without touching the
+start-up; if not, an `.early.initcall` start (step 5) is the next candidate, only with the owner's say-so.
