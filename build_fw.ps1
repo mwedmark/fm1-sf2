@@ -15,8 +15,10 @@
 # -Cpu1Probe (a read-only test build) adds FM1_CPU1_TEST 3: the info page shows whether the SDK's own CPU1 runs and its hand-over flags.
 # Those are local symbols of the SDK's library: the build links once, reads their addresses with llvm-nm into fm1_open\app\cpu1_sdk_addr.h
 # (not committed) and links again until the addresses it was built with are the ones in the image.
+# -Cpu1Borrow (a test build) adds FM1_CPU1_TEST 4: ARP on the info page runs one job on CPU1 through the SDK's own hand-over
+# (cpu_enter_sfc_critical / cpu_exit_sfc_critical, app\cpu1_borrow.c), with the same address passes. CPU1 is not started, held or restarted.
 param([Parameter(Mandatory)][string]$Name, [string]$Bank = 'dist\gm_32k_packed.fm1b', [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
-      [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test, [switch]$Cpu1Boot, [switch]$Cpu1Probe)
+      [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test, [switch]$Cpu1Boot, [switch]$Cpu1Probe, [switch]$Cpu1Borrow)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 if ($Name -notmatch '^[A-Za-z0-9_.-]{1,27}$') { throw 'Name: letters, digits, _ . - only, at most 27 characters (the screen shows 40 with .fwsc)' }
@@ -27,9 +29,10 @@ if ($Rate -eq 44100 -and !$PSBoundParameters.ContainsKey('CacheKB')) { $CacheKB 
 if (Test-Path $rateFile) { throw "$rateFile is left from another build: remove it (-Rate writes it for one build)" }
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
 Set-Content $info "/* Written by build_fw.ps1 for one build; not committed. */`n#define FM1_BUILD_NAME `"$Name.fwsc`"`n#define FM1_BUILD_DATE `"$date`"`n" -NoNewline
-if ([int][bool]$Cpu1Test + [int][bool]$Cpu1Boot + [int][bool]$Cpu1Probe -gt 1) { throw '-Cpu1Test, -Cpu1Boot, -Cpu1Probe: one of them' }
+if ([int][bool]$Cpu1Test + [int][bool]$Cpu1Boot + [int][bool]$Cpu1Probe + [int][bool]$Cpu1Borrow -gt 1) { throw '-Cpu1Test, -Cpu1Boot, -Cpu1Probe, -Cpu1Borrow: one of them' }
+$sdkAddr = $Cpu1Probe -or $Cpu1Borrow
 $addrFile = Join-Path $root 'fm1_open\app\cpu1_sdk_addr.h'
-$sdkSymbols = 'is4byte_mode', 'cpu_wait_flag', 'cpu_do_in_irq_func', 'cpu_do_in_irq_priv', 'exchange'
+$sdkSymbols = 'is4byte_mode', 'cpu_wait_flag', 'cpu_do_in_irq_func', 'cpu_do_in_irq_priv', 'exchange', 'cpu_enter_sfc_critical', 'cpu_exit_sfc_critical'
 function Write-SdkAddr($map) {
     $l = @('/* Written by build_fw.ps1 -Cpu1Probe: the SDK library''s local symbols, read off the last link with llvm-nm. Not committed. */')
     foreach ($s in $sdkSymbols) { $l += '#define FM1_SDK_' + $s.ToUpper() + (' 0x{0:X8}U' -f $map[$s]) }
@@ -48,23 +51,24 @@ function Read-SdkAddr {
     foreach ($s in $sdkSymbols) { if (!$m.ContainsKey($s)) { throw "no $s in sdk.elf" } }
     $m
 }
-if ($Rate -ne 32000 -or $FlashProbe -or $Cpu1Test -or $Cpu1Boot -or $Cpu1Probe) {
-    $lines = @('/* Written by build_fw.ps1 -Rate / -FlashProbe / -Cpu1Test / -Cpu1Boot / -Cpu1Probe for one build; not committed. */')
+if ($Rate -ne 32000 -or $FlashProbe -or $Cpu1Test -or $Cpu1Boot -or $sdkAddr) {
+    $lines = @('/* Written by build_fw.ps1 -Rate / -FlashProbe / -Cpu1Test / -Cpu1Boot / -Cpu1Probe / -Cpu1Borrow for one build; not committed. */')
     if ($Rate -ne 32000) { $lines += "#define FM1B_RATE ${Rate}U" }
     if ($FlashProbe) { $lines += '#define FM1B_FLASH_PROBE 1' }
     if ($Cpu1Test) { $lines += '#define FM1_CPU1_TEST 1' }
     if ($Cpu1Boot) { $lines += '#define FM1_CPU1_TEST 2' }
     if ($Cpu1Probe) { $lines += '#define FM1_CPU1_TEST 3' }
+    if ($Cpu1Borrow) { $lines += '#define FM1_CPU1_TEST 4' }
     Set-Content $rateFile (($lines -join "`n") + "`n") -NoNewline
 }
 try {
     Push-Location (Join-Path $root 'fm1_open')
     $env:FM1_PI32_TOOLCHAIN = $Toolchain
     $live = @{ LiveCache = [bool]$LiveCache; CacheKB = $CacheKB; CacheFrames = $CacheFrames }
-    if ($Cpu1Probe) { $written = @{}; foreach ($s in $sdkSymbols) { $written[$s] = 0x01C40000 }; Write-SdkAddr $written }   # placeholders of the same size
+    if ($sdkAddr) { $written = @{}; foreach ($s in $sdkSymbols) { $written[$s] = 0x01C40000 }; Write-SdkAddr $written }   # placeholders of the same size
     ./sdk/Build.ps1 -FirmwareOnly -Toolchain $Toolchain @live
     if (!$?) { throw 'The build failed.' }
-    for ($pass = 2; $Cpu1Probe; $pass++) {                    # link again until the image has the addresses it was built with
+    for ($pass = 2; $sdkAddr; $pass++) {                    # link again until the image has the addresses it was built with
         $found = Read-SdkAddr
         if (!($sdkSymbols | Where-Object { $found[$_] -ne $written[$_] })) { Write-Host "FM1: SDK addresses settled after $($pass - 1) links"; break }
         if ($pass -gt 4) { throw 'The SDK addresses did not settle in 4 links' }

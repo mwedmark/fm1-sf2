@@ -22,8 +22,12 @@
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
-#include "cpu1_sdk_addr.h"                               /* written by build_fw.ps1 -Cpu1Probe from the link: the SDK's own (local) symbols */
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST >= 3
+#include "cpu1_sdk_addr.h"                               /* written by build_fw.ps1 -Cpu1Probe / -Cpu1Borrow from the link: the SDK's own (local) symbols */
+#if FM1_CPU1_TEST == 4
+#include "cpu1_borrow.h"
+static struct cpu1_borrow cpu1_borrow_state;              /* ARP on the info page: one job on CPU1 through the SDK's hand-over */
+#endif
 #elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
 #include "cpu1_test.h"
 #if FM1B_FLASH_PROBE
@@ -522,7 +526,25 @@ static void info_update(void)
         line_show(14, 217, wide, 1, GREY);
     }
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 4
+    {   /* "BORROW OK 3/3 0:2625 2:2630 1:2625US": the tries that worked, the job on CPU0 alone, on both at once, on CPU1 (the last try) */
+        static const char *const why[] = {"-", "OK", "NOT UP", "LATE", "BAD SUM"};
+        const struct cpu1_borrow *b = &cpu1_borrow_state;
+        d = put_text(line, "BORROW ");
+        d = put_text(d, why[b->last_state < 5U ? b->last_state : 0]);
+        d = put_number(put_text(d, " "), (int32_t)b->ok, 0);
+        d = put_number(put_text(d, "/"), (int32_t)b->tries, 0);
+        if (b->last_state == 1U || b->last_state == 3U || b->last_state == 4U) {
+            d = put_number(put_text(d, " 0:"), (int32_t)b->solo_us, 0);
+            d = put_number(put_text(d, " 2:"), (int32_t)b->both_us, 0);
+            d = put_number(put_text(d, " 1:"), (int32_t)b->cpu1_us, 0);
+            d = put_text(d, "US");
+        }
+        *d = 0;
+        line_show(15, 140, line, 1, b->last_state == 0U ? GREY : b->last_state == 1U ? GREEN : ORANGE);
+    }
+    line_show(11, 228, "REC BACK  ARP: A JOB ON CPU1", 1, GREY);
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
     {   /* Read only: does the SDK's CPU1 run? "C1 01000000 U1 W0 E02000224 S00004102": CPU1's control register (the SDK writes bit 3 on,
          * bit 1 off to release it; on the FM-1 bit 3 reads back 0), the flag CPU1 sets when its worker runs (the byte after is4byte_mode:
          * the SDK's CPU1 code addresses is4byte_mode + 1, a local of its own), the flag of the flash hand-over (cpu_wait_flag), the word
@@ -1090,7 +1112,10 @@ void groove_screen_control(void)
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: the voices' samples from the flash or the SRAM probe */
         fm1b_probe_set(!fm1b_probe());
 #endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 4
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one job on CPU1, through the SDK's hand-over */
+        cpu1_borrow_try(&cpu1_borrow_state);
+#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
 #elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one job on the CPU1 the start left running */
         cpu1_boot_job(&cpu1_boot_state);
