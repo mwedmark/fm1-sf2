@@ -523,24 +523,25 @@ static void info_update(void)
     }
 #endif
 #if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
-    {   /* Read only: does the SDK's CPU1 run? "C1 0000000A U1 W0 F00000000 S00004000": CPU1's control register (bit 3: released, bit 1:
-         * held), the SDK's flag CPU1 sets when its worker runs (is4byte_mode), the flag of the flash hand-over (cpu_wait_flag), the function
-         * the other core's interrupt would run (cpu_do_in_irq_func), and the register cpu_enter_sfc_critical waits on (bit 14).
+    {   /* Read only: does the SDK's CPU1 run? "C1 01000000 U1 W0 E02000224 S00004102": CPU1's control register (the SDK writes bit 3 on,
+         * bit 1 off to release it; on the FM-1 bit 3 reads back 0), the flag CPU1 sets when its worker runs (the byte after is4byte_mode:
+         * the SDK's CPU1 code addresses is4byte_mode + 1, a local of its own), the flag of the flash hand-over (cpu_wait_flag), the word
+         * CPU1 starts from (0x01C7FFF8), and the register cpu_enter_sfc_critical waits on (bit 14).
          * PLAN_DUALCORE_CLOCK.md (branch sf2-dualcore), section 8. */
         static const char hex[] = "0123456789ABCDEF";
         const uint32_t c1 = *(volatile uint32_t *)0x1EEE004U, s = *(volatile uint32_t *)0x1EEE008U;
-        const uint32_t up = *(volatile uint8_t *)(uintptr_t)FM1_SDK_IS4BYTE_MODE, wait = *(volatile uint8_t *)(uintptr_t)FM1_SDK_CPU_WAIT_FLAG;
-        const uint32_t fn = *(volatile uint32_t *)(uintptr_t)FM1_SDK_CPU_DO_IN_IRQ_FUNC;
+        const uint32_t up = *(volatile uint8_t *)(uintptr_t)(FM1_SDK_IS4BYTE_MODE + 1U), wait = *(volatile uint8_t *)(uintptr_t)FM1_SDK_CPU_WAIT_FLAG;
+        const uint32_t fn = *(volatile uint32_t *)0x01C7FFF8U;
         d = put_text(line, "C1 ");
         for (int k = 28; k >= 0; k -= 4) *d++ = hex[(c1 >> k) & 15U];
         d = put_number(put_text(d, " U"), (int32_t)up, 0);
         d = put_number(put_text(d, " W"), (int32_t)wait, 0);
-        d = put_text(d, " F");
+        d = put_text(d, " E");
         for (int k = 28; k >= 0; k -= 4) *d++ = hex[(fn >> k) & 15U];
         d = put_text(d, " S");
         for (int k = 28; k >= 0; k -= 4) *d++ = hex[(s >> k) & 15U];
         *d = 0;
-        line_show(15, 140, line, 1, (c1 & 8U) && !(c1 & 2U) ? GREEN : ORANGE);
+        line_show(15, 140, line, 1, up ? GREEN : ORANGE);
     }
     line_show(11, 228, "REC BACK  CPU1 READ ONLY", 1, GREY);
 #elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
