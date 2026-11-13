@@ -328,7 +328,7 @@ flash is full. Without the switch a bank packs to the same bytes as before (chec
 
 ```
 node pack_bank.js test_fluid/cmp/bfp8_44k.fm1b test_fluid/cmp/mp3_64_44k_fill.fm1b --kbit 64 --fill 1
-.\build_fw.ps1 -Name rate44k -CacheKB 81        (with fm1b_rate.h in place, as in 2e)
+.\build_fw.ps1 -Name rate44k -CacheKB 81        (with fm1b_rate.h in place, as in 2e; since 2026-11-13: .\build_fw.ps1 -Name sf2player_44k -Rate 44100)
 .\start_emu.ps1 -Tap -Script astley60_rec.script -NoBrowser -Bank test_fluid\cmp\mp3_64_44k_fill.fm1b
 ```
 
@@ -351,6 +351,22 @@ start of the user flash; without them about 70 KB more of the sounds would be MP
 
 **Not known.** Why one MP3 frame takes longer (3.4 ms) and the longest control cycle is 60 ms. How another song does: which 16 sounds are MP3 follows from the MP3's quality only, not from
 how often a sound is played, and this song uses few of them. `test_pack_bank.js --packed` compares with a 32 kHz bank, so `--fill` has no test of its own on a 44.1 kHz bank.
+
+**On the FM-1, 2026-11-13.** This firmware and bank, installed with `install.html` (`dist\gm_44k_fill.fm1b` as the bank of `make_install.js`), play on the device: the
+first bank over 466 944 bytes on it, and the first at the start of the user flash. Listened to; load and late notes not read off the device yet.
+
+**The build switch** (2026-11-13): `-Rate 44100` on `build_fw.ps1`, `build_firmware.ps1` and `build_all.ps1` writes `fm1_open\app\fm1b_rate.h` for the one build and removes it
+after (git ignores it), and takes an 81 KB pool unless `-CacheKB` says otherwise. `build_firmware.ps1` and `build_all.ps1` then use `dist\gm_44k_fill.fm1b`, which is made by hand:
+
+```
+node make_bank.js bfp8 44100 <font.sf2> dist\gm_44k.fm1b
+node pack_bank.js dist\gm_44k.fm1b dist\gm_44k_fill.fm1b --kbit 64 --fill 1
+.\build_all.ps1 -Rate 44100 -Serve            firmware, dist\install\ and install.html
+```
+
+Built so, the image is the same size as above (446 716 bytes with a 27-character name, 81 KB pool, heap 112 652), and in fm1-emu it plays the 60 s of the test song with the
+same counts: `CACHE H303 M5 E0 F0 L0 P0 W0`, load about 56 % (peak 66 %) against 44 % (peak 50 %) for today's 32 kHz firmware and packed bank (2 late notes, 162 times with no room).
+4-point interpolation at 44.1 kHz (`FM1B_INTERP4 1`) cost about 18 points more (mean 75 %, peak 86 %, over the CPU guard's 80 %) and 2.5 KB of heap (pool 78 KB): not with one core.
 
 ## 3. The converter and browser simulator (verified)
 

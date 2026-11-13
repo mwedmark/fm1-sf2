@@ -25,7 +25,7 @@
 /* The rate the player renders at, voices and effects alike. The device renders at the bank's 32 kHz and board/audio.c resamples
  * that to the codec's 44.1 kHz (a voice at its root key then reads one sample a frame); the browser and the tests render at
  * 44.1 kHz. A test may set it (-DFM1B_RATE=32000U). */
-/* An experiment build may set the rate with a header of its own (app/fm1b_rate.h, not committed): #define FM1B_RATE 44100U. RUNNING.md, 2e. */
+/* build_fw.ps1 -Rate 44100 sets the rate for one build with a header of its own (app/fm1b_rate.h, not committed): #define FM1B_RATE 44100U. RUNNING.md, 2f. */
 #if defined(__has_include)
 #if __has_include("fm1b_rate.h")
 #include "fm1b_rate.h"
