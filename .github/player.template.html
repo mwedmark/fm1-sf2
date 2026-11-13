@@ -66,7 +66,7 @@ let player = null, current = null;   // current: the name of the loaded song
 let song = null, bank = null;        // the FILES and BANKS entries chosen; null for the visitor's own file
 let emuReady = false;                // the emulator has booted and runs (its try-out said "playing")
 const params = new URLSearchParams(location.search);
-let wantPlay = params.get('play') === '1';   // play as soon as the song is loaded and the emulator runs
+let wantPlay = params.get('play') === '1' || (params.has('song') && params.get('play') !== '0');   // a link that names a song plays it (play=0 to not)   // play as soon as the song is loaded and the emulator runs
 
 // Names for links: a song is its label in lower case with dashes, a bank its flash file's name without .flash.
 const slug = s => s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
