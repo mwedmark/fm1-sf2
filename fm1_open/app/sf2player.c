@@ -22,6 +22,13 @@
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+#include "cpu1_test.h"
+#if FM1B_FLASH_PROBE
+#error "FM1_CPU1_TEST and FM1B_FLASH_PROBE both take ARP on the info page"
+#endif
+static struct cpu1_tries cpu1_tries;                     /* the second core's start test (ARP and SEQ on the info page) */
+#endif
 #if __has_include("build_info.h")
 #include "build_info.h"                                  /* written by build_fw.ps1: FM1_BUILD_NAME, FM1_BUILD_DATE */
 #endif
@@ -513,7 +520,21 @@ static void info_update(void)
         line_show(14, 217, wide, 1, GREY);
     }
 #endif
-#if FM1B_FLASH_PROBE
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+    {   /* "CPU1 M8 3/10 M89 9/10 OK 812US": the tries and starts that worked with each mask, the last try's result and start time */
+        static const char *const why[] = {"-", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
+        const struct cpu1_tries *t = &cpu1_tries;
+        d = put_number(put_text(line, "CPU1 M8 "), (int32_t)t->ok[CPU1_MASK_8], 0);
+        d = put_number(put_text(d, "/"), (int32_t)t->tries[CPU1_MASK_8], 0);
+        d = put_number(put_text(d, " M89 "), (int32_t)t->ok[CPU1_MASK_8_9], 0);
+        d = put_number(put_text(d, "/"), (int32_t)t->tries[CPU1_MASK_8_9], 0);
+        d = put_text(put_text(d, " "), why[t->last_state < 6U ? t->last_state : 0]);
+        if (t->last_state != CPU1_NOT_RUN) d = put_text(put_number(put_text(d, " "), (int32_t)t->last_start_us, 0), "US");
+        *d = 0;
+        line_show(15, 140, line, 1, t->last_state == CPU1_NOT_RUN ? GREY : t->last_state == CPU1_OK ? GREEN : ORANGE);
+    }
+    line_show(11, 228, cpu1_tries.mask == CPU1_MASK_8_9 ? "REC BACK ARP TRY SEQ MASK 8+9" : "REC BACK ARP TRY SEQ MASK 8", 1, GREY);
+#elif FM1B_FLASH_PROBE
     line_show(11, 228, fm1b_probe() ? "REC BACK  ARP SAMPLES: RAM" : "REC BACK  ARP SAMPLES: FLASH", 1, fm1b_probe() ? ORANGE : GREY);
 #else
     line_show(11, 228, "REC BACK", 1, GREY);
@@ -1019,6 +1040,12 @@ void groove_screen_control(void)
 #if FM1B_FLASH_PROBE
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: the voices' samples from the flash or the SRAM probe */
         fm1b_probe_set(!fm1b_probe());
+#endif
+#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one start of the second core */
+        cpu1_test_try(&cpu1_tries);
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_SEQ)))      /* SEQ on the info page: the interrupts off while it starts */
+        cpu1_tries.mask ^= 1U;
 #endif
     if (channels && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
         struct fm1b_channel info;
