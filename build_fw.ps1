@@ -10,7 +10,7 @@
 # -FlashProbe (a measurement build) adds FM1B_FLASH_PROBE 1 to it: ARP on the info page switches the voices between flash and SRAM (RUNNING.md, 2g).
 # -Cpu1Test (a test build) adds FM1_CPU1_TEST 1: ARP on the info page starts the second core once, SEQ chooses the interrupts off meanwhile
 # (app\cpu1_test.c; PLAN_DUALCORE_CLOCK.md on branch sf2-dualcore, section 7). Never started at power-on.
-# -Cpu1Boot (a test build) adds FM1_CPU1_TEST 2: CPU1 started in an .early.initcall, only while ARP is held at power-on; ARP on the info page
+# -Cpu1Boot (a test build) adds FM1_CPU1_TEST 2: CPU1 started in an .early.initcall or a .late.initcall, only while ARP is held at power-on; ARP on the info page
 # then gives it a job. A start that hangs: switch off and on without ARP.
 param([Parameter(Mandatory)][string]$Name, [string]$Bank = 'dist\gm_32k_packed.fm1b', [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
       [ValidateSet(32000, 44100)][int]$Rate = 32000, [switch]$FlashProbe, [switch]$Cpu1Test, [switch]$Cpu1Boot)

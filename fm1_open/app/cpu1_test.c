@@ -183,14 +183,17 @@ void cpu1_test_try(struct cpu1_tries *t)
  * touches CPU1, so a start that hangs is undone by switching off and on without ARP. Interrupts (ICFG bits 8 and 9) off meanwhile. */
 struct cpu1_boot cpu1_boot_state;
 enum { BOOT_WAIT_LOOPS = 4000000 };          /* the wait for CPU1's report: tens of ms at 320 MHz */
-int fm1_board_key_held_at_boot(unsigned key);
-static int cpu1_boot(void)
+int fm1_board_key_held_at_boot(unsigned key, unsigned stage);
+/* stage 0: the .early.initcall; stage 1: the .late.initcall (after power_init and the SDK's GPIO set-up: on the FM-1 the panel read no
+ * contact at all in the early one, 2026-11-13; still before the flash driver, our MIDI set-up, USB, Bluetooth and the audio). The first
+ * stage that sees ARP starts CPU1; the other does nothing. */
+static void cpu1_boot_at(unsigned stage)
 {
     struct cpu1_boot *b = &cpu1_boot_state;
     uint32_t icfg, div, pc[4], top, i, n;
-    b->asked = fm1_board_key_held_at_boot(10U) ? 1U : 0U;   /* ARP */
-    if (!b->asked)
-        return 0;
+    if (b->asked || !fm1_board_key_held_at_boot(10U, stage))   /* ARP */
+        return;
+    b->asked = stage + 1U;
     icfg = icfg_read();
     icfg_write(icfg & ~0x300U);
     cpu1_stop();
@@ -221,9 +224,11 @@ static int cpu1_boot(void)
     WR_LIMIT_EN |= top;
     dbg_lock();
     icfg_write(icfg);
-    return 0;
 }
-static int (*const cpu1_boot_call)(void) __attribute__((section(".early.initcall"), used)) = cpu1_boot;
+static int cpu1_boot_early(void) { cpu1_boot_at(0U); return 0; }
+static int cpu1_boot_late(void) { cpu1_boot_at(1U); return 0; }
+static int (*const cpu1_boot_call_early)(void) __attribute__((section(".early.initcall"), used)) = cpu1_boot_early;
+static int (*const cpu1_boot_call_late)(void) __attribute__((section(".late.initcall"), used)) = cpu1_boot_late;
 
 /* ARP on the info page: one job on the running CPU1 beside CPU0's own run of it, compared; a failure holds CPU1 */
 void cpu1_boot_job(struct cpu1_boot *b)

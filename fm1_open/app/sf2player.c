@@ -524,15 +524,17 @@ static void info_update(void)
     {   /* "CPU1 BOOT OK 1234 JOBS 3/3", or what kept it from starting; NOT ASKED: ARP was not held at power-on */
         static const char *const why[] = {"NOT ASKED", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
         const struct cpu1_boot *b = &cpu1_boot_state;
-        d = put_text(line, "CPU1 BOOT ");
+        d = put_text(line, b->asked == 2U ? "CPU1 LATE " : b->asked ? "CPU1 EARLY " : "CPU1 ");
         d = put_text(d, why[b->state < 6U ? b->state : 0]);
-        if (!b->asked) {                                  /* what the scan at power-on saw: "D48 C008 B0400" (hex) */
+        if (!b->asked) {                                  /* what the scans at power-on saw: "E48/000 L48/008 B0000" (columns, buttons: hex) */
             static const char hex[] = "0123456789ABCDEF";
-            d = put_number(put_text(d, " D"), (int32_t)fm1_boot_scan.done, 0);
-            d = put_text(d, " C");
-            for (int s = 8; s >= 0; s -= 4) *d++ = hex[(fm1_boot_scan.columns >> s) & 15U];
+            for (unsigned k = 0; k < 2U; ++k) {
+                d = put_number(put_text(d, k ? " L" : " E"), (int32_t)fm1_boot_scan[k].done, 0);
+                *d++ = '/';
+                for (int s = 8; s >= 0; s -= 4) *d++ = hex[(fm1_boot_scan[k].columns >> s) & 15U];
+            }
             d = put_text(d, " B");
-            for (int s = 12; s >= 0; s -= 4) *d++ = hex[(fm1_boot_scan.buttons >> s) & 15U];
+            for (int s = 12; s >= 0; s -= 4) *d++ = hex[(fm1_boot_scan[1].buttons >> s) & 15U];
         }
         if (b->asked) {
             d = put_number(put_text(d, " "), (int32_t)b->loops, 0);

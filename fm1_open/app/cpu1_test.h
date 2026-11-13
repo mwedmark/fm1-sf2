@@ -24,7 +24,7 @@ void cpu1_test_try(struct cpu1_tries *t);
 /* The boot start (FM1_CPU1_TEST 2, build_fw.ps1 -Cpu1Boot): in an .early.initcall, before power, Bluetooth, the flash driver, USB and the
  * audio, CPU1 is started only while ARP is held at power-on; it is then left running its RAM loop. ARP on the info page gives it one job. */
 struct cpu1_boot {
-    uint32_t asked;                    /* ARP was held at power-on */
+    uint32_t asked;                    /* ARP was seen at power-on: 1 in the .early.initcall, 2 in the .late.initcall */
     uint32_t state;                    /* CPU1_*: NOT_RUN when not asked */
     uint32_t loops;                    /* the wait's turns until CPU1 reported in (no timer runs that early) */
     uint32_t jobs_tried, jobs_ok;
@@ -33,5 +33,5 @@ extern struct cpu1_boot cpu1_boot_state;
 /* What the panel scan at power-on saw (app/board/panel.c), for the info page: the columns of the 48 whose DMA had finished before the wait
  * ran out, the columns (bit per column 0..10) where any contact read closed, and the buttons the decode ended with. */
 struct fm1_boot_scan { uint32_t done, columns, buttons; };
-extern struct fm1_boot_scan fm1_boot_scan;
+extern struct fm1_boot_scan fm1_boot_scan[2];   /* [0] the .early.initcall's scan, [1] the .late.initcall's */
 void cpu1_boot_job(struct cpu1_boot *b);
