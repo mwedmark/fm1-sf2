@@ -160,7 +160,7 @@ MIDIs/UnderTheSea.mid</textarea>
     const mean = k => used.length ? used.reduce((s, r) => s + r[k], 0) / used.length : 0;
     const d = k => (after[k] - before[k]) >>> 0;
     return {
-      song, share, seconds: used.length, cpuMean: +mean('cpu').toFixed(1), peakMax: Math.max(0, ...used.map(r => r.cpuPeak)), over80: used.filter(r => r.cpuPeak >= 80).length,
+      song, share, startEpoch: Math.round(performance.timeOrigin + t0), length: seconds, seconds: used.length, cpuMean: +mean('cpu').toFixed(1), peakMax: Math.max(0, ...used.map(r => r.cpuPeak)), over80: used.filter(r => r.cpuPeak >= 80).length,
       voicesMean: +mean('voices').toFixed(1), guard: d('guard'), held: d('held'), lost: d('lost'), cycleMax: Math.max(0, ...used.map(r => r.cycleMax)),
       checked: after.chk === undefined ? null : d('chk'), differed: after.chkBad === undefined ? null : d('chkBad'),
     };

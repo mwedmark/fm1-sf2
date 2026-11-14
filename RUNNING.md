@@ -489,6 +489,18 @@ timestamps of their own.)
 at 50 % (SEQ and CC 102 change it by hand); a share chosen from the measured cost of each core's last block would follow a song whose voices are heavier on one side (not built). A flash write by
 the SDK's own code (not ours) while CPU1 renders is not guarded against; the SDK's flash driver then waits for CPU1.
 
+### 2i. Recording the FM-1's USB audio and comparing it with the host render
+
+The unit's final mix goes out over USB audio (`audio_output.c`), so a PC can record what it really plays. `dualcore.html?go=1&seconds=40&shares=0,50&songs=...`
+plays the songs (results carry `startEpoch`), `ffmpeg -f dshow -audio_buffer_size 50 -i audio="Microphone (USB-Audio)"` records, `node render_host.js song.mid host.wav --seconds=40`
+renders the same messages through the player's own code on the host (no CPU limit, reverb/chorus 30), and
+`node analyze_usb.js rec.wav host.wav --start=<seconds from recording start to song start> --length=40` finds the lag (envelope, then samples), matches the level by RMS
+and reports per 93 ms frame the octave-band distance, frames where the unit is 6/12 dB quieter than the host (missing notes), clicks and zero runs.
+Sample-by-sample correlation is low by nature (reverb/chorus, timing of MIDI over USB); the figures are similarity to the host render, not quality.
+
+44.1 kHz, linear, 40 s (30 s for Under the Sea), one core -> both cores: frames 6 dB quieter than host / mean band distance: Dancing Queen 3 (0.8 %) / 2.6 dB -> 0 / 2.0 dB;
+Africa 0 / 1.95 -> 0 / 2.0; Under the Sea 2 / 3.5 -> 0 / 3.1. No clicks or zero runs on the unit in any run. Not known: how it sounds (listen to the four files of the excerpt).
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell
