@@ -18,7 +18,9 @@
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sf2out.h"
+#if FM1_CLOCK_SWITCH
 #include "sf2clock.h"
+#endif
 #include "song.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
@@ -410,11 +412,15 @@ static void stats_midi_poll(void)
     (void)fm1_midi_send_port(FM1_MIDI_USB, m, sizeof m);      /* -1 when no USB host, -2 when the queue is full: the next second tries again */
 }
 #endif
+#if FM1_CLOCK_SWITCH
 static uint8_t clock_status, clock_tried;                  /* the clock switch: the result of the last EDIT (sf2clock_toggle) */
+#endif
 static struct fm1_audio_stats audio_base;                 /* the audio interrupt's counters at the last EDIT (zero: since start) */
 static void info_compute(void)
 {
+#if FM1_CLOCK_SWITCH
     sf2clock_probe();
+#endif
 #if FM1_MIDIPLAY
     info_free_ram = song_free_ram();
 #endif
@@ -492,6 +498,7 @@ static void info_update(void)
         *put_hex(line, soundset_crc) = 0;
         line_show(10, 170, line, 2, YELLOW);
     }
+#if FM1_CLOCK_SWITCH
     {   /* "CLOCK 320 MHZ  EDIT: 360": the CPU clock (the registers at 360 MHz, else the booted 320), EDIT switches between the booted clock and 360 MHz until power off */
         static const char *const why[] = {"", "", "TIMER OFF", "NO READBACK", "FLASH DIFFERS", "ALU DIFFERS"};
         const unsigned mhz = sf2clock_mhz() ? sf2clock_mhz() : 320U;        /* (the booted clock: source 2, PLL1 off) */
@@ -502,6 +509,7 @@ static void info_update(void)
         *d = 0;
         line_show(16, 80, line, 1, sf2clock_raised() ? ORANGE : clock_tried && clock_status ? ORANGE : GREY);   /* (y 80: free; the upload line takes 184-198) */
     }
+#endif
     {   /* "B123 SHORT 0 OVR 0": the audio interrupt's own count since the last EDIT of the blocks it skipped (an interval too short or too long) or
          * could not finish in time: the glitches themselves. Row 17, y 24: between the title and the firmware lines. */
         struct fm1_audio_stats a;
@@ -1101,6 +1109,7 @@ void groove_screen_control(void)
         fm1b_channel_info(cursor, &info);
         sf2player_channel_solo(info.solo ? -1 : (int)cursor);
     }
+#if FM1_CLOCK_SWITCH
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_EDIT))) {   /* EDIT on the info page: the CPU clock, 320 <-> 360 MHz (not saved) */
         {   struct fm1b_info bi;
             fm1b_info(&bi);
@@ -1110,6 +1119,7 @@ void groove_screen_control(void)
         fm1_audio_stats_read(&audio_base);                    /* the audio counters are shown from this switch on */
         page_clear();
     }
+#endif
     if (channels && page != PAGE_INFO && (pressed & (1U << BUTTON_EDIT))) {            /* EDIT: arm or disarm the selected row (MIDI channel 1 when armed) */
         armed ^= (uint16_t)(1U << cursor);
         arm_midi[cursor] = 0;

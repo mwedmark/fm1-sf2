@@ -6,6 +6,8 @@
 #include "fm1b.h"
 #include "board/fm1_audio.h"
 
+#if FM1_CLOCK_SWITCH
+
 #define REG(address) (*(volatile uint32_t *)(address))
 #define SYS_CON REG(0x10014U)        /* [7:0] the system clock's source (6: PLL1 * 2/3); bits 8..11 are the audio clock's (audio.c): never touched */
 #define MUX_CON REG(0x1000CU)        /* bit 8: the system clock from the PLL mux, bits 6, 7 the mux's */
@@ -185,3 +187,4 @@ int sf2clock_toggle(const uint8_t *data, uint32_t bytes)
     fm1b_split_hold(0);
     return status;
 }
+#endif

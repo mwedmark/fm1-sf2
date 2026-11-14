@@ -34,6 +34,13 @@
 #ifndef FM1B_VOICES
 #define FM1B_VOICES 32U
 #endif
+/* FM1_CLOCK_SWITCH 1 (build_fw.ps1 -ClockSwitch): an EXPERIMENT, off by default. EDIT on the info page switches the CPU clock between the clock the unit
+ * booted at (320 MHz) and 360 MHz (sf2clock.c). On the FM-1 it ran, but the sound got occasional glitches that stayed after switching back until a restart,
+ * which fits felucca-bsp's docs/CPU.md (64-bit multiplies beside 16-bit loads go wrong now and then at 360 MHz; our voice, filter and limiter code is full
+ * of them). FM1_TEST.md, section K. */
+#ifndef FM1_CLOCK_SWITCH
+#define FM1_CLOCK_SWITCH 0
+#endif
 /* FM1B_FLASH_PROBE 1 (a measurement build; set it in the same header): the info page's ARP switches every voice between its samples in the
  * flash and a 2 KB BFP8 tone in SRAM, the same code either way, so the CPU figures of the two tell what the flash reads cost. RUNNING.md, 2g. */
 #ifndef FM1B_FLASH_PROBE

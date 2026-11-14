@@ -234,3 +234,17 @@ Firmware: bygg med `.\build_fw.ps1 -Name sf2p_v48_clk -Voices 48` (`-Voices 40` 
 - Glitchräknaren (raden `B… SHORT … OVR …` överst på REC-sidan, nollställs av EDIT): **320 MHz: 0 förlorade block av 27 000 (piano). 360 MHz, piano: 0 av 23 000. 360 MHz, de tyngsta filerna (load48_all, load48_filter, Dancing Queen, 30 s var): 16 förlorade block av 206 000, alla `COMMIT` (renderingen tog 2,6 ms av 2,9 ms), `LATE 0`. Inget missljud hördes.**
 - Belastning, 360 mot 320 MHz (30 s, delning 50 %): load48_all medel 67 mot 70 %, topp 72 mot 79 %, 48 mot 45 röster; load48_filter 58 mot 58 %, topp 83 mot 83 %; Dancing Queen medel 52 mot 51 %, topp 92 mot 109 %, spärren tog 14 mot 18, 31 mot 24 röster. Vinsten är måttlig: medel-CPU ändras knappt.
 - Det som inte är gjort: en längre provkörning (30 minuter) vid 360 MHz och samma tunga test vid 320 MHz med glitchräknaren.
+
+**Slutsats om 360 MHz (2026-11-14, efter `clk7`):** EDIT gick igenom utan felmeddelande och båda självtesterna klarade sig, men vid pianospel kom enstaka missljud vid 360 MHz, och de **låg kvar efter byte tillbaka till 320 MHz tills enheten startades om**. Det stämmer med felucca-bsp:s `docs/CPU.md`: 64-bitars-multiplikationer bredvid 16-bitars-laddningar lämnar ibland ett register en bit fel vid 360 MHz (hos dem kraschade en AAC-avkodare efter några minuter; felet försvann när multiplikationerna lades i egna `noinline`-funktioner, till priset av ca 50 % hastighet). Vår röst-, filter- och limiterkod är full av sådana multiplikationer, och en bit fel i ett rekursivt tillstånd (filter, envelope, limiter) ger brus som består. Misstanken är inte bevisad, men ett test på 1 ms (självtestet) ser inte ett fel som kommer var några minuter. Skyddet skulle ta bort hela vinsten (ca 12 % klocka, Dancing Queens topp 109 → 92 %). **Beslut: 320 MHz är standard.** Klockväxeln finns kvar som experiment (`build_fw.ps1 -ClockSwitch`, av som standard).
+
+## L. 40 röster vid 320 MHz (2026-11-14)
+
+Firmware: `dist\sf2p_44k_v40_320.fwsc` (`build_fw.ps1 -Name sf2p_44k_v40_320 -Voices 40`: 44,1 kHz, båda kärnorna, fyrpunktsinterpolation, ingen klockväxel; imagen har 3 173 byte kvar, poolen är 71 KB). Banken är den som redan ligger i flashen (`gm_44k_fill.fm1b`). Tillbaka till 32 röster: `dist\sf2player_44k.fwsc`. Referens vid 320 MHz: 32 röster har topp 72-78 % och spärren tar 0 (RUNNING.md 2h); 48 röster hade Dancing Queen topp 102-109 % med spärren 18-31 (avsnitt J och K).
+
+| # | Steg | Väntat | Resultat |
+| --- | --- | --- | --- |
+| L1 | Flasha firmwaren. Infosidan (REC): firmwarens CRC32 och rad överst. | CRC32 1E436FC1, 450 748 byte. Raden `B… SHORT 0 OVR 0` (räknas från start). | |
+| L2 | `load48_all.mid` och `load48_filter.mid` (dualcore.html, andel 50 %). | Fulla röster utan att spärren ingriper ofta: topp under 80 %. | |
+| L3 | Dancing Queen, Africa, Under the Sea (45 s, andel 50 %). | Topp under 90 %, spärren tar få röster (jämför 32 röster: 0, 48 röster: 18-31). | |
+| L4 | Läs av `SHORT … OVR …` på REC efter L2-L3. | Låga värden (inga eller få förlorade block). | |
+| L5 | Lyssna på låtarna och på pianospel. | Rent. | |

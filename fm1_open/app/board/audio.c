@@ -16,7 +16,6 @@ static struct fm1_audio_stats statistics;
 static uint32_t block_ticks, previous_tick;
 static uint8_t initialized, previous_valid;
 static volatile unsigned mute_depth;
-#define FM1_TIMER4 (*(volatile uint32_t *)0x10804U)    /* 24 MHz, from the crystal */
 
 static inline __attribute__((always_inline)) uint32_t elapsed(uint32_t start, uint32_t end)
 {
@@ -97,6 +96,8 @@ void fm1_audio_resume(void)
     if (mute_depth && --mute_depth == 0) previous_valid = 0;
     fm1_device_irq_restore(flags);
 }
+#if FM1_CLOCK_SWITCH
+#define FM1_TIMER4 (*(volatile uint32_t *)0x10804U)    /* 24 MHz, from the crystal */
 static uint32_t measured_block_ticks(void)
 {
     const uint32_t t4 = FM1_TIMER4, count = FM1_AUDIO_TIMER_COUNT;
@@ -117,6 +118,7 @@ void fm1_audio_retime(void)
     if (m) block_ticks = m;
     previous_valid = 0;
 }
+#endif
 int fm1_audio_start(void)
 {
     if (initialized) return 0;
