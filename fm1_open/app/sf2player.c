@@ -18,6 +18,7 @@
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sf2out.h"
+#include "sf2clock.h"
 #include "song.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
@@ -409,8 +410,11 @@ static void stats_midi_poll(void)
     (void)fm1_midi_send_port(FM1_MIDI_USB, m, sizeof m);      /* -1 when no USB host, -2 when the queue is full: the next second tries again */
 }
 #endif
+static uint8_t clock_status, clock_tried;                  /* the clock switch: the result of the last EDIT (sf2clock_toggle) */
+static struct fm1_audio_stats audio_base;                 /* the audio interrupt's counters at the last EDIT (zero: since start) */
 static void info_compute(void)
 {
+    sf2clock_probe();
 #if FM1_MIDIPLAY
     info_free_ram = song_free_ram();
 #endif
@@ -487,6 +491,27 @@ static void info_update(void)
         line_show(9, 156, "SOUNDSET CHECKSUM:", 1, YELLOW);
         *put_hex(line, soundset_crc) = 0;
         line_show(10, 170, line, 2, YELLOW);
+    }
+    {   /* "CLOCK 320 MHZ  EDIT: 360": the CPU clock (the registers at 360 MHz, else the booted 320), EDIT switches between the booted clock and 360 MHz until power off */
+        static const char *const why[] = {"", "", "TIMER OFF", "NO READBACK", "FLASH DIFFERS", "ALU DIFFERS"};
+        const unsigned mhz = sf2clock_mhz() ? sf2clock_mhz() : 320U;        /* (the booted clock: source 2, PLL1 off) */
+        d = put_number(put_text(line, "CLOCK "), (int32_t)mhz, 0);
+        d = put_text(d, " MHZ");
+        if (clock_tried && clock_status) d = put_text(put_text(d, "  "), why[clock_status]);
+        else if (sf2clock_switchable()) d = put_text(d, sf2clock_raised() ? "  EDIT: BACK" : "  EDIT: 360 MHZ");
+        *d = 0;
+        line_show(16, 80, line, 1, sf2clock_raised() ? ORANGE : clock_tried && clock_status ? ORANGE : GREY);   /* (y 80: free; the upload line takes 184-198) */
+    }
+    {   /* "B123 SHORT 0 OVR 0": the audio interrupt's own count since the last EDIT of the blocks it skipped (an interval too short or too long) or
+         * could not finish in time: the glitches themselves. Row 17, y 24: between the title and the firmware lines. */
+        struct fm1_audio_stats a;
+        fm1_audio_stats_read(&a);
+        const uint32_t shorts = a.short_intervals - audio_base.short_intervals, overruns = a.overruns - audio_base.overruns;
+        d = put_number(put_text(line, "B"), (int32_t)(a.blocks - audio_base.blocks), 0);
+        d = put_number(put_text(d, " SHORT "), (int32_t)shorts, 0);
+        d = put_number(put_text(d, " OVR "), (int32_t)overruns, 0);
+        *d = 0;
+        line_show(17, 24, line, 1, shorts || overruns ? ORANGE : GREY);
     }
     upload_line();
 #if FM1_MIDIPLAY
@@ -1076,11 +1101,20 @@ void groove_screen_control(void)
         fm1b_channel_info(cursor, &info);
         sf2player_channel_solo(info.solo ? -1 : (int)cursor);
     }
-    if (channels && (pressed & (1U << BUTTON_EDIT))) {            /* EDIT: arm or disarm the selected row (MIDI channel 1 when armed) */
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_EDIT))) {   /* EDIT on the info page: the CPU clock, 320 <-> 360 MHz (not saved) */
+        {   struct fm1b_info bi;
+            fm1b_info(&bi);
+            clock_status = (uint8_t)sf2clock_toggle(bi.image, bi.bytes);
+        }
+        clock_tried = 1;
+        fm1_audio_stats_read(&audio_base);                    /* the audio counters are shown from this switch on */
+        page_clear();
+    }
+    if (channels && page != PAGE_INFO && (pressed & (1U << BUTTON_EDIT))) {            /* EDIT: arm or disarm the selected row (MIDI channel 1 when armed) */
         armed ^= (uint16_t)(1U << cursor);
         arm_midi[cursor] = 0;
     }
-    if (channels && (pressed & (1U << BUTTON_GLO)) && ((armed >> cursor) & 1U))   /* GLO: the armed row's MIDI channel up one, 16 to 1 */
+    if (channels && page != PAGE_INFO && (pressed & (1U << BUTTON_GLO)) && ((armed >> cursor) & 1U))   /* GLO: the armed row's MIDI channel up one, 16 to 1 */
         arm_midi[cursor] = (uint8_t)((arm_midi[cursor] + 1U) & 15U);
     leds_update();
     if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */

@@ -46,6 +46,9 @@ if ($patched -notmatch '__lcd') {
 if ($patched -notmatch 'window\.__perf') { $patched = $patched.TrimEnd() + "`n`nwindow.__perf = perf;   // local addition: lets a test read load and idleShare`n" }
 if ($patched -notmatch 'window\.__midi') { $patched = $patched.TrimEnd() + "`nwindow.__midi = (bytes) => send({ type: `"midi`", bytes: Array.from(bytes) });   // local addition: a test sends MIDI (SysEx too) into the DIN jack`n" }
 if ($patched -notmatch 'window\.__key') { $patched = $patched.TrimEnd() + "`nwindow.__key = (id, down) => send({ type: `"key`", id, down });   // local addition: a test presses a panel button (ids as in scripts)`n" }
+# the real FM-1 runs at 320 MHz (measured 2026-11-05), not the 240 the emulator's page offers: add 320 and start there
+if ($patched -notmatch 'CLOCKS = \[[^\]]*320') { $patched = $patched -replace 'const CLOCKS = \[([^\]]*)\];', 'const CLOCKS = [$1, 320];' }
+$patched = $patched -replace '(params\.get\("mhz"\) \|\| stored\("fm1\.mhz"\) \|\| )100\)', '${1}320)   // local: the real FM-1''s clock'
 if ($patched -ne $code) { Set-Content $mainJs $patched -NoNewline }
 if ($patched -notmatch 'a new build of sf2 is fetched') { Write-Warning "main.js changed upstream: a browser may boot an older sf2 build (press Check for firmware updates)" }
 
@@ -98,7 +101,7 @@ if (!$listening) {
 }
 
 # 5. open it (127.0.0.1, not localhost: flash= and script= are fetched from the page's own origin)
-$url = "http://127.0.0.1:$Port/" + $(if ($Tap) { 'index_tap.html' } else { '' }) + "?fw=sf2&flash=$flashName&mhz=240" + $(if ($Script) { "&script=$Script" } else { '' })
+$url = "http://127.0.0.1:$Port/" + $(if ($Tap) { 'index_tap.html' } else { '' }) + "?fw=sf2&flash=$flashName&mhz=320" + $(if ($Script) { "&script=$Script" } else { '' })
 Write-Host $url
 if (!$NoBrowser) { Start-Process $url }
 # From another computer: Chrome runs the emulator's audio (AudioWorklet) only on localhost or HTTPS, so -Lan also serves HTTPS on

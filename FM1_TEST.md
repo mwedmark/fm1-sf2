@@ -193,3 +193,44 @@ Prova i fm1-emu (`start_emu.ps1 -Tap`) före FM-1:an, och ha `FM-1_015.fwsc` til
 - Bankuppladdningen hela vägen (B): emulatorn tar bara MIDI via DIN och svaren försvinner.
 - Skärmen (C, E): emulatorn ritar inte LCD:n.
 - Hur mycket flash-läsningar kostar på riktig hårdvara; emulatorn räknar troligen inte med väntetid.
+
+## J. 48 röster (2026-11-14)
+
+Firmware: `dist\sf2p_44k_v48.fwsc` (`build_fw.ps1 -Name sf2p_44k_v48 -Voices 48`: 44,1 kHz, båda kärnorna, fyrpunktsinterpolation, poolen 68 KB mot 74). Banken är den som redan ligger i flashen (`gm_44k_fill.fm1b`, CRC32 811B3999), så den behöver inte installeras om. Tillbaka till 32 röster: `dist\sf2player_44k.fwsc`.
+I fm1-emu vid 320 MHz: 48 av 48 röster 35 % CPU (topp 36 %), filtrerade ljud 45 %, spärren tog 0. Det är emulatorn, troligen en kärna: det här testar det den inte kan visa.
+
+| # | Steg | Väntat | Resultat |
+| --- | --- | --- | --- |
+| J1 | Flasha `dist\sf2p_44k_v48.fwsc` med workbenchen. Bankens installation behövs inte. | Startar, ingen frysning. | |
+| J2 | Infosidan (REC): firmwarens CRC32 och banken. | Firmware F0135FDB, 450 492 byte. Bank 811B3999. SPLIT-raden har siffror. | |
+| J3 | Programsidan. | `VOICES 0/48`. | |
+| J4 | Spela `test_emu\midi\load48_all.mid` från Windows. | `VOICES 48/48`. CPU under 80 %, MAX under 80 %, `DROPPED ... CPU 0`. Inget knaster. |  2026-11-14, FM-1: CPU mean 65 %, peak 72 %, 0 s over 80 %, voices mean 45, spärren 0 (emulatorn gav 35 %: hårdvaran kostar ca 1,9 gånger). Ok. |
+| J5 | Spela `test_emu\midi\load48_filter.mid` (filtrerade ljud). | Som J4. Emulatorn gav 45 %. |  2026-11-14, FM-1: CPU mean 58 %, peak 83 %, 1 s over 80 %, spärren tog 4 röster, voices mean 32. Spärren ingriper vid 48 filtrerade röster. |
+| J6 | Spela `MIDIs\ABBA_-_Dancing_Queen.mid` och en låt till (t.ex. Africa). | Inget knaster, `CPU` under 80 %, spärren tar 0. |  2026-11-14, FM-1, 45 s, andel 50 %: Dancing Queen mean 53 %, peak 102 %, 17 s over 80 %, spärren 31; Africa 54 %, 84 %, 5 s, 5; Under the Sea 60 %, 90 %, 8 s, 11. Sämre än 32-rösters (toppar 72-78 %, 0 s, 0 tagna: RUNNING.md 2h). Inte lyssnat. |
+| J7 | Lyssna: hör du skillnad mot 32-rösters firmwaren på samma låt (tjockare ackord, färre bortfallna toner)? | Subjektivt: skriv vad du hör. | |
+| J8 | `dualcore.html` på båda firmwarena (en låt, andel 50 %): jämför medel-CPU, topp, sekunder över 80 % och spärrens tagna röster. | 48-rösters: topp under 80 %, 0 tagna. | |
+| J9 | Skicka om banken med install.html (flashskrivning med CPU1 igång). | Skrivs och binds (CRC stämmer). | |
+| J10 | Flasha tillbaka `dist\sf2player_44k.fwsc`. | 32 röster, spelar som förut. | |
+
+## K. Klockväxel 320 / 360 MHz (2026-11-14)
+
+Firmware: bygg med `.\build_fw.ps1 -Name sf2p_v48_clk -Voices 48` (`-Voices 40` för 40 röster) och packa med `.\build_install.ps1 -Bank dist\gm_44k_fill.fm1b -Voices 48`; 2026-11-14 provades `dist\sf2p_v48_clk7.fwsc`. Koden: `app\sf2clock.c`. Infosidan (REC) har raden `CLOCK 320 MHZ  EDIT: 360 MHZ`; **EDIT på infosidan** växlar mellan klockan enheten startade på (320 MHz) och 360 MHz (PLL1 540 MHz × 2/3, M-VAVE:s egen klocka). **Sparas inte:** varje start är på 320 MHz, så en hängning botas med att stänga av och sätta på. Bytet tar ca 3 ms (CPU:n går på kristallen i ca 1 ms) med ljudet avstängt: ett klick är väntat. Innan bytet jämförs ljudtimern mot TIMER4; stämmer den inte ändras inget och raden säger `TIMER OFF`. Efter bytet mäts blocklängden om. Kunskapskälla: Felucca-projektets `chip/fm1_clock.h`; risken som den nämner är att 64-bitars multiplikationer ibland ger en bit fel vid 360 MHz (vår filter- och limiterkod använder sådana): kör därför en lång stund.
+
+| # | Steg | Väntat | Resultat |
+| --- | --- | --- | --- |
+| K1 | Flasha firmwaren. Infosidan (REC). | Raden `CLOCK 320 MHZ  EDIT: 360 MHZ` (grå). Visas `360` eller ingen EDIT-text: skriv ned vad. | |
+| K2 | Spela `load48_all.mid` (dualcore.html, andel 50 %), som baslinje vid 320. | Som J4: CPU ca 65 %, topp ca 72 %. | |
+| K3 | REC, tryck **EDIT**. | Ett klick, sedan `CLOCK 360 MHZ  EDIT: BACK TO BOOT CLOCK` i orange. Ingen frysning, skärmen och USB-MIDI lever. | |
+| K4 | Spela `load48_all.mid` igen vid 360. | CPU ca 11 % lägre (ca 58 %), topp ca 64 %. | |
+| K5 | Spela `load48_filter.mid` och Dancing Queen. | Bättre än vid 320 (J5: topp 83 %, spärr 4. J6: topp 102 %, spärr 31). | |
+| K6 | Spela musik i 30 minuter vid 360. | Inga krascher, ingen hängning, inga udda toner. | |
+| K7 | EDIT igen. | Tillbaka till `CLOCK 320 MHZ`. | |
+| K8 | Stäng av och sätt på igen efter K3. | Startar på 320 MHz. | |
+
+**Förlopp och resultat (2026-11-14, FM-1, 48 röster, delning 50 %, `dist\gm_44k_fill.fm1b`):**
+- Första firmwaren (bara PLL1 och systemklockan, som Felucca-källan beskriver) gav missljud vid 360 MHz som försvann direkt vid byte tillbaka till 320.
+- Misstankar och vad som slog fast: (1) flashens chip-select-tid i SFC (`0x40200` bit 23:20, m-bootloaders SPEC 3.6: `floor(HSB MHz × 45 / 1000) + 1`, alltså 8 vid HSB 160 MHz och 9 vid 180) sätts nu **före** bytet; registret visade 9 vid 360 MHz. HSB/LSB-delarna (`0x10008` = `0x00010200`) är desamma vid båda klockorna. (2) Ljudklockan följer inte CPU-klockan: avbrottsintervallet var 2901 µs vid 360 MHz (nominellt 2902). (3) Ljudtimern räknar CPU-klockan, så blocklängden mäts om efter bytet (`fm1_audio_retime`, 1 044 475 ticks vid 360 MHz).
+- Självtesterna efter bytet (CRC32 över hela banken och en kort 64-bitars-multiplikationsslinga, 8 × 2048 steg, ca 1 ms) lägger tillbaka 320 MHz vid skillnad. Båda klarade sig vid 360 MHz på den här enheten.
+- Glitchräknaren (raden `B… SHORT … OVR …` överst på REC-sidan, nollställs av EDIT): **320 MHz: 0 förlorade block av 27 000 (piano). 360 MHz, piano: 0 av 23 000. 360 MHz, de tyngsta filerna (load48_all, load48_filter, Dancing Queen, 30 s var): 16 förlorade block av 206 000, alla `COMMIT` (renderingen tog 2,6 ms av 2,9 ms), `LATE 0`. Inget missljud hördes.**
+- Belastning, 360 mot 320 MHz (30 s, delning 50 %): load48_all medel 67 mot 70 %, topp 72 mot 79 %, 48 mot 45 röster; load48_filter 58 mot 58 %, topp 83 mot 83 %; Dancing Queen medel 52 mot 51 %, topp 92 mot 109 %, spärren tog 14 mot 18, 31 mot 24 röster. Vinsten är måttlig: medel-CPU ändras knappt.
+- Det som inte är gjort: en längre provkörning (30 minuter) vid 360 MHz och samma tunga test vid 320 MHz med glitchräknaren.
