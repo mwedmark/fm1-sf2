@@ -52,7 +52,7 @@ For building the firmware and working on the code, see [DEVELOPING.md](DEVELOPIN
 - **The bank format (FM1B)** is a SoundFont reduced to what the FM-1 can play: presets with their key and velocity zones, layered zones,
   loop points, volume envelopes, the filter and its envelope, vibrato and tremolo LFOs, pan, reverb and chorus sends, and the samples, mono and
   in one of the codecs below. The full layout is in [FORMAT.md](FORMAT.md).
-- **The player** mixes up to 32 voices at 32 kHz, resamples to the FM-1's 44.1 kHz output and adds reverb, chorus and a limiter.
+- **The player** mixes up to 32 voices at 44.1 kHz (the FM-1's output rate), with four-point interpolation and the voices shared between the FM-1's two CPU cores, and adds reverb, chorus and a limiter.
   A CPU guard lowers the number of voices for a moment if the processor runs out of time, so it never stutters.
 
 There is one firmware. It plays a **BFP8** bank, or a **packed** bank (MP3) that holds about twice as much sound, from the bank in flash.
@@ -77,8 +77,8 @@ The converter is hosted at <https://mwedmark.github.io/fm1-sf2/converter.html> (
    empty preset, so a program change to one of them makes the channel silent (a program the bank has no preset for leaves the
    channel playing what it played). The FM-1's panel steps over the empty programs and starts on the first one that has sounds.
 3. **Encoding**: the codec of the samples, see [section 4](#4-codecs). BFP8 is the default and the one to use. **MP3 64, 128 or 256 kbit/s**
-   makes a packed bank: BFP8 at 32,000 Hz with the sounds as one MP3 stream (the sample rate is then fixed).
-4. **Sample rate**: 32,000 Hz is the default and the rate the player works at. Lower rates make the bank smaller and duller
+   makes a packed bank: BFP8 at 44,100 Hz with the sounds as one MP3 stream, the flash that is left filled with the sounds MP3 handles worst kept as BFP8 (the sample rate is then fixed). Packed banks from the 32 kHz firmware of v0.5.x do not play on the 44.1 kHz firmware: convert them again.
+4. **Sample rate**: 32,000 Hz is the default for plain banks; the player works at 44,100 Hz and plays a bank of any rate. Lower rates make the bank smaller and duller
    (22,059 Hz keeps up to about 11 kHz).
 5. **Bit depth**: only for raw PCM (8, 12 or 16 bit).
 6. **Convert**. The line under it says the bank's size and whether it **fits in the device's sample bank of 524.0 KB**. The table
@@ -430,7 +430,7 @@ Notes from the FM-1's own keys play at velocity 100.
 ---
 
 The firmware is built on [m-vave/fm1_open](https://github.com/m-vave/fm1_open) (GPLv3 with the FM1 SDK linking exception, see
-`fm1_open/LICENSE.md`). The screenshots are from fm1-emu (MIT) running the firmware with `dist/gm_32k_bfp8.fm1b`.
+`fm1_open/LICENSE.md`). The screenshots are from fm1-emu (MIT) running the firmware with a 32 kHz bank, `dist/gm_32k_bfp8.fm1b`.
 
 ## Licence
 
@@ -446,7 +446,7 @@ included. The sound data (`banks/default.fm1b`) and the MIDI files are not code 
 
 The corresponding source of every release is this repository at the release's tag.
 
-**The starter bank.** `banks/default.fm1b` (also attached to each release as `gm_32k_bfp8.fm1b`, and what the install page puts on the FM-1) is a
+**The starter bank.** `banks/default.fm1b` (a 44.1 kHz bank, some sounds MP3 and the rest BFP8; also attached to each release as `gm_44k_fill.fm1b`, and what the install page puts on the FM-1) is a
 General MIDI bank converted from a SoundFont whose header names E-mu Systems (1993) as the copyright holder. It is included so that you can
 get going at once; the SoundFont itself is not in the repository. If you want other sounds, make your own bank with the converter.
 

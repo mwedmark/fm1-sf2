@@ -93,7 +93,7 @@
           <option value="sea6">SEA6 (6.7 bit/sample, about 5 dB less noise)</option>
           <option value="bfp8" selected>BFP8 (8 bit with a scale per 32 samples, 8.25 bit/sample, easy to decode)</option>
           <option value="pcm">Raw PCM</option>
-          <option value="mp3_64">MP3 64 kbit/s, packed for the live-cache firmware (BFP8 at 32,000 Hz underneath)</option>
+          <option value="mp3_64">MP3 64 kbit/s, packed for the live-cache firmware (BFP8 at 44,100 Hz underneath)</option>
           <option value="mp3_128">MP3 128 kbit/s, packed for the live-cache firmware</option>
           <option value="mp3_256">MP3 256 kbit/s, packed for the live-cache firmware</option>
         </select></label>
@@ -1028,7 +1028,7 @@ function writeSf2(bank, name) {
     const picking = $('preset').value === 'pick', list = picking ? chosen() : null;
     if (picking && !list.length) { $('result').hidden = true; showErr('Tick at least one instrument.'); return; }
     try {
-      bank = buildBank(sf, picking ? list : +$('preset').value, kbit ? { rate: 32000, bits: 8, sea: false, seaBits: 5, bfp: true } :
+      bank = buildBank(sf, picking ? list : +$('preset').value, kbit ? { rate: 44100, bits: 8, sea: false, seaBits: 5, bfp: true } :
         { rate: +$('rate').value, bits: +$('bits').value, sea: $('codec').value.startsWith('sea'), seaBits: $('codec').value === 'sea6' ? 6 : 5, bfp: $('codec').value === 'bfp8' });
     } catch (e) { showErr('The conversion failed: ' + e.message); return; }
     if (!bank.zones.length) { $('result').hidden = true; showErr('The preset has no playable sounds.'); return; }
@@ -1042,7 +1042,7 @@ function writeSf2(bank, name) {
     if (kbit) {
       converting = true; $('go').disabled = true; $('go').textContent = 'Packing as MP3 ...';
       await new Promise(r => setTimeout(r, 30));             // let the button show it: the packing takes a few seconds
-      try { bank.packed = FM1_PACK.pack(bin, { kbit, encode: lameEncode, decode: MP3_DECODER.decode }); }
+      try { bank.packed = FM1_PACK.pack(bin, { kbit, fill: 1, encode: lameEncode, decode: MP3_DECODER.decode }); }
       catch (e) { bank = null; $('result').hidden = true; showErr('The MP3 packing failed: ' + e.message); return; }
       finally { converting = false; $('go').disabled = false; $('go').textContent = 'Convert'; }
       // the simulator plays plain banks: the BFP8 bank with each MP3 sound as the firmware decodes it
@@ -1068,8 +1068,8 @@ function writeSf2(bank, name) {
     Play.load(play);
   }
   // pcm (Int16Array, 32 kHz mono) to one constant-bit-rate MP3 stream: lamejs codes without the bit reservoir and writes no tag
-  function lameEncode(pcm, kbit) {
-    const enc = new lamejs.Mp3Encoder(1, 32000, kbit), parts = [];
+  function lameEncode(pcm, kbit, rate = 44100) {
+    const enc = new lamejs.Mp3Encoder(1, rate, kbit), parts = [];
     for (let i = 0; i < pcm.length; i += 1152) parts.push(enc.encodeBuffer(pcm.subarray(i, i + 1152)));
     parts.push(enc.flush());
     const out = new Uint8Array(parts.reduce((a, q) => a + q.length, 0));
