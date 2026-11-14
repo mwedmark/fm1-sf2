@@ -216,3 +216,23 @@ links here).
 interrupt: enter, then exit at once (CPU1 goes on with the job and returns from its interrupt when done, so CPU0's interrupts are off only for
 the handshake), CPU0 renders its share, waits for CPU1's done flag, adds the buffers. While CPU1 runs the job it cannot answer the flash
 driver, which then waits until it is done (at most one share of the voices). 2g found the flash reads cheap, so CPU1 may read the samples itself.
+
+**The voices on both cores, on the FM-1 (2026-11-14, PR 34, `build_fw.ps1 -Rate 44100 -Cpu1Split -CacheKB 77`).** Installed with `install.html` from Chrome
+(driven by the assistant; Web MIDI works on localhost:8765, not on the self-signed 8766), the whole of "Never gonna give you up" (218 s, `dist
+ever_full.script`)
+played over USB-MIDI twice, with CPU1's share of the voices set over MIDI (CC 102 on channel 16): 50 % and 0 % (one core); the live figures over MIDI
+read in the same page. No hang, no late block (the split switches itself off if CPU1 is not done in 5 ms; it never did):
+
+| | One core (share 0) | Both cores (share 50 %) |
+| --- | --- | --- |
+| CPU, mean of the seconds with voices | 50.0 % | **42.8 %** |
+| CPU, highest peak | 109 % | **80 %** |
+| Seconds with a peak of 80 % or more | 124 of 239 | **1 of 232** |
+| Voices taken by the CPU guard (`DROPPED CPU`) | 205 | **0** |
+| Voices playing, mean | 18.4 | **28.6** |
+| Held notes dropped by the voice limit (`HELD`) | 1 439 | 490 |
+| Longest control cycle | 72 ms | 52 ms |
+| Late notes / no room in the pool | 0 / 0 | 0 / 0 |
+
+With one core the CPU guard keeps the voice count down (18 on average, 205 voices taken), which is why its mean CPU is not higher; with both cores
+the song keeps 28.6 voices of the 32 and the guard does nothing. So the second core removes the 44.1 kHz build's CPU limit on this song.
