@@ -14,7 +14,7 @@
 #   -SplitCheck: a verification build of -DualCore: CPU0 also renders CPU1's voices from copies of their state and compares (info page: CHK checked/differed).
 #   -ClockSwitch: an EXPERIMENT (FM1_TEST.md, section K): EDIT on the info page switches the CPU clock between 320 and 360 MHz. Off by default: at 360 MHz the sound
 #     got glitches that stayed until a restart.
-#   -Voices n: n voices instead of 32 (a measurement build: the heap pays for the extra voices with a smaller pool).
+#   -Voices n: n voices instead of the default 40 (FM1B_VOICES in fm1b.h; 32 until 2026-11-14) (a measurement build: the heap pays for the extra voices with a smaller pool).
 #   -FlashProbe: a measurement build (RUNNING.md, 2g): ARP on the info page switches the voices between flash and SRAM; one core only (-DualCore off).
 # The pool is taken from what the heap allows: 84 KB at 32 kHz, 81 at 44.1 kHz, less for the dual-core buffers and four-point interpolation; the build
 # asks for 111 468 bytes of heap, and if it comes out short build_fw.ps1 lowers the pool by what is missing and links again (unless -CacheKB is given).
@@ -24,7 +24,7 @@
 # The dual-core code calls two functions of the SDK's library that are local symbols: the build links, reads their addresses with llvm-nm into
 # fm1_open\app\cpu1_sdk_addr.h (not committed) and links again until the addresses it was built with are the ones in the image (two or three links).
 param([Parameter(Mandatory)][string]$Name, [string]$Bank, [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
-      [ValidateSet(32000, 44100)][int]$Rate = 44100, [ValidateSet('auto', 'on', 'off')][string]$DualCore = 'auto', [switch]$Interp4, [switch]$Linear, [switch]$SplitCheck, [switch]$FlashProbe, [ValidateRange(1,64)][int]$Voices = 32, [switch]$ClockSwitch)
+      [ValidateSet(32000, 44100)][int]$Rate = 44100, [ValidateSet('auto', 'on', 'off')][string]$DualCore = 'auto', [switch]$Interp4, [switch]$Linear, [switch]$SplitCheck, [switch]$FlashProbe, [ValidateRange(1,64)][int]$Voices = 40, [switch]$ClockSwitch)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 # defaults (2026-11-14): 44.1 kHz, both cores, four-point interpolation; -Rate 32000 is the old 32 kHz build, -Linear turns four-point off
@@ -51,14 +51,14 @@ $explicitKB = $PSBoundParameters.ContainsKey('CacheKB')
 
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
 Set-Content $info "/* Written by build_fw.ps1 for one build; not committed. */`n#define FM1_BUILD_NAME `"$Name.fwsc`"`n#define FM1_BUILD_DATE `"$date`"`n" -NoNewline
-if ($Rate -ne 32000 -or $split -or $Interp4 -or $FlashProbe -or $Voices -ne 32 -or $ClockSwitch) {
+if ($Rate -ne 32000 -or $split -or $Interp4 -or $FlashProbe -or $Voices -ne 40 -or $ClockSwitch) {
     $lines = @('/* Written by build_fw.ps1 (-Rate, -DualCore, -SplitCheck, -Interp4, -FlashProbe) for one build; not committed. */')
     if ($Rate -ne 32000) { $lines += "#define FM1B_RATE ${Rate}U" }
     if ($split) { $lines += '#define FM1B_SPLIT 1' }
     if ($SplitCheck) { $lines += '#define FM1B_SPLIT_CHECK 1' }
     if ($Interp4) { $lines += '#define FM1B_INTERP4 1' }
     if ($FlashProbe) { $lines += '#define FM1B_FLASH_PROBE 1' }
-    if ($Voices -ne 32) { $lines += "#define FM1B_VOICES ${Voices}U" }
+    if ($Voices -ne 40) { $lines += "#define FM1B_VOICES ${Voices}U" }
     if ($ClockSwitch) { $lines += '#define FM1_CLOCK_SWITCH 1' }
     Set-Content $rateFile (($lines -join "`n") + "`n") -NoNewline
 }

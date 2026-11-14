@@ -1,6 +1,6 @@
 # fm1-sf2: a SoundFont player for the M-VAVE FM-1
 
-This firmware turns the M-VAVE FM-1 into a 32-voice, 16-channel General MIDI sound module that plays a sound bank converted
+This firmware turns the M-VAVE FM-1 into a 40-voice, 16-channel General MIDI sound module that plays a sound bank converted
 from a SoundFont (`.sf2`). You convert the bank in the browser, install the firmware and the bank over USB from another page in
 the browser, and then play it from the FM-1's keys or over MIDI (USB, DIN or Bluetooth).
 
@@ -52,7 +52,7 @@ For building the firmware and working on the code, see [DEVELOPING.md](DEVELOPIN
 - **The bank format (FM1B)** is a SoundFont reduced to what the FM-1 can play: presets with their key and velocity zones, layered zones,
   loop points, volume envelopes, the filter and its envelope, vibrato and tremolo LFOs, pan, reverb and chorus sends, and the samples, mono and
   in one of the codecs below. The full layout is in [FORMAT.md](FORMAT.md).
-- **The player** mixes up to 32 voices at 44.1 kHz (the FM-1's output rate), with four-point interpolation and the voices shared between the FM-1's two CPU cores, and adds reverb, chorus and a limiter.
+- **The player** mixes up to 40 voices at 44.1 kHz (the FM-1's output rate), with four-point interpolation and the voices shared between the FM-1's two CPU cores, and adds reverb, chorus and a limiter.
   A CPU guard lowers the number of voices for a moment if the processor runs out of time, so it never stutters.
 
 There is one firmware. It plays a **BFP8** bank, or a **packed** bank (MP3) that holds about twice as much sound, from the bank in flash.

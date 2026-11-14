@@ -32,7 +32,7 @@
 #endif
 #endif
 #ifndef FM1B_VOICES
-#define FM1B_VOICES 32U
+#define FM1B_VOICES 40U                          /* 40 since 2026-11-14 (32 before): measured on the FM-1, FM1_TEST.md section L */
 #endif
 /* FM1_CLOCK_SWITCH 1 (build_fw.ps1 -ClockSwitch): an EXPERIMENT, off by default. EDIT on the info page switches the CPU clock between the clock the unit
  * booted at (320 MHz) and 360 MHz (sf2clock.c). On the FM-1 it ran, but the sound got occasional glitches that stayed after switching back until a restart,
