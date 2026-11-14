@@ -21,7 +21,7 @@
 /* The same in the browser and on the device. Measured in fm1-emu at 240 MHz, player at 32 kHz, flute, 32 voices: BFP8 bank
  * 42-48 % (63 % while the notes start), SEA6 bank 70-78 % (88 %): RUNNING.md, section 7b. On the device the audio interrupt's
  * own time lowers fm1b_voice_limit() when it runs short (sf2out_load), so this is a ceiling: a SEA6 bank may get fewer. */
-#define FM1B_VOICES 32U
+/* (the number itself is defined after fm1b_rate.h below: build_fw.ps1 -Voices sets it for one build) */
 /* The rate the player renders at, voices and effects alike. The device renders at the bank's 32 kHz and board/audio.c resamples
  * that to the codec's 44.1 kHz (a voice at its root key then reads one sample a frame); the browser and the tests render at
  * 44.1 kHz. A test may set it (-DFM1B_RATE=32000U). */
@@ -30,6 +30,16 @@
 #if __has_include("fm1b_rate.h")
 #include "fm1b_rate.h"
 #endif
+#endif
+#ifndef FM1B_VOICES
+#define FM1B_VOICES 40U                          /* 40 since 2026-11-14 (32 before): measured on the FM-1, FM1_TEST.md section L */
+#endif
+/* FM1_CLOCK_SWITCH 1 (build_fw.ps1 -ClockSwitch): an EXPERIMENT, off by default. EDIT on the info page switches the CPU clock between the clock the unit
+ * booted at (320 MHz) and 360 MHz (sf2clock.c). On the FM-1 it ran, but the sound got occasional glitches that stayed after switching back until a restart,
+ * which fits felucca-bsp's docs/CPU.md (64-bit multiplies beside 16-bit loads go wrong now and then at 360 MHz; our voice, filter and limiter code is full
+ * of them). FM1_TEST.md, section K. */
+#ifndef FM1_CLOCK_SWITCH
+#define FM1_CLOCK_SWITCH 0
 #endif
 /* FM1B_FLASH_PROBE 1 (a measurement build; set it in the same header): the info page's ARP switches every voice between its samples in the
  * flash and a 2 KB BFP8 tone in SRAM, the same code either way, so the CPU figures of the two tell what the flash reads cost. RUNNING.md, 2g. */

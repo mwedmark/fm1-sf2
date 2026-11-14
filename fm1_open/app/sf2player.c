@@ -18,6 +18,9 @@
 #include "sf2_upload.h"
 #include "sf2fx.h"
 #include "sf2out.h"
+#if FM1_CLOCK_SWITCH
+#include "sf2clock.h"
+#endif
 #include "song.h"
 #include "tuning_hook.h"
 #include "fm1_device.h"
@@ -366,9 +369,27 @@ static void cache_service_timed(void)
  * so that a waiting note's sound got room (fm1b.c, packed_squeeze). Version 1 had 0..19, version 2 0..21.
  * Without the live cache the cache's values are 0. */
 static uint32_t stats_sent_at, window_step_max, window_screen_max;
+/* The screen's text over USB MIDI, so that a PC can read what the panel shows (the info page's counters and so on): one line at a time, 25 ms apart,
+ * round robin over the 20 line slots (the whole page in half a second): F0 7D 46 4D 53 10 <page> <line> <text, 7-bit ASCII> F7. A slot is empty (no text)
+ * when the page does not use it (page_clear empties them all). dualcore.html and stats.html read it; nothing is kept, no RAM. */
+static void screen_midi_poll(uint32_t now)
+{
+    static uint32_t at;
+    static unsigned next;
+    if (now - at < 25U)
+        return;
+    at = now;
+    uint8_t m[8 + LINE_CHARS + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x10, (uint8_t)page, (uint8_t)next}, *d = m + 8;
+    for (const char *t = shown[next]; *t && d < m + 8 + LINE_CHARS; ++t)
+        *d++ = (uint8_t)(*t & 0x7f);
+    *d++ = 0xf7;
+    if (fm1_midi_send_port(FM1_MIDI_USB, m, (size_t)(d - m)) == 0)   /* -1 no USB host, -2 queue full: the same line again next time */
+        next = (next + 1U) % LINES;
+}
 static void stats_midi_poll(void)
 {
     uint32_t now = fm1_millis();
+    screen_midi_poll(now);
     if (now - stats_sent_at < 1000U)
         return;
     stats_sent_at = now;
@@ -409,8 +430,15 @@ static void stats_midi_poll(void)
     (void)fm1_midi_send_port(FM1_MIDI_USB, m, sizeof m);      /* -1 when no USB host, -2 when the queue is full: the next second tries again */
 }
 #endif
+#if FM1_CLOCK_SWITCH
+static uint8_t clock_status, clock_tried;                  /* the clock switch: the result of the last EDIT (sf2clock_toggle) */
+#endif
+static struct fm1_audio_stats audio_base;                 /* the audio interrupt's counters at the last EDIT (zero: since start) */
 static void info_compute(void)
 {
+#if FM1_CLOCK_SWITCH
+    sf2clock_probe();
+#endif
 #if FM1_MIDIPLAY
     info_free_ram = song_free_ram();
 #endif
@@ -487,6 +515,29 @@ static void info_update(void)
         line_show(9, 156, "SOUNDSET CHECKSUM:", 1, YELLOW);
         *put_hex(line, soundset_crc) = 0;
         line_show(10, 170, line, 2, YELLOW);
+    }
+#if FM1_CLOCK_SWITCH
+    {   /* "CLOCK 320 MHZ  EDIT: 360": the CPU clock (the registers at 360 MHz, else the booted 320), EDIT switches between the booted clock and 360 MHz until power off */
+        static const char *const why[] = {"", "", "TIMER OFF", "NO READBACK", "FLASH DIFFERS", "ALU DIFFERS"};
+        const unsigned mhz = sf2clock_mhz() ? sf2clock_mhz() : 320U;        /* (the booted clock: source 2, PLL1 off) */
+        d = put_number(put_text(line, "CLOCK "), (int32_t)mhz, 0);
+        d = put_text(d, " MHZ");
+        if (clock_tried && clock_status) d = put_text(put_text(d, "  "), why[clock_status]);
+        else if (sf2clock_switchable()) d = put_text(d, sf2clock_raised() ? "  EDIT: BACK" : "  EDIT: 360 MHZ");
+        *d = 0;
+        line_show(16, 80, line, 1, sf2clock_raised() ? ORANGE : clock_tried && clock_status ? ORANGE : GREY);   /* (y 80: free; the upload line takes 184-198) */
+    }
+#endif
+    {   /* "B123 SHORT 0 OVR 0": the audio interrupt's own count since the last EDIT of the blocks it skipped (an interval too short or too long) or
+         * could not finish in time: the glitches themselves. Row 17, y 24: between the title and the firmware lines. */
+        struct fm1_audio_stats a;
+        fm1_audio_stats_read(&a);
+        const uint32_t shorts = a.short_intervals - audio_base.short_intervals, overruns = a.overruns - audio_base.overruns;
+        d = put_number(put_text(line, "B"), (int32_t)(a.blocks - audio_base.blocks), 0);
+        d = put_number(put_text(d, " SHORT "), (int32_t)shorts, 0);
+        d = put_number(put_text(d, " OVR "), (int32_t)overruns, 0);
+        *d = 0;
+        line_show(17, 24, line, 1, shorts || overruns ? ORANGE : GREY);
     }
     upload_line();
 #if FM1_MIDIPLAY
@@ -1076,11 +1127,22 @@ void groove_screen_control(void)
         fm1b_channel_info(cursor, &info);
         sf2player_channel_solo(info.solo ? -1 : (int)cursor);
     }
-    if (channels && (pressed & (1U << BUTTON_EDIT))) {            /* EDIT: arm or disarm the selected row (MIDI channel 1 when armed) */
+#if FM1_CLOCK_SWITCH
+    if (page == PAGE_INFO && (pressed & (1U << BUTTON_EDIT))) {   /* EDIT on the info page: the CPU clock, 320 <-> 360 MHz (not saved) */
+        {   struct fm1b_info bi;
+            fm1b_info(&bi);
+            clock_status = (uint8_t)sf2clock_toggle(bi.image, bi.bytes);
+        }
+        clock_tried = 1;
+        fm1_audio_stats_read(&audio_base);                    /* the audio counters are shown from this switch on */
+        page_clear();
+    }
+#endif
+    if (channels && page != PAGE_INFO && (pressed & (1U << BUTTON_EDIT))) {            /* EDIT: arm or disarm the selected row (MIDI channel 1 when armed) */
         armed ^= (uint16_t)(1U << cursor);
         arm_midi[cursor] = 0;
     }
-    if (channels && (pressed & (1U << BUTTON_GLO)) && ((armed >> cursor) & 1U))   /* GLO: the armed row's MIDI channel up one, 16 to 1 */
+    if (channels && page != PAGE_INFO && (pressed & (1U << BUTTON_GLO)) && ((armed >> cursor) & 1U))   /* GLO: the armed row's MIDI channel up one, 16 to 1 */
         arm_midi[cursor] = (uint8_t)((arm_midi[cursor] + 1U) & 15U);
     leds_update();
     if (pressed & 3U) {                                       /* OCT-: bit 0, OCT+: bit 1 */

@@ -26,6 +26,11 @@
 #define FM1_AUDIO_CLOCK_SEL  (*(volatile uint32_t *)0x10014U)
 
 int fm1_audio_start(void);
+/* The block's length in audio-timer ticks, measured against TIMER4 (24 MHz) over 2 ms: call with interrupts off and the audio muted (sf2clock.c).
+ * check: 0 when it agrees with the ticks the block was set up with (the timer counts the CPU clock), else 1. retime: sets them from the measurement
+ * (after the CPU clock was changed). */
+int fm1_audio_timer_check(void);
+void fm1_audio_retime(void);
 void fm1_audio_suspend(void);
 void fm1_audio_resume(void);
 #define FM1_AUDIO_INLINE static inline __attribute__((always_inline))
