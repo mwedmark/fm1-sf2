@@ -22,19 +22,6 @@
 #include "tuning_hook.h"
 #include "fm1_device.h"
 #include <string.h>
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST >= 3
-#include "cpu1_sdk_addr.h"                               /* written by build_fw.ps1 -Cpu1Probe / -Cpu1Borrow from the link: the SDK's own (local) symbols */
-#if FM1_CPU1_TEST == 4
-#include "cpu1_borrow.h"
-static struct cpu1_borrow cpu1_borrow_state;              /* ARP on the info page: one job on CPU1 through the SDK's hand-over */
-#endif
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
-#include "cpu1_test.h"
-#if FM1B_FLASH_PROBE
-#error "FM1_CPU1_TEST and FM1B_FLASH_PROBE both take ARP on the info page"
-#endif
-static struct cpu1_tries cpu1_tries;                     /* the second core's start test (ARP and SEQ on the info page) */
-#endif
 #if __has_include("build_info.h")
 #include "build_info.h"                                  /* written by build_fw.ps1: FM1_BUILD_NAME, FM1_BUILD_DATE */
 #endif
@@ -385,7 +372,8 @@ static void stats_midi_poll(void)
     if (now - stats_sent_at < 1000U)
         return;
     stats_sent_at = now;
-    enum { VALUES = 23 + (FM1B_FLASH_PROBE || FM1B_SPLIT) };  /* version 4: 23 the probe (1 when the voices read the SRAM), or the split's share in % */
+    enum { VALUES = 23 + (FM1B_FLASH_PROBE || FM1B_SPLIT) };  /* version 4: 23 the probe (1 when the voices read the SRAM) or the split's share in %. Version 5 (-SplitCheck): 22 the blocks checked and 23 how many
+                                                                 * differed, in place of 'squeezed' and the share: fm1_midi_send_port takes 128 bytes a message at most (24 values are 127) */
     uint32_t v[VALUES] = {now};
 #if FM1B_PACKED
     struct fm1b_cache_stats cs;
@@ -404,9 +392,16 @@ static void stats_midi_poll(void)
 #if FM1B_FLASH_PROBE
     v[23] = fm1b_probe();
 #elif FM1B_SPLIT
-    v[23] = fm1b_split_share;
+    {
+        struct fm1b_split_stats ss;
+        fm1b_split_stats(&ss);
+        v[23] = fm1b_split_share;
+#if FM1B_SPLIT_CHECK
+        v[22] = ss.checked; v[23] = ss.bad;
 #endif
-    uint8_t m[6 + VALUES * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, VALUES == 24 ? 0x04 : 0x03}, *d = m + 6;
+    }
+#endif
+    uint8_t m[6 + VALUES * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, FM1B_SPLIT_CHECK ? 0x05 : VALUES == 24 ? 0x04 : 0x03}, *d = m + 6;
     for (unsigned i = 0; i < VALUES; ++i)
         for (unsigned k = 0; k < 5; ++k)
             *d++ = (uint8_t)((v[i] >> (7 * k)) & 0x7fU);
@@ -529,102 +524,30 @@ static void info_update(void)
     }
 #endif
 #if FM1B_SPLIT
-    {   /* "SPLIT 50% L0 V51% H12 W340 J900": the share of the voices' cost for CPU1 (OFF: 0), the blocks it did not finish in time, its
-         * share of the voices so far, and per split block in us: the handshake, CPU0's wait for CPU1, CPU1's job. ARP: on/off, SEQ: 30..70 % */
-        struct fm1b_split_stats s;
+    {   /* "SPLIT 50% V51% L0 H1 W27 J559": the share of the voices' cost for CPU1 (OFF: 0; NO CPU1: it is not up), its share of the voices
+         * so far, the blocks it did not finish in time, and per split block in us the handshake, CPU0's wait for CPU1 and CPU1's job;
+         * with -SplitCheck " CHK 1234/0": the blocks checked / that differed. ARP: on or off, SEQ: the share 30 to 70 %. */
+        struct fm1b_split_stats ss;
         struct fm1b_split_times tm;
-        fm1b_split_stats(&s);
+        char wide[LINE_CHARS + 1];
+        fm1b_split_stats(&ss);
         fm1b_split_times(&tm);
         const unsigned share = fm1b_split_share, k = tm.count ? tm.count : 1U;
-        d = share ? put_text(put_number(put_text(line, "SPLIT "), (int32_t)share, 0), "%") : put_text(line, "SPLIT OFF");
-        d = put_number(put_text(d, " L"), (int32_t)s.late, 0);
-        d = put_text(put_number(put_text(d, " V"), s.voices_all ? (int32_t)(100ULL * s.voices_other / s.voices_all) : 0, 0), "%");
+        d = !fm1b_split_up() ? put_text(wide, "SPLIT: CPU1 NOT UP") : share ? put_text(put_number(put_text(wide, "SPLIT "), (int32_t)share, 0), "%") : put_text(wide, "SPLIT OFF");
+        d = put_text(put_number(put_text(d, " V"), ss.voices_all ? (int32_t)(100ULL * ss.voices_other / ss.voices_all) : 0, 0), "%");
+        d = put_number(put_text(d, " L"), (int32_t)ss.late, 0);
         d = put_number(put_text(d, " H"), (int32_t)(tm.handshake_us / k), 0);
         d = put_number(put_text(d, " W"), (int32_t)(tm.wait_us / k), 0);
         d = put_number(put_text(d, " J"), (int32_t)(tm.job_us / k), 0);
+#if FM1B_SPLIT_CHECK
+        d = put_number(put_text(d, " CHK "), (int32_t)ss.checked, 0);
+        d = put_number(put_text(d, "/"), (int32_t)ss.bad, 0);
+#endif
         *d = 0;
-        line_show(15, 140, line, 1, s.late ? ORANGE : share ? GREEN : GREY);
+        wide[LINE_CHARS] = 0;
+        line_show(15, 140, wide, 1, ss.late || ss.bad ? ORANGE : share && fm1b_split_up() ? GREEN : GREY);
     }
-    line_show(11, 228, "REC BACK  ARP ON/OFF  SEQ SHARE", 1, GREY);
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 4
-    {   /* "BORROW OK 3/3 0:2625 2:2630 1:2625US": the tries that worked, the job on CPU0 alone, on both at once, on CPU1 (the last try) */
-        static const char *const why[] = {"-", "OK", "NOT UP", "LATE", "BAD SUM"};
-        const struct cpu1_borrow *b = &cpu1_borrow_state;
-        d = put_text(line, "BORROW ");
-        d = put_text(d, why[b->last_state < 5U ? b->last_state : 0]);
-        d = put_number(put_text(d, " "), (int32_t)b->ok, 0);
-        d = put_number(put_text(d, "/"), (int32_t)b->tries, 0);
-        if (b->last_state == 1U || b->last_state == 3U || b->last_state == 4U) {
-            d = put_number(put_text(d, " 0:"), (int32_t)b->solo_us, 0);
-            d = put_number(put_text(d, " 2:"), (int32_t)b->both_us, 0);
-            d = put_number(put_text(d, " 1:"), (int32_t)b->cpu1_us, 0);
-            d = put_text(d, "US");
-        }
-        *d = 0;
-        line_show(15, 140, line, 1, b->last_state == 0U ? GREY : b->last_state == 1U ? GREEN : ORANGE);
-    }
-    line_show(11, 228, "REC BACK  ARP: A JOB ON CPU1", 1, GREY);
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
-    {   /* Read only: does the SDK's CPU1 run? "C1 01000000 U1 W0 E02000224 S00004102": CPU1's control register (the SDK writes bit 3 on,
-         * bit 1 off to release it; on the FM-1 bit 3 reads back 0), the flag CPU1 sets when its worker runs (the byte after is4byte_mode:
-         * the SDK's CPU1 code addresses is4byte_mode + 1, a local of its own), the flag of the flash hand-over (cpu_wait_flag), the word
-         * CPU1 starts from (0x01C7FFF8), and the register cpu_enter_sfc_critical waits on (bit 14).
-         * PLAN_DUALCORE_CLOCK.md (branch sf2-dualcore), section 8. */
-        static const char hex[] = "0123456789ABCDEF";
-        const uint32_t c1 = *(volatile uint32_t *)0x1EEE004U, s = *(volatile uint32_t *)0x1EEE008U;
-        const uint32_t up = *(volatile uint8_t *)(uintptr_t)(FM1_SDK_IS4BYTE_MODE + 1U), wait = *(volatile uint8_t *)(uintptr_t)FM1_SDK_CPU_WAIT_FLAG;
-        const uint32_t fn = *(volatile uint32_t *)0x01C7FFF8U;
-        d = put_text(line, "C1 ");
-        for (int k = 28; k >= 0; k -= 4) *d++ = hex[(c1 >> k) & 15U];
-        d = put_number(put_text(d, " U"), (int32_t)up, 0);
-        d = put_number(put_text(d, " W"), (int32_t)wait, 0);
-        d = put_text(d, " E");
-        for (int k = 28; k >= 0; k -= 4) *d++ = hex[(fn >> k) & 15U];
-        d = put_text(d, " S");
-        for (int k = 28; k >= 0; k -= 4) *d++ = hex[(s >> k) & 15U];
-        *d = 0;
-        line_show(15, 140, line, 1, up ? GREEN : ORANGE);
-    }
-    line_show(11, 228, "REC BACK  CPU1 READ ONLY", 1, GREY);
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
-    {   /* "CPU1 BOOT OK 1234 JOBS 3/3", or what kept it from starting; NOT ASKED: ARP was not held at power-on */
-        static const char *const why[] = {"NOT ASKED", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
-        const struct cpu1_boot *b = &cpu1_boot_state;
-        d = put_text(line, b->asked == 2U ? "CPU1 LATE " : b->asked ? "CPU1 EARLY " : "CPU1 ");
-        d = put_text(d, why[b->state < 6U ? b->state : 0]);
-        if (!b->asked) {                                  /* what the scans at power-on saw: "E48/000 L48/008 B0000" (columns, buttons: hex) */
-            static const char hex[] = "0123456789ABCDEF";
-            for (unsigned k = 0; k < 2U; ++k) {
-                d = put_number(put_text(d, k ? " L" : " E"), (int32_t)fm1_boot_scan[k].done, 0);
-                *d++ = '/';
-                for (int s = 8; s >= 0; s -= 4) *d++ = hex[(fm1_boot_scan[k].columns >> s) & 15U];
-            }
-            d = put_text(d, " B");
-            for (int s = 12; s >= 0; s -= 4) *d++ = hex[(fm1_boot_scan[1].buttons >> s) & 15U];
-        }
-        if (b->asked) {
-            d = put_number(put_text(d, " "), (int32_t)b->loops, 0);
-            d = put_number(put_text(d, " JOBS "), (int32_t)b->jobs_ok, 0);
-            d = put_number(put_text(d, "/"), (int32_t)b->jobs_tried, 0);
-        }
-        *d = 0;
-        line_show(15, 140, line, 1, !b->asked ? GREY : b->state == CPU1_OK ? GREEN : ORANGE);
-    }
-    line_show(11, 228, cpu1_boot_state.state == CPU1_OK ? "REC BACK  ARP: A JOB ON CPU1" : "REC BACK  ARP AT POWER-ON: CPU1", 1, GREY);
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
-    {   /* "CPU1 M8 3/10 M89 9/10 OK 812US": the tries and starts that worked with each mask, the last try's result and start time */
-        static const char *const why[] = {"-", "OK", "NO START", "LATE", "BAD SUM", "MISREAD"};
-        const struct cpu1_tries *t = &cpu1_tries;
-        d = put_number(put_text(line, "CPU1 M8 "), (int32_t)t->ok[CPU1_MASK_8], 0);
-        d = put_number(put_text(d, "/"), (int32_t)t->tries[CPU1_MASK_8], 0);
-        d = put_number(put_text(d, " M89 "), (int32_t)t->ok[CPU1_MASK_8_9], 0);
-        d = put_number(put_text(d, "/"), (int32_t)t->tries[CPU1_MASK_8_9], 0);
-        d = put_text(put_text(d, " "), why[t->last_state < 6U ? t->last_state : 0]);
-        if (t->last_state != CPU1_NOT_RUN) d = put_text(put_number(put_text(d, " "), (int32_t)t->last_start_us, 0), "US");
-        *d = 0;
-        line_show(15, 140, line, 1, t->last_state == CPU1_NOT_RUN ? GREY : t->last_state == CPU1_OK ? GREEN : ORANGE);
-    }
-    line_show(11, 228, cpu1_tries.mask == CPU1_MASK_8_9 ? "REC BACK ARP TRY SEQ MASK 8+9" : "REC BACK ARP TRY SEQ MASK 8", 1, GREY);
+    line_show(11, 228, "REC BACK  ARP SPLIT ON/OFF  SEQ SHARE", 1, GREY);
 #elif FM1B_FLASH_PROBE
     line_show(11, 228, fm1b_probe() ? "REC BACK  ARP SAMPLES: RAM" : "REC BACK  ARP SAMPLES: FLASH", 1, fm1b_probe() ? ORANGE : GREY);
 #else
@@ -1133,7 +1056,7 @@ void groove_screen_control(void)
         fm1b_probe_set(!fm1b_probe());
 #endif
 #if FM1B_SPLIT
-    {   /* ARP on the info page: the split on and off (the share it had); SEQ: the share 30, 40 .. 70 % */
+    {   /* ARP on the info page: the split on and off (back to the share it had); SEQ: the share 30, 40 .. 70 % */
         static uint8_t split_kept = 50;
         if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP))) {
             if (fm1b_split_share) { split_kept = fm1b_split_share; fm1b_split_share = 0; }
@@ -1142,18 +1065,6 @@ void groove_screen_control(void)
         if (page == PAGE_INFO && (pressed & (1U << BUTTON_SEQ)))
             fm1b_split_share = split_kept = (uint8_t)(fm1b_split_share >= 70U || fm1b_split_share < 30U ? 30U : fm1b_split_share + 10U);
     }
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 4
-    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one job on CPU1, through the SDK's hand-over */
-        cpu1_borrow_try(&cpu1_borrow_state);
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 3
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
-    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one job on the CPU1 the start left running */
-        cpu1_boot_job(&cpu1_boot_state);
-#elif defined(FM1_CPU1_TEST) && FM1_CPU1_TEST
-    if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: one start of the second core */
-        cpu1_test_try(&cpu1_tries);
-    if (page == PAGE_INFO && (pressed & (1U << BUTTON_SEQ)))      /* SEQ on the info page: the interrupts off while it starts */
-        cpu1_tries.mask ^= 1U;
 #endif
     if (channels && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
         struct fm1b_channel info;

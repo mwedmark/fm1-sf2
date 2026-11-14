@@ -31,6 +31,8 @@ static struct fm1b_split_stats split_read(void) { struct fm1b_split_stats s; fm1
 EXPORT unsigned cf_split_blocks(void) { return split_read().blocks; }
 EXPORT unsigned cf_split_other(void) { return split_read().voices_other; }
 EXPORT unsigned cf_split_all(void) { return split_read().voices_all; }
+EXPORT unsigned cf_split_checked(void) { return split_read().checked; }
+EXPORT unsigned cf_split_bad(void) { return split_read().bad; }
 #endif
 EXPORT unsigned cf_cut(void)
 {

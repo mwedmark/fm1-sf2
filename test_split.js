@@ -14,10 +14,10 @@ const sources = [path.join(root, 'test_fluid/wrap.c'), path.join(root, 'test_flu
 const outDir = path.join(root, 'test_fluid/out');
 fs.mkdirSync(outDir, { recursive: true });
 
-function build(split) {
-  const wasm = path.join(outDir, `split_${rate}_${split}.wasm`);
+function build(split, check = 0) {
+  const wasm = path.join(outDir, `split_${rate}_${split}${check ? '_check' : ''}.wasm`);
   execFileSync(path.join(sdk, 'bin/clang.exe'), ['--sysroot=' + path.join(sdk, 'share/wasi-sysroot'), '-O2', '-DFM1_HOST_TEST', `-DFM1B_RATE=${rate}U`,
-    '-DFM1B_INTERP4=0', `-DFM1B_SPLIT=${split}`, '-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-dynamic', '-Wall', '-Werror',
+    '-DFM1B_INTERP4=0', `-DFM1B_SPLIT=${split}`, `-DFM1B_SPLIT_CHECK=${check}`, '-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-dynamic', '-Wall', '-Werror',
     ...['fm1_open/app', 'fm1_open/app/synth', 'fm1_open/sdk/include'].map(d => '-I' + path.join(root, d)), ...sources, '-o', wasm], { stdio: 'inherit' });
   const module = new WebAssembly.Module(fs.readFileSync(wasm));
   return () => {                                       // a fresh instance for each run: no voice left from the one before
@@ -68,11 +68,11 @@ function play(make, share) {
     out.set(new Int32Array(w.memory.buffer, w.cf_out(), 256), b * 256);
     peak = Math.max(peak, w.cf_sounding());
   }
-  return { out, peak, split: share === undefined ? null : [w.cf_split_blocks(), w.cf_split_other(), w.cf_split_all()] };
+  return { out, peak, split: share === undefined ? null : [w.cf_split_blocks(), w.cf_split_other(), w.cf_split_all()], check: share === undefined ? null : [w.cf_split_checked(), w.cf_split_bad()] };
 }
 
 const one = play(build(0));
-const two = build(1);
+const two = build(1), checked = build(1, 1);
 let failed = 0;
 console.log(`${path.relative(root, bankPath)} at ${rate} Hz, ${seconds} s, up to ${one.peak} voices at once`);
 for (const share of [0, 25, 50, 75, 100]) {
@@ -84,6 +84,15 @@ for (const share of [0, 25, 50, 75, 100]) {
   if (!ok) failed++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} share ${share} %: ${blocks} blocks split, the other core ${all ? (100 * other / all).toFixed(1) : 0} % of the voices` +
     (ok ? ', the output equals one core\'s' : `, first difference at block ${Math.floor(diff / 256)} sample ${diff % 256}: ${one.out[diff]} against ${r.out[diff]}`));
+}
+// the verification build (FM1B_SPLIT_CHECK: CPU0 re-renders the other core's voices from saved state and compares): the same output, no block differs
+for (const share of [30, 50, 100]) {
+  const r = play(checked, share);
+  let diff = -1;
+  for (let i = 0; i < one.out.length; ++i) if (one.out[i] !== r.out[i]) { diff = i; break; }
+  const [n, bad] = r.check, ok = diff < 0 && n > 0 && bad === 0;
+  if (!ok) failed++;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} check build, share ${share} %: ${n} blocks compared on the spot, ${bad} differ` + (diff < 0 ? ", the output equals one core's" : `, output differs at sample ${diff}`));
 }
 console.log(failed ? `${failed} FAILED` : 'all passed');
 process.exit(failed ? 1 : 0);

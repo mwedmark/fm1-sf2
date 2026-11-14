@@ -1814,11 +1814,23 @@ static inline __attribute__((always_inline)) void voice_block(struct voice *v, i
 }
 enum { SPLIT_FRAMES = 128 };                                  /* a block's frames at most: 128 at 44.1 kHz, 93 at 32 kHz */
 volatile uint8_t fm1b_split_share = 50;
+static volatile uint8_t split_holds;
+void fm1b_split_hold(int on) { if (on) ++split_holds; else if (split_holds) --split_holds; }
 static struct {
     uint8_t list[FM1B_VOICES];
     unsigned count, frames, buses;
     int32_t out[SPLIT_FRAMES], rev[SPLIT_FRAMES], cho[SPLIT_FRAMES], left[SPLIT_FRAMES], right[SPLIT_FRAMES];
 } split;
+#if FM1B_SPLIT_CHECK
+static struct voice split_shadow[FM1B_VOICES];                 /* the other core's voices as they were before the block */
+static int32_t chk_out[SPLIT_FRAMES], chk_rev[SPLIT_FRAMES], chk_cho[SPLIT_FRAMES], chk_left[SPLIT_FRAMES], chk_right[SPLIT_FRAMES];
+static FM1_DSP_CODE unsigned words_differ(const void *a, const void *b, unsigned bytes)
+{
+    const uint32_t *x = (const uint32_t *)a, *y = (const uint32_t *)b;
+    for (unsigned i = 0; i < bytes / 4U; ++i) if (x[i] != y[i]) return 1;
+    return 0;
+}
+#endif
 static struct fm1b_split_stats split_counts;
 void fm1b_split_stats(struct fm1b_split_stats *s) { *s = split_counts; }
 /* The other core's share: its own buffers from zero, its voices into them. Nothing else of the block is touched. */
@@ -1842,7 +1854,7 @@ static FM1_DSP_CODE int split_render(const void *owner, int32_t *out, int32_t *r
 {
     uint8_t list[FM1B_VOICES];
     unsigned count = 0, total = 0, share = fm1b_split_share;
-    if (!share || frames > SPLIT_FRAMES)
+    if (!share || frames > SPLIT_FRAMES || split_holds || !fm1b_split_up())
         return 0;
     for (unsigned n = 0; n < FM1B_VOICES; ++n) {
         struct voice *v = &voices[n];
@@ -1865,6 +1877,9 @@ static FM1_DSP_CODE int split_render(const void *owner, int32_t *out, int32_t *r
     split.count = 0;
     for (unsigned k = mine; k < count; ++k) split.list[split.count++] = list[k];
     split.frames = frames; split.buses = buses;
+#if FM1B_SPLIT_CHECK
+    for (unsigned k = 0; k < split.count; ++k) split_shadow[k] = voices[split.list[k]];
+#endif
     split_counts.blocks++;
     split_counts.voices_all += count;
     split_counts.voices_other += split.count;
@@ -1874,6 +1889,21 @@ static FM1_DSP_CODE int split_render(const void *owner, int32_t *out, int32_t *r
     if (handed) {
         split_counts.handed++;
         if (!fm1b_split_wait()) { split_counts.late++; fm1b_split_share = 0; return 1; }   /* its share left out, and no more splits: it may still be writing */
+#if FM1B_SPLIT_CHECK
+        {   /* the same voices from their saved state, here: the buffers and the state they ended in must be the other core's */
+            int32_t *chk_sides[2] = {chk_left, chk_right};
+            for (unsigned i = 0; i < frames; ++i) chk_out[i] = chk_rev[i] = chk_cho[i] = chk_left[i] = chk_right[i] = 0;
+            for (unsigned k = 0; k < split.count; ++k) voice_block(&split_shadow[k], chk_out, chk_rev, chk_cho, chk_sides, frames, buses);
+            unsigned bad = words_differ(chk_out, split.out, frames * 4U);
+            if (buses & 1U) bad |= words_differ(chk_rev, split.rev, frames * 4U);
+            if (buses & 2U) bad |= words_differ(chk_cho, split.cho, frames * 4U);
+            if (buses & 4U) bad |= words_differ(chk_left, split.left, frames * 4U);
+            if (buses & 8U) bad |= words_differ(chk_right, split.right, frames * 4U);
+            for (unsigned k = 0; k < split.count; ++k) bad |= words_differ(&split_shadow[k], &voices[split.list[k]], sizeof(struct voice));
+            split_counts.checked++;
+            if (bad) split_counts.bad++;
+        }
+#endif
     } else
         split_job(NULL);
     for (unsigned i = 0; i < frames; ++i) out[i] += split.out[i];

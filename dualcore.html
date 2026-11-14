@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FM-1 dual-core test</title>
+<!-- Plays MIDI files to an FM-1 running the dual-core SF2 player (build_fw.ps1 -Rate 44100, RUNNING.md 2h) once for each share of the voices given
+     to CPU1 (0 = one core), and sums up the live figures the FM-1 sends back over USB MIDI (stats.html): CPU, voices, what the CPU guard took.
+     CPU1's share is set with CC 102 on MIDI channel 16. Serve the repository (start_web.ps1) and open this page on http://localhost:8765 in Chrome or
+     Edge (Web MIDI needs a secure origin and localhost counts as one); it must be the only program using the FM-1's MIDI port.
+     Address parameters start it by themselves: dualcore.html?songs=MIDIs/a.mid|MIDIs/b.mid&seconds=75&shares=0,50&go=1  (window.__results has the result). -->
+<style>
+  :root { --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #dcdcd5; --accent: #1f6feb; --ok: #1a7f37; --bad: #c62828; --warn: #b26a00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92; --line: #34342f; --accent: #5b9bff; --ok: #56d364; --bad: #ff7b72; --warn: #e3a33a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 10px; }
+  label { display: block; color: var(--muted); margin: 10px 0 2px; }
+  input, select, textarea { font: inherit; width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  textarea { height: 8em; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 160px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--accent); color: #fff; cursor: pointer; margin-top: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { min-height: 1.5em; margin: 10px 0 0; color: var(--muted); }
+  #status.bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { color: var(--muted); font-weight: normal; }
+  td.bad { color: var(--bad); }
+  .scroll { overflow-x: auto; }
+  pre { font-size: 12px; overflow-x: auto; background: var(--bg); padding: 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FM-1 dual-core test</h1>
+  <p class="sub">Plays MIDI files to the FM-1 with the voices shared between the two cores and on one core, and sums up what it measures.</p>
+
+  <div class="panel">
+    <div class="row">
+      <div><label for="port">The FM-1's MIDI port</label><select id="port"></select></div>
+      <div><label for="seconds">Seconds of each song</label><input id="seconds" type="number" value="75" min="10" max="600"></div>
+      <div><label for="shares">CPU1's share of the voices, % (0: one core)</label><input id="shares" value="0,50"></div>
+    </div>
+    <label for="songs">MIDI files, one address a line (relative to this server)</label>
+    <textarea id="songs">MIDIs/ABBA_-_Dancing_Queen.mid
+MIDIs/Star-Wars-Theme-(From-'Star-Wars').mid
+MIDIs/TOTO.Africa K.mid
+MIDIs/Backstreet Boys - I Want It That Way.mid
+MIDIs/beethoven_hammerklavier_4_format0.mid
+MIDIs/UnderTheSea.mid</textarea>
+    <button id="go">Play them</button>
+    <p id="status">Looking for the FM-1 ...</p>
+  </div>
+
+  <div class="panel scroll">
+    <h2>Result</h2>
+    <table id="result"><thead><tr><th>Song</th><th>Share</th><th>Seconds</th><th>CPU mean %</th><th>Peak max %</th><th>Seconds ≥ 80 %</th><th>Voices mean</th>
+      <th>CPU guard took</th><th>Voice limit took</th><th>Late notes</th><th>Cycle max ms</th><th>Checked / differed</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="panel"><h2>Raw (JSON, <code>window.__results</code>)</h2><pre id="raw"></pre></div>
+</main>
+<script>
+  // The FM-1's figures, once a second: F0 7D 46 4D 53 <version>, values of 5 x 7 bits, lowest first, F7 (sf2player.c, stats_midi_poll; stats.html)
+  const NAMES = ['ms', 'hits', 'misses', 'evictions', 'noRoom', 'frames', 'requested', 'lost', 'waiting', 'pinned', 'busyMs', 'cycles', 'cycleMs', 'cycleMax',
+                 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard', 'stepMax', 'screenMax', 'squeezed', 'share'];
+  const NAMES5 = NAMES.slice(0, 22).concat(['chk', 'chkBad']);       // a -SplitCheck build (version 5): the blocks checked and how many differed in place of the last two
+  const COUNT = { 1: 20, 2: 22, 3: 23, 4: 24, 5: 24 };
+  const $ = id => document.getElementById(id), sleep = ms => new Promise(r => setTimeout(r, ms));
+  const status = (t, bad) => { $('status').textContent = t; $('status').className = bad ? 'bad' : ''; };
+  let access = null, out = null, rows = [];
+  window.__results = [];
+
+  // a standard MIDI file to timed messages [[ms, [bytes]], ...]: notes, controllers, program and bend; no meta events or SysEx
+  function parseMidi(buf) {
+    const v = new DataView(buf), u = new Uint8Array(buf);
+    if (String.fromCharCode(...u.subarray(0, 4)) !== 'MThd') throw new Error('not a MIDI file');
+    const ntracks = v.getUint16(10), division = v.getUint16(12);
+    if (division & 0x8000) throw new Error('SMPTE time is not supported');
+    let o = 8 + v.getUint32(4); const raw = [];
+    for (let tr = 0; tr < ntracks && o < u.length; ++tr) {
+      const end = o + 8 + v.getUint32(o + 4);
+      let p = o + 8, tick = 0, status = 0;
+      const vlq = () => { let x = 0, c; do { c = u[p++]; x = x << 7 | c & 127; } while (c & 128); return x; };
+      while (p < end) {
+        tick += vlq();
+        let s = u[p];
+        if (s & 128) ++p; else s = status;
+        if (s === 0xff) { const type = u[p++], len = vlq(); if (type === 0x51) raw.push({ tick, tempo: u[p] << 16 | u[p + 1] << 8 | u[p + 2], o: raw.length }); p += len; }
+        else if (s === 0xf0 || s === 0xf7) { const len = vlq(); p += len; }
+        else { status = s; const n = (s & 0xf0) === 0xc0 || (s & 0xf0) === 0xd0 ? 1 : 2; raw.push({ tick, d: [s, ...u.subarray(p, p + n)], o: raw.length }); p += n; }
+      }
+      o = end;
+    }
+    raw.sort((a, b) => a.tick - b.tick || a.o - b.o);
+    let tempo = 500000, last = 0, ms = 0; const ev = [];
+    for (const r of raw) {
+      ms += (r.tick - last) * tempo / division / 1000; last = r.tick;
+      if (r.tempo) tempo = r.tempo;
+      else if (!(r.d[0] === 0xbf && r.d[1] === 102)) ev.push([ms, r.d]);       // CC 102 on channel 16 is the test's own
+    }
+    return ev;
+  }
+
+  function onMessage(e) {
+    const d = e.data;
+    if (d[0] !== 0xf0 || d[1] !== 0x7d || d[2] !== 0x46 || d[3] !== 0x4d || d[4] !== 0x53) return;
+    const n = COUNT[d[5]];
+    if (!n || d.length !== 6 + n * 5 + 1) return;
+    const r = { at: performance.now() };
+    const names = d[5] === 5 ? NAMES5 : NAMES;
+    for (let i = 0; i < n; ++i) { let x = 0; for (let k = 4; k >= 0; --k) x = x * 128 + d[6 + i * 5 + k]; r[names[i]] = x >>> 0; }
+    rows.push(r);
+  }
+
+  async function connect() {
+    access = await navigator.requestMIDIAccess({ sysex: true });
+    const sel = $('port'); sel.innerHTML = '';
+    for (const o of access.outputs.values()) { const opt = document.createElement('option'); opt.value = o.name; opt.textContent = o.name; sel.appendChild(opt); }
+    const pick = [...sel.options].find(o => /USB-Midi|FM-1/i.test(o.value));
+    if (pick) sel.value = pick.value;
+    status(pick ? 'Found ' + pick.value + '. Waiting for its figures ...' : 'No FM-1 port: connect it over USB, switch it on and reload.', !pick);
+    return !!pick;
+  }
+  function open() {
+    out = [...access.outputs.values()].find(o => o.name === $('port').value);
+    const input = [...access.inputs.values()].find(i => i.name === $('port').value);
+    if (!out || !input) throw new Error('the port has no input or output');
+    input.onmidimessage = onMessage;
+  }
+  async function figures(tries = 12) {
+    for (let i = 0; i < tries; ++i) { if (rows.length && performance.now() - rows[rows.length - 1].at < 2500) return rows[rows.length - 1]; await sleep(500); }
+    throw new Error('no figures from the FM-1: is it running a build with the live figures (FM1_STATS_MIDI)?');
+  }
+
+  async function playRun(song, events, seconds, share) {
+    for (let c = 0; c < 16; ++c) { out.send([0xb0 | c, 123, 0]); out.send([0xb0 | c, 121, 0]); }     // all notes off, controllers reset
+    out.send([0xbf, 102, share]);
+    await sleep(3500);                                                                               // the tails die away, the share has reached the figures
+    const first = rows.length, t0 = performance.now();
+    let i = 0;
+    while (i < events.length && events[i][0] <= seconds * 1000) {
+      const now = performance.now() - t0;
+      while (i < events.length && events[i][0] <= now && events[i][0] <= seconds * 1000) out.send(events[i++][1]);
+      status(`${song}: share ${share} %, ${(now / 1000).toFixed(0)} of ${seconds} s`);
+      await sleep(2);
+    }
+    while (performance.now() - t0 < seconds * 1000) await sleep(50);
+    const last = rows.length;
+    for (let c = 0; c < 16; ++c) out.send([0xb0 | c, 123, 0]);
+    await sleep(1500);
+    // the seconds of the run with voices playing; deltas of the totals from the figure before the first of them
+    const run = rows.slice(first, last);
+    const used = run.filter(r => r.voices > 0);
+    const before = rows[first - 1] || run[0], after = run[run.length - 1];
+    const mean = k => used.length ? used.reduce((s, r) => s + r[k], 0) / used.length : 0;
+    const d = k => (after[k] - before[k]) >>> 0;
+    return {
+      song, share, seconds: used.length, cpuMean: +mean('cpu').toFixed(1), peakMax: Math.max(0, ...used.map(r => r.cpuPeak)), over80: used.filter(r => r.cpuPeak >= 80).length,
+      voicesMean: +mean('voices').toFixed(1), guard: d('guard'), held: d('held'), lost: d('lost'), cycleMax: Math.max(0, ...used.map(r => r.cycleMax)),
+      checked: after.chk === undefined ? null : d('chk'), differed: after.chkBad === undefined ? null : d('chkBad'),
+    };
+  }
+  function show(res) {
+    const tb = document.querySelector('#result tbody');
+    const tr = document.createElement('tr');
+    const cells = [res.song.replace(/^.*\//, ''), res.share === 0 ? 'one core' : res.share + ' %', res.seconds, res.cpuMean, res.peakMax, res.over80, res.voicesMean,
+                   res.guard, res.held, res.lost, res.cycleMax, res.checked === null ? '–' : res.checked + ' / ' + res.differed];
+    cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if ((i === 9 && c > 0) || (i === 11 && res.differed > 0)) td.className = 'bad'; tr.appendChild(td); });
+    tb.appendChild(tr);
+    $('raw').textContent = JSON.stringify(window.__results);
+  }
+
+  async function run() {
+    $('go').disabled = true;
+    try {
+      open(); await figures();
+      const seconds = +$('seconds').value, shares = $('shares').value.split(',').map(s => Math.max(0, Math.min(100, +s.trim() || 0)));
+      const songs = $('songs').value.split('\n').map(s => s.trim()).filter(Boolean);
+      window.__done = false;
+      for (const song of songs) {
+        status('Fetching ' + song + ' ...');
+        const events = parseMidi(await (await fetch(song)).arrayBuffer());
+        for (const share of shares) { const res = await playRun(song, events, seconds, share); window.__results.push(res); show(res); }
+      }
+      out.send([0xbf, 102, shares.includes(50) ? 50 : shares[shares.length - 1]]);
+      status('Done: ' + window.__results.length + ' runs.');
+    } catch (e) { status(e.message, true); window.__error = e.message; }
+    window.__done = true;
+    $('go').disabled = false;
+  }
+
+  $('go').onclick = run;
+  const q = new URLSearchParams(location.search);
+  if (q.get('songs')) $('songs').value = q.get('songs').split('|').join('\n');
+  if (q.get('seconds')) $('seconds').value = q.get('seconds');
+  if (q.get('shares')) $('shares').value = q.get('shares');
+  connect().then(ok => { if (ok && q.get('go')) setTimeout(run, 1500); }).catch(e => status('Web MIDI: ' + e.message, true));
+</script>
+</body>
+</html>

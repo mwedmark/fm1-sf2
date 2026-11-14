@@ -36,24 +36,35 @@
 #ifndef FM1B_FLASH_PROBE
 #define FM1B_FLASH_PROBE 0
 #endif
-/* FM1B_SPLIT 1 (build_fw.ps1 -Cpu1Split): each block's voices are shared between CPU0 and a second core. fm1b_render_sends hands a
- * job to fm1b_split_begin (the device's: the SDK's own CPU1 through its hand-over, cpu1_split.c; a host test's: at once, in line), renders
- * its own share, then fm1b_split_wait and adds the other core's buffers: the sum is the same integers as on one core. begin returns 0
- * when the job is to run here (the other core not there or switched off); wait returns 0 when the job did not finish in time (its share
- * of the block is then left out). PLAN_DUALCORE_CLOCK.md (branch sf2-dualcore), section 8. */
+/* FM1B_SPLIT 1 (build_fw.ps1 -DualCore, on by default at 44.1 kHz): the voices of each block are shared between CPU0 and the SDK's CPU1.
+ * fm1b_render_sends lists the voices that run and gives the other core a share of their cost (fm1b_split_share, in %: 50 at start, 0 none),
+ * calls fm1b_split_begin (the device's, app/cpu1_split.c: the SDK's own hand-over to CPU1; a host test's: runs the job at once), renders its
+ * own share, calls fm1b_split_wait and adds the other core's buffers: the same integers as on one core (test_split.js). begin returns 0 when
+ * the job is to run here (the other core not up, or a flash write going on: fm1b_split_hold); wait returns 0 when the job was not done in
+ * time (its share is then left out of the block and the split switched off).
+ * FM1B_SPLIT_CHECK 1 (build_fw.ps1 -SplitCheck, a verification build): CPU0 also renders the other core's voices from copies of their state
+ * taken before, and compares the buffers and the voices' state afterwards (fm1b_split_stats: checked, bad).
+ * PLAN_DUALCORE_CLOCK.md (branch sf2-dualcore), section 8. */
 #ifndef FM1B_SPLIT
 #define FM1B_SPLIT 0
+#endif
+#ifndef FM1B_SPLIT_CHECK
+#define FM1B_SPLIT_CHECK 0
 #endif
 #if FM1B_SPLIT
 int fm1b_split_begin(void (*job)(void *), void *arg);
 int fm1b_split_wait(void);
-struct fm1b_split_stats { uint32_t blocks, handed, late, voices_other, voices_all; };
+int fm1b_split_up(void);                                   /* 1: the other core is there to be handed a job */
+struct fm1b_split_stats { uint32_t blocks, handed, late, voices_other, voices_all, checked, bad; };
 void fm1b_split_stats(struct fm1b_split_stats *s);
 /* where a split block's time goes (the other core's side): the handshake on CPU0 (enter to exit), CPU0's wait for the other core after its
  * own share, and the other core's job; sums in us over count blocks */
 struct fm1b_split_times { uint32_t count, handshake_us, wait_us, job_us; };
 void fm1b_split_times(struct fm1b_split_times *t);
 extern volatile uint8_t fm1b_split_share;                  /* the share of the voices' cost for the other core, in % (0: none) */
+void fm1b_split_hold(int on);                              /* on: no splitting from now on (a flash write starts); off: it may again. Control task only; nests. */
+#else
+#define fm1b_split_hold(on) ((void)(on))
 #endif
 #if FM1B_FLASH_PROBE
 void fm1b_probe_set(unsigned ram);

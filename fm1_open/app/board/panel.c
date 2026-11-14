@@ -8,32 +8,6 @@
 #include "lcd.inc"
 
 static uint8_t controls_started;
-#if defined(__has_include)
-#if __has_include("fm1b_rate.h")
-#include "fm1b_rate.h"
-#endif
-#endif
-#if defined(FM1_CPU1_TEST) && FM1_CPU1_TEST == 2
-#include "cpu1_test.h"
-struct fm1_boot_scan fm1_boot_scan[2];
-/* The CPU1 boot test (cpu1_test.c, build_fw.ps1 -Cpu1Boot): the panel scanned a few times at power-on, before the timer that scans it
- * later runs (fm1_controls_init starts the scanner again from the beginning); nonzero while button key (0..13) is held. */
-int fm1_board_key_held_at_boot(unsigned key, unsigned stage)
-{
-    struct fm1_boot_scan *s = &fm1_boot_scan[stage & 1U];
-    fm1_input_init();
-    for (unsigned i = 0; i < 48U; ++i) {                  /* 48 columns: four scans of the 11, a press counts after two */
-        unsigned wait = 100000;
-        while (!(FM1_SCAN_REG(0) & (1u << 15)) && --wait) {}
-        if (FM1_SCAN_REG(0) & (1u << 15)) s->done++;
-        fm1_input_tick();
-        for (unsigned c = 0; c < FM1_NCOL; ++c)
-            if (fm1_in.rows[c]) s->columns |= 1u << c;
-    }
-    s->buttons = fm1_in.buttons;
-    return key < 14U && ((fm1_in.buttons >> key) & 1U);
-}
-#endif
 uint8_t fm1_io_trs_midi_enabled(void) { return 1U; }
 
 void fm1_controls_init(void)

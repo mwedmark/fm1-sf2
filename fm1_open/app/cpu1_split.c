@@ -19,6 +19,7 @@ typedef void (*sdk_exit_fn)(void);
 #define SDK_ENTER ((sdk_enter_fn)(uintptr_t)FM1_SDK_CPU_ENTER_SFC_CRITICAL)
 #define SDK_EXIT ((sdk_exit_fn)(uintptr_t)FM1_SDK_CPU_EXIT_SFC_CRITICAL)
 #define SDK_CPU1_UP (*(volatile uint8_t *)(uintptr_t)(FM1_SDK_IS4BYTE_MODE + 1U))   /* set by CPU1's worker (the SDK's local after is4byte_mode) */
+#define SDK_WAIT_FLAG (*(volatile uint8_t *)(uintptr_t)FM1_SDK_CPU_WAIT_FLAG)        /* nonzero: the SDK has CPU1 parked for a flash access */
 
 static void (*volatile split_fn)(void *);
 static void *volatile split_arg;
@@ -39,9 +40,11 @@ static FM1_AUDIO_CODE void on_cpu1(void *unused)      /* CPU1, in its interrupt 
     SYNC();
 }
 
+FM1_AUDIO_CODE int fm1b_split_up(void) { return SDK_CPU1_UP; }
+
 FM1_AUDIO_CODE int fm1b_split_begin(void (*job)(void *), void *arg)
 {
-    if (!SDK_CPU1_UP)
+    if (!SDK_CPU1_UP || SDK_WAIT_FLAG)
         return 0;
     split_fn = job; split_arg = arg; started = 0; done = 0;
     SYNC();
