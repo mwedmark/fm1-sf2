@@ -112,6 +112,7 @@ try {
     Remove-Item $rateFile -ErrorAction SilentlyContinue
     Remove-Item $addrFile -ErrorAction SilentlyContinue
 }
+New-Item -ItemType Directory -Force (Join-Path $root 'dist') | Out-Null   # git ignores dist\: a fresh checkout (the workflow) has none
 $package = Join-Path $root "dist\$Name.fwsc"
 Copy-Item (Join-Path $root 'fm1_open\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc') $package -Force
 Push-Location $root

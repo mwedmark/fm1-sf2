@@ -80,7 +80,7 @@ async function get(url) {
     const id = f.replace(/\.fm1b$/i, '');
     if (seen.has(id) || id === 'sine') { console.warn(`${dir}/${f}: the name ${id} is taken, skipped`); continue; }
     const bytes = fs.readFileSync(path.join(root, dir, f));
-    if (bytes.toString('latin1', 0, 4) !== 'FM1B' || bytes.readUInt16LE(4) !== 1) throw new Error(`${dir}/${f} is not a plain FM1B bank (the site runs the plain firmware; MP3-packed banks are refused)`);
+    if (bytes.toString('latin1', 0, 4) !== 'FM1B' || ![1, 2].includes(bytes.readUInt16LE(4))) throw new Error(`${dir}/${f} is not an FM1B bank (version 1, or 2 for an MP3-packed bank; the site runs the live-cache firmware, which plays both)`);
     seen.add(id);
     fs.writeFileSync(path.join(out, `${id}.flash`), overlay(bytes));
     fs.copyFileSync(path.join(root, dir, f), path.join(out, f));
