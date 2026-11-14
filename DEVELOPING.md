@@ -7,7 +7,7 @@ with the paths on the build machine.
 ## Build helpers
 
 ```powershell
-.\build_firmware.ps1                     # dist\sf2player_<date>.fwsc, the one firmware: live cache, 84 KB pool, BFP8 and MP3 banks (-NoLiveCache: all formats and the MIDI file player, no MP3)
+.\build_firmware.ps1                     # dist\sf2player_<date>.fwsc, the one firmware (since 2026-11-14: 44.1 kHz, both cores, four-point interpolation, bank dist\gm_44k_fill.fm1b; -Rate 32000 is the old 32 kHz build, -Linear turns four-point off, -Rate 32000 -NoLiveCache: all formats and the MIDI file player, no MP3)
 .\build_install.ps1                      # packs the last build and a bank into dist\install\ for install.html
 .\build_all.ps1 -Name sf2player_x -Serve # both, then starts the server and opens install.html
 .\start_web.ps1                          # serves index.html, install.html and song.html on http://localhost:8765

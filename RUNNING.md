@@ -29,6 +29,10 @@ It writes the name and time to `fm1_open\app\build_info.h` (git ignores it), run
 copies the package to `dist\<name>.fwsc` and writes what `node fm1_info.js` prints next to it. A plain build shows
 `FM1_OFFICIAL_OPEN.fwsc` and the compiler's clock on the info page.
 
+**Defaults since 2026-11-14:** `build_fw.ps1`, `build_firmware.ps1` and `build_all.ps1` build the 44.1 kHz player with both cores and four-point interpolation, for
+`dist\gm_44k_fill.fm1b` (sections 2f, 2h, 2i). `-Rate 32000` is the old 32 kHz build (linear, one core, `dist\gm_32k_packed.fm1b`; the figures below are for it),
+`-Linear` turns four-point off, `-DualCore off` is one core. The GitHub workflow builds with `sdk\Build.ps1` and is unchanged (32 kHz).
+
 **One firmware, with the live cache** (the default since 2026-11-11; `build_fw.ps1`, `build_firmware.ps1` and `sdk\Build.ps1` build it without a switch, the
 GitHub workflow builds only it, and `install.html` installs it for BFP8 and MP3 banks alike; `-LiveCache:$false` on `build_fw.ps1` or `sdk\Build.ps1`, or
 `-NoLiveCache` on `build_firmware.ps1`, builds the firmware without it, which has every bank format and the MIDI file player). With all the formats

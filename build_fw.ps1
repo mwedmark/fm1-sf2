@@ -3,7 +3,9 @@
 #   .\build_fw.ps1 -Name sf2player_32v_info -Bank dist\gm_32k_bfp8.fm1b   also print the bank's and the sound set's CRC32
 #   The live cache is on by default (RUNNING.md, 1b; [-CacheKB 84] [-CacheFrames 2]): the firmware plays BFP8 banks and those made by pack_bank.js.
 #   .\build_fw.ps1 -Name sf2player_plain -LiveCache:$false   without it: all bank formats and the MIDI file player, no MP3 banks
-#   .\build_fw.ps1 -Name sf2player_44k -Rate 44100      the player at 44.1 kHz (RUNNING.md, 2f): plays banks made at 44.1 kHz
+#   Defaults (2026-11-14): -Rate 44100 (RUNNING.md, 2f; bank dist\gm_44k_fill.fm1b), -DualCore auto (on), four-point interpolation on.
+#   .\build_fw.ps1 -Name sf2player_32k -Rate 32000      the old 32 kHz player (linear, one core, bank dist\gm_32k_packed.fm1b)
+#   -Linear: linear interpolation instead of four-point (the default at 44.1 kHz; -Interp4 is only needed at 32 kHz)
 #   -DualCore auto|on|off (default auto): the voices of each block shared between the two cores (RUNNING.md, 2h). auto is on at -Rate 44100 and off at
 #     32 kHz, where the image has 165 bytes to spare and the code takes about 2.8 KB. It borrows the SDK's own CPU1 through the SDK's hand-over
 #     (fm1b.c, app\cpu1_split.c); CPU1 is never started or held by us. The info page (REC) has the line SPLIT: ARP on/off, SEQ the share of the voices
@@ -18,10 +20,14 @@
 # -Rate, -DualCore, -Interp4 and the like write fm1_open\app\fm1b_rate.h (read by fm1b.h and live_cache\mp3_sound.h) the same way, and remove it after.
 # The dual-core code calls two functions of the SDK's library that are local symbols: the build links, reads their addresses with llvm-nm into
 # fm1_open\app\cpu1_sdk_addr.h (not committed) and links again until the addresses it was built with are the ones in the image (two or three links).
-param([Parameter(Mandatory)][string]$Name, [string]$Bank = 'dist\gm_32k_packed.fm1b', [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
-      [ValidateSet(32000, 44100)][int]$Rate = 32000, [ValidateSet('auto', 'on', 'off')][string]$DualCore = 'auto', [switch]$Interp4, [switch]$SplitCheck, [switch]$FlashProbe)
+param([Parameter(Mandatory)][string]$Name, [string]$Bank, [string]$Toolchain = 'D:\JL\pi32', [switch]$LiveCache = $true, [int]$CacheKB = 84, [int]$CacheFrames = 2,
+      [ValidateSet(32000, 44100)][int]$Rate = 44100, [ValidateSet('auto', 'on', 'off')][string]$DualCore = 'auto', [switch]$Interp4, [switch]$Linear, [switch]$SplitCheck, [switch]$FlashProbe)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+# defaults (2026-11-14): 44.1 kHz, both cores, four-point interpolation; -Rate 32000 is the old 32 kHz build, -Linear turns four-point off
+if (!$Bank) { $Bank = if ($Rate -eq 44100) { 'dist\gm_44k_fill.fm1b' } else { 'dist\gm_32k_packed.fm1b' } }
+if ($Linear -and $Interp4) { throw '-Linear and -Interp4 exclude each other' }
+if (!$Linear -and !$Interp4 -and $Rate -eq 44100 -and !$FlashProbe) { $Interp4 = [switch]$true }
 if ($Name -notmatch '^[A-Za-z0-9_.-]{1,27}$') { throw 'Name: letters, digits, _ . - only, at most 27 characters (the screen shows 40 with .fwsc)' }
 $info = Join-Path $root 'fm1_open\app\build_info.h'
 $rateFile = Join-Path $root 'fm1_open\app\fm1b_rate.h'
