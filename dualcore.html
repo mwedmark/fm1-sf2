@@ -113,6 +113,10 @@ MIDIs/UnderTheSea.mid</textarea>
   function onMessage(e) {
     const d = e.data;
     if (d[0] !== 0xf0 || d[1] !== 0x7d || d[2] !== 0x46 || d[3] !== 0x4d || d[4] !== 0x53) return;
+    if (d[5] === 0x10) {            // the panel's text, one line a message (sf2player.c, screen_midi_poll): window.__screen.lines[n], window.__screen.text()
+      const sc = window.__screen || (window.__screen = { page: 0, lines: [], text() { return this.lines.filter(Boolean).join('\n'); } });
+      sc.page = d[6]; sc.lines[d[7]] = String.fromCharCode(...d.subarray(8, d.length - 1)); return;
+    }
     const n = COUNT[d[5]];
     if (!n || d.length !== 6 + n * 5 + 1) return;
     const r = { at: performance.now() };

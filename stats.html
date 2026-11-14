@@ -67,6 +67,10 @@
       <tbody id="rows"></tbody>
     </table></div>
   </div>
+  <div class="panel">
+    <h2>The panel's text (as the screen shows it)</h2>
+    <pre id="screen" style="margin:0;font:13px/1.35 ui-monospace,Consolas,monospace;white-space:pre-wrap"></pre>
+  </div>
 </main>
 <script>
   // The message (sf2player.c, stats_midi_poll): F0 7D 46 4D 53 <version>, values of 32 bits as 5 bytes of 7 bits, lowest first, F7.
@@ -78,7 +82,16 @@
   const $ = id => document.getElementById(id);
   let base = null, last = null, count = 0;
 
+  // The panel's text, one line a message (sf2player.c, screen_midi_poll): F0 7D 46 4D 53 10 <page> <line> <ASCII> F7. window.__screen has it too.
+  const screenLines = [];
+  window.__screen = { page: 0, lines: screenLines, text() { return screenLines.filter(Boolean).join('\n'); } };
+  function screenLine(data) {
+    window.__screen.page = data[6];
+    screenLines[data[7]] = String.fromCharCode(...data.subarray(8, data.length - 1));
+    $('screen').textContent = window.__screen.text();
+  }
   function decode(data) {
+    if (data[0] === 0xf0 && data[1] === 0x7d && data[2] === 0x46 && data[3] === 0x4d && data[4] === 0x53 && data[5] === 0x10 && data.length > 9) { screenLine(data); return null; }
     const n = COUNT[data[5]];
     if (!n || data.length !== 6 + n * 5 + 1 || data[0] !== 0xf0 || data[1] !== 0x7d || data[2] !== 0x46 || data[3] !== 0x4d || data[4] !== 0x53) return null;
     const r = { stepMax: '–', screenMax: '–', squeezed: 0 };

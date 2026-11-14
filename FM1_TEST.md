@@ -239,11 +239,11 @@ Firmware: bygg med `.\build_fw.ps1 -Name sf2p_v48_clk -Voices 48` (`-Voices 40` 
 
 ## L. 40 röster vid 320 MHz (2026-11-14)
 
-Firmware: `dist\sf2p_44k_v40_320.fwsc` (`build_fw.ps1 -Name sf2p_44k_v40_320 -Voices 40`: 44,1 kHz, båda kärnorna, fyrpunktsinterpolation, ingen klockväxel; imagen har 3 173 byte kvar, poolen är 71 KB). Banken är den som redan ligger i flashen (`gm_44k_fill.fm1b`). Tillbaka till 32 röster: `dist\sf2player_44k.fwsc`. Referens vid 320 MHz: 32 röster har topp 72-78 % och spärren tar 0 (RUNNING.md 2h); 48 röster hade Dancing Queen topp 102-109 % med spärren 18-31 (avsnitt J och K).
+Firmware: `dist\sf2p_44k_v40_scr.fwsc` (`build_fw.ps1 -Name sf2p_44k_v40_scr -Voices 40`: 44,1 kHz, båda kärnorna, fyrpunktsinterpolation, ingen klockväxel; imagen har ca 3 000 byte kvar, poolen är 71 KB; **skärmens text skickas också över USB-MIDI**: en rad i taget var 25 ms, så hela sidan var 0,5 s, och `stats.html` visar den i rutan "The panel's text" och `dualcore.html` har den i `window.__screen`, så en dator kan läsa av REC-sidan utan att du skriver av den). Banken är den som redan ligger i flashen (`gm_44k_fill.fm1b`). Tillbaka till 32 röster: `dist\sf2player_44k.fwsc`. Referens vid 320 MHz: 32 röster har topp 72-78 % och spärren tar 0 (RUNNING.md 2h); 48 röster hade Dancing Queen topp 102-109 % med spärren 18-31 (avsnitt J och K).
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
-| L1 | Flasha firmwaren. Infosidan (REC): firmwarens CRC32 och rad överst. | CRC32 1E436FC1, 450 748 byte. Raden `B… SHORT 0 OVR 0` (räknas från start). | |
+| L1 | Flasha firmwaren. Infosidan (REC): firmwarens CRC32 och rad överst. | CRC32 FDDA508E, 450 908 byte. Raden `B… SHORT 0 OVR 0` (räknas från start). | |
 | L2 | `load48_all.mid` och `load48_filter.mid` (dualcore.html, andel 50 %). | Fulla röster utan att spärren ingriper ofta: topp under 80 %. | |
 | L3 | Dancing Queen, Africa, Under the Sea (45 s, andel 50 %). | Topp under 90 %, spärren tar få röster (jämför 32 röster: 0, 48 röster: 18-31). | |
 | L4 | Läs av `SHORT … OVR …` på REC efter L2-L3. | Låga värden (inga eller få förlorade block). | |

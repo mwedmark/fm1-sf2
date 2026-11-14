@@ -369,9 +369,27 @@ static void cache_service_timed(void)
  * so that a waiting note's sound got room (fm1b.c, packed_squeeze). Version 1 had 0..19, version 2 0..21.
  * Without the live cache the cache's values are 0. */
 static uint32_t stats_sent_at, window_step_max, window_screen_max;
+/* The screen's text over USB MIDI, so that a PC can read what the panel shows (the info page's counters and so on): one line at a time, 25 ms apart,
+ * round robin over the 20 line slots (the whole page in half a second): F0 7D 46 4D 53 10 <page> <line> <text, 7-bit ASCII> F7. A slot is empty (no text)
+ * when the page does not use it (page_clear empties them all). dualcore.html and stats.html read it; nothing is kept, no RAM. */
+static void screen_midi_poll(uint32_t now)
+{
+    static uint32_t at;
+    static unsigned next;
+    if (now - at < 25U)
+        return;
+    at = now;
+    uint8_t m[8 + LINE_CHARS + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, 0x10, (uint8_t)page, (uint8_t)next}, *d = m + 8;
+    for (const char *t = shown[next]; *t && d < m + 8 + LINE_CHARS; ++t)
+        *d++ = (uint8_t)(*t & 0x7f);
+    *d++ = 0xf7;
+    if (fm1_midi_send_port(FM1_MIDI_USB, m, (size_t)(d - m)) == 0)   /* -1 no USB host, -2 queue full: the same line again next time */
+        next = (next + 1U) % LINES;
+}
 static void stats_midi_poll(void)
 {
     uint32_t now = fm1_millis();
+    screen_midi_poll(now);
     if (now - stats_sent_at < 1000U)
         return;
     stats_sent_at = now;
