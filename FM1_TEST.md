@@ -243,8 +243,8 @@ Firmware: `dist\sf2p_44k_v40_scr.fwsc` (`build_fw.ps1 -Name sf2p_44k_v40_scr -Vo
 
 | # | Steg | Väntat | Resultat |
 | --- | --- | --- | --- |
-| L1 | Flasha firmwaren. Infosidan (REC): firmwarens CRC32 och rad överst. | CRC32 FDDA508E, 450 908 byte. Raden `B… SHORT 0 OVR 0` (räknas från start). | |
-| L2 | `load48_all.mid` och `load48_filter.mid` (dualcore.html, andel 50 %). | Fulla röster utan att spärren ingriper ofta: topp under 80 %. | |
-| L3 | Dancing Queen, Africa, Under the Sea (45 s, andel 50 %). | Topp under 90 %, spärren tar få röster (jämför 32 röster: 0, 48 röster: 18-31). | |
-| L4 | Läs av `SHORT … OVR …` på REC efter L2-L3. | Låga värden (inga eller få förlorade block). | |
+| L1 | Flasha firmwaren. Infosidan (REC): firmwarens CRC32 och rad överst. | CRC32 FDDA508E, 450 908 byte. Raden `B… SHORT 0 OVR 0` (räknas från start). |  2026-11-14, FM-1: CRC32 FDDA508E, 450 908 byte, bank 811B3999 533 268 byte (läst över MIDI). Ok. |
+| L2 | `load48_all.mid` och `load48_filter.mid` (dualcore.html, andel 50 %). | Fulla röster utan att spärren ingriper ofta: topp under 80 %. |  2026-11-14, FM-1, 30 s, andel 50 %: load48_all medel 60 %, topp 68 %, 36,5 röster, spärren 0; load48_filter 54 %, 83 %, 27 röster, spärren 5. Ok (spärren ingriper bara med filter). |
+| L3 | Dancing Queen, Africa, Under the Sea (45 s, andel 50 %). | Topp under 90 %, spärren tar få röster (jämför 32 röster: 0, 48 röster: 18-31). |  2026-11-14, FM-1: Dancing Queen medel 53 %, topp 95 %, 11 s över 80 %, spärren 15; Africa 49 %, 82 %, 2 s, 4; Under the Sea 62 %, 82 %, 3 s, 5. Mellan 32 röster (topp 78 %, spärren 0) och 48 (topp 102-109 %, spärren 18-31), närmare 48 på Dancing Queen. |
+| L4 | Läs av `SHORT … OVR …` på REC efter L2-L3. | Låga värden (inga eller få förlorade block). |  2026-11-14, FM-1 (REC-sidan läst över MIDI efter de fem filerna, ca 264 s sedan start): B90890 SHORT 0 OVR 4. Fyra förlorade block av 90 890. |
 | L5 | Lyssna på låtarna och på pianospel. | Rent. | |
