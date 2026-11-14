@@ -5,5 +5,6 @@
   "play": "https://mwedmark.github.io/fm1-sf2/",
   "editor": "https://mwedmark.github.io/fm1-sf2/converter.html",
   "image": "docs/img/lcd_program_note.png",
-  "color": "#4fc3f7"
+  "color": "#4fc3f7",
+  "sounds": "licensed: General MIDI SoundFont found via musical-artifacts.com (header names E-mu Systems, 1993), licence unknown"
 }
