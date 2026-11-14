@@ -427,6 +427,68 @@ samples (8-16 KB at 44.1 kHz and 32 voices), which the heap does not have to spa
 buffer is the best case for the cache (2 KB), and it was not cheaper. fm1-emu showed about 47 % (SRAM) against 55 % (flash) for the first minute, so it models the flash
 slower than the device is here.
 
+### 2h. Both cores: the voices shared with the SDK's CPU1 (2026-11-14)
+
+**What it is.** The SDK starts CPU1 itself at power-on and leaves it in a worker loop (`PLAN_DUALCORE_CLOCK.md` on branch `sf2-dualcore`, section 8: how that was found in `sdk.elf`, and why our own
+start tests of 2026-11-05 and 2026-11-13 hung the unit). The player borrows it through the SDK's own hand-over (`cpu_enter_sfc_critical(func, arg)`, which its flash driver uses). In each audio
+block `fm1b_render_sends` lists the voices that run and gives CPU1 a share of their cost (50 % at start; a filtered voice counts 3, another 2); CPU1 renders its voices into buffers of its own
+while CPU0 renders the rest, and CPU0 adds the buffers (`fm1b.c`, `app\cpu1_split.c`). Our code never starts, holds or restarts CPU1.
+
+**Build.** `.\build_fw.ps1 -Name sf2player_44k -Rate 44100` has it on (`-DualCore auto`); `-DualCore off` is one core. At 32 kHz it is off: the image has 165 bytes to spare and the code takes about
+2.8 KB. The 44.1 kHz build: image 449 692 bytes (4 229 to spare), pool 77 KB, taken from what the heap allows (build_fw.ps1 lowers it and links again if the heap comes out short, unless `-CacheKB`
+is given); `-Interp4` is four-point interpolation, `-SplitCheck` a verification build. The two SDK functions are local symbols of its library: the build links, reads their addresses off the link with
+`llvm-nm` and links again until the image has the addresses it was built with (three links). `build_firmware.ps1` and `build_all.ps1` pass the switches on. The default 32 kHz build is unchanged (453 756 bytes).
+
+**Safety.** CPU1 not up (the SDK's flag is not set), a flash write going on (`fm1b_split_hold` in `sf2_upload.c`) or the SDK having CPU1 parked: the block is rendered on CPU0 alone, as on one core.
+CPU1 not done in 5 ms: its share is left out of that block and the split is switched off. The info page (REC) has the line `SPLIT 50% V51% L0 H1 W27 J559` (CPU1's share; its share of the voices
+so far; blocks it was late with; per block in us the handshake, CPU0's wait and CPU1's job), ARP switches it on and off, SEQ sets the share (30 to 70 %); CC 102 on MIDI channel 16 sets it too (0: off).
+The live figures over MIDI (`stats.html`, version 4) carry the share.
+
+**Exact.** `node test_split.js` (host): with and without the split the output stage gives the same int32 output block for block, at shares 0 to 100 %, at 32 and 44.1 kHz, with linear and four-point
+interpolation, and the verification build agrees with itself. On the FM-1, `-SplitCheck` (CPU0 renders CPU1's voices again from copies of their state and compares the buffers and the voices' state;
+info page `CHK`, live figures version 5): "Dancing Queen", 60 s, share 50 %: **18 116 blocks compared, none differed**. Not heard: the assistant cannot listen.
+
+**On the FM-1: six songs, one core against both** (`dualcore.html`: plays MIDI files to the FM-1 once for each share and sums up the live figures; 44.1 kHz firmware `-Rate 44100`, the `--fill 1` bank, linear
+interpolation; the first 75 s of each song; the seconds with voices playing):
+
+| Song | CPU mean, one core → both | Highest peak | Seconds at 80 % or more | Voices, mean | Taken by the CPU guard |
+| --- | --- | --- | --- | --- | --- |
+| ABBA, Dancing Queen | 54.4 → **43.7 %** | 107 → **72 %** | 42 → **0** | 18.7 → 27.9 | 83 → **0** |
+| Star Wars theme | 39.8 → **24.0 %** | 80 → **51 %** | 2 → **0** | 18.2 → 18.1 | 0 → 0 |
+| TOTO, Africa | 59.3 → **41.9 %** | 88 → **58 %** | 5 → **0** | 23.6 → 28.6 | 9 → **0** |
+| Backstreet Boys, I Want It That Way | 55.5 → **35.0 %** | 87 → **60 %** | 13 → **0** | 23.1 → 23.5 | 13 → **0** |
+| Beethoven, Hammerklavier 4 | 58.8 → **36.0 %** | 81 → **52 %** | 3 → **0** | 25.1 → 25.0 | 2 → **0** |
+| Under the Sea | 60.2 → **41.2 %** | 88 → **59 %** | 25 → **0** | 26.2 → 29.9 | 25 → **0** |
+| **All six** | | 107 → **72 %** | 90 of 442 → **0 of 447** | | 132 → **0** |
+
+No late notes and no lack of room in the pool in any run. With both cores no second of any song reaches the CPU guard's 80 %, and the guard takes no voice; on one core it takes 132 and cuts
+the voices down (Dancing Queen: 18.7 voices on average on one core, 27.9 on both). Together with the whole of "Never gonna give you up" (`PLAN_DUALCORE_CLOCK.md`, section 8: guard 205 → 0).
+
+**Four-point interpolation, on the FM-1** (`-Interp4`, pool 74 KB; the same page, the first 75 s of three songs, CPU1's share 0 = one core, 50 % and 70 %). Four-point interpolation (FluidSynth's
+default, which removes the aliasing of the linear one: RUNNING.md 2g, issue 5) cost about 18 points of CPU on one core in fm1-emu and was left off for that; with the voices on both cores it fits:
+
+| Song | Share | CPU mean | Highest peak | Seconds at 80 % or more | Voices, mean | Taken by the CPU guard |
+| --- | --- | --- | --- | --- | --- | --- |
+| Dancing Queen | one core | 50.8 % | 113 % | 46 | 14.5 | 118 |
+| | **50 %** | 51.7 % | **78 %** | **0** | 28.2 | **0** |
+| | 70 % | 56.1 % | 98 % | 41 | 22.4 | 61 |
+| Africa | one core | 57.6 % | 92 % | 7 | 17.5 | 14 |
+| | **50 %** | 48.9 % | **66 %** | **0** | 27.8 | **0** |
+| | 70 % | 61.7 % | 81 % | 5 | 27.2 | 3 |
+| Under the Sea | one core | 58.1 % | 99 % | 28 | 18.8 | 51 |
+| | **50 %** | 49.0 % | **69 %** | **0** | 29.0 | **0** |
+| | 70 % | 63.0 % | 87 % | 6 | 28.6 | 10 |
+
+With four-point interpolation and 50 % to CPU1 no second of the three songs reaches 80 % and the guard takes nothing; the same three songs with linear interpolation (above) read 72, 58 and 59 % at
+their highest, so four-point costs about 7 to 10 points of CPU on both cores. **50 % is the right share:** at 70 % CPU1 is the one that is late and the CPU0 waits for it (the peaks and the guard
+come back); on one core four-point interpolation does not fit (guard 118, 14, 51). The host test is exact with four-point interpolation too (`node test_split.js --interp4=1`). Not heard.
+(A first run of these three songs was spoiled when the page was in the background: Chrome throttled its timers and the songs went out in lumps; `dualcore.html` now gives the messages
+timestamps of their own.)
+
+**Not known.** How it sounds: nothing here was listened to, neither the split nor four-point interpolation. Only six songs for the linear build and three for four-point, 75 s each. The share is fixed
+at 50 % (SEQ and CC 102 change it by hand); a share chosen from the measured cost of each core's last block would follow a song whose voices are heavier on one side (not built). A flash write by
+the SDK's own code (not ours) while CPU1 renders is not guarded against; the SDK's flash driver then waits for CPU1.
+
 ## 3. The converter and browser simulator (verified)
 
 ```powershell

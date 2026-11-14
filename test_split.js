@@ -2,22 +2,22 @@
 // Builds the player's output stage (fm1b, sf2fx, sf2out) for WebAssembly twice, without and with FM1B_SPLIT (the "other core" runs its
 // share at once, test_fluid/split_host.c), plays the same random notes on 16 channels with different programs, sends, pans and filters
 // through both, and compares the int32 output of every block. Also at other shares of the cost (0, 25, 50, 75, 100 %).
-//   node test_split.js [bank.fm1b] [--rate=44100] [--seconds=30]
+//   node test_split.js [bank.fm1b] [--rate=44100] [--seconds=30] [--interp4=1]     (--interp4=1: the four-point interpolation, FM1B_INTERP4 1)
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
 const root = __dirname;
 const args = process.argv.slice(2), opt = {};
 for (const a of args) { const m = a.match(/^--([^=]+)=(.*)$/); if (m) opt[m[1]] = m[2]; }
 const bankPath = path.resolve(root, args.find(a => !a.startsWith('--')) || 'banks/default.fm1b');
-const rate = +(opt.rate || 32000), seconds = +(opt.seconds || 30);
+const rate = +(opt.rate || 32000), seconds = +(opt.seconds || 30), interp4 = +(opt.interp4 || 0);
 const sdk = path.join(root, 'fm1_open/build/tools/wasi-sdk-27.0-x86_64-windows'), app = path.join(root, 'fm1_open/app');
 const sources = [path.join(root, 'test_fluid/wrap.c'), path.join(root, 'test_fluid/split_host.c'), ...['fm1b.c', 'sf2fx.c', 'sf2out.c'].map(f => path.join(app, f))];
 const outDir = path.join(root, 'test_fluid/out');
 fs.mkdirSync(outDir, { recursive: true });
 
 function build(split, check = 0) {
-  const wasm = path.join(outDir, `split_${rate}_${split}${check ? '_check' : ''}.wasm`);
+  const wasm = path.join(outDir, `split_${rate}_${split}${check ? '_check' : ''}${interp4 ? '_i4' : ''}.wasm`);
   execFileSync(path.join(sdk, 'bin/clang.exe'), ['--sysroot=' + path.join(sdk, 'share/wasi-sysroot'), '-O2', '-DFM1_HOST_TEST', `-DFM1B_RATE=${rate}U`,
-    '-DFM1B_INTERP4=0', `-DFM1B_SPLIT=${split}`, `-DFM1B_SPLIT_CHECK=${check}`, '-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-dynamic', '-Wall', '-Werror',
+    `-DFM1B_INTERP4=${interp4}`, `-DFM1B_SPLIT=${split}`, `-DFM1B_SPLIT_CHECK=${check}`, '-mexec-model=reactor', '-Wl,--no-entry', '-Wl,--export-dynamic', '-Wall', '-Werror',
     ...['fm1_open/app', 'fm1_open/app/synth', 'fm1_open/sdk/include'].map(d => '-I' + path.join(root, d)), ...sources, '-o', wasm], { stdio: 'inherit' });
   const module = new WebAssembly.Module(fs.readFileSync(wasm));
   return () => {                                       // a fresh instance for each run: no voice left from the one before
@@ -74,7 +74,7 @@ function play(make, share) {
 const one = play(build(0));
 const two = build(1), checked = build(1, 1);
 let failed = 0;
-console.log(`${path.relative(root, bankPath)} at ${rate} Hz, ${seconds} s, up to ${one.peak} voices at once`);
+console.log(`${path.relative(root, bankPath)} at ${rate} Hz${interp4 ? ', four-point interpolation' : ''}, ${seconds} s, up to ${one.peak} voices at once`);
 for (const share of [0, 25, 50, 75, 100]) {
   const r = play(two, share);
   let diff = -1;

@@ -1629,6 +1629,7 @@ static inline __attribute__((always_inline)) void voice_run(struct voice *v, int
     if (ram) pcm = probe_ram;
 #else
     const uint32_t mask = ~0U;
+    (void)mask;                                               /* only the linear voice loop uses it (FM1B_INTERP4 0) */
 #endif
     const uint32_t length = v->length, ls = v->loop_start, le = v->loop_end;
     uint32_t position = v->position, fraction = v->fraction, step = v->step;

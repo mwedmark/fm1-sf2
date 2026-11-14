@@ -141,26 +141,22 @@ MIDIs/UnderTheSea.mid</textarea>
     throw new Error('no figures from the FM-1: is it running a build with the live figures (FM1_STATS_MIDI)?');
   }
 
+  // The messages go out with timestamps of their own (Web MIDI queues them in the browser), so the playing does not depend on this page's timers:
+  // a page in the background gets its timers throttled, down to one a minute, which would send the song in lumps. The figures are the ones that
+  // arrive between the song's start and its end.
   async function playRun(song, events, seconds, share) {
     for (let c = 0; c < 16; ++c) { out.send([0xb0 | c, 123, 0]); out.send([0xb0 | c, 121, 0]); }     // all notes off, controllers reset
     out.send([0xbf, 102, share]);
     await sleep(3500);                                                                               // the tails die away, the share has reached the figures
-    const first = rows.length, t0 = performance.now();
-    let i = 0;
-    while (i < events.length && events[i][0] <= seconds * 1000) {
-      const now = performance.now() - t0;
-      while (i < events.length && events[i][0] <= now && events[i][0] <= seconds * 1000) out.send(events[i++][1]);
-      status(`${song}: share ${share} %, ${(now / 1000).toFixed(0)} of ${seconds} s`);
-      await sleep(2);
-    }
-    while (performance.now() - t0 < seconds * 1000) await sleep(50);
-    const last = rows.length;
-    for (let c = 0; c < 16; ++c) out.send([0xb0 | c, 123, 0]);
-    await sleep(1500);
-    // the seconds of the run with voices playing; deltas of the totals from the figure before the first of them
-    const run = rows.slice(first, last);
+    const t0 = performance.now() + 1000;                                                              // the song starts a second from now
+    status(`${song}: share ${share} %, ${seconds} s`);
+    for (const [ms, bytes] of events) { if (ms > seconds * 1000) break; out.send(bytes, t0 + ms); }
+    for (let c = 0; c < 16; ++c) out.send([0xb0 | c, 123, 0], t0 + seconds * 1000);
+    while (performance.now() < t0 + seconds * 1000 + 1500) await sleep(250);
+    const run = rows.filter(r => r.at >= t0 && r.at <= t0 + seconds * 1000);
     const used = run.filter(r => r.voices > 0);
-    const before = rows[first - 1] || run[0], after = run[run.length - 1];
+    if (!run.length) throw new Error('no figures during the song');
+    const before = rows[rows.indexOf(run[0]) - 1] || run[0], after = run[run.length - 1];
     const mean = k => used.length ? used.reduce((s, r) => s + r[k], 0) / used.length : 0;
     const d = k => (after[k] - before[k]) >>> 0;
     return {
