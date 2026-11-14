@@ -372,7 +372,8 @@ static void stats_midi_poll(void)
     if (now - stats_sent_at < 1000U)
         return;
     stats_sent_at = now;
-    enum { VALUES = 23 + FM1B_FLASH_PROBE };                  /* version 4 (the probe build): 23 the probe, 1 when the voices read the SRAM */
+    enum { VALUES = 23 + (FM1B_FLASH_PROBE || FM1B_SPLIT) };  /* version 4: 23 the probe (1 when the voices read the SRAM) or the split's share in %. Version 5 (-SplitCheck): 22 the blocks checked and 23 how many
+                                                                 * differed, in place of 'squeezed' and the share: fm1_midi_send_port takes 128 bytes a message at most (24 values are 127) */
     uint32_t v[VALUES] = {now};
 #if FM1B_PACKED
     struct fm1b_cache_stats cs;
@@ -390,8 +391,17 @@ static void stats_midi_poll(void)
     window_step_max = window_screen_max = 0;
 #if FM1B_FLASH_PROBE
     v[23] = fm1b_probe();
+#elif FM1B_SPLIT
+    {
+        struct fm1b_split_stats ss;
+        fm1b_split_stats(&ss);
+        v[23] = fm1b_split_share;
+#if FM1B_SPLIT_CHECK
+        v[22] = ss.checked; v[23] = ss.bad;
 #endif
-    uint8_t m[6 + VALUES * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, VALUES == 24 ? 0x04 : 0x03}, *d = m + 6;
+    }
+#endif
+    uint8_t m[6 + VALUES * 5 + 1] = {0xf0, 0x7d, 0x46, 0x4d, 0x53, FM1B_SPLIT_CHECK ? 0x05 : VALUES == 24 ? 0x04 : 0x03}, *d = m + 6;
     for (unsigned i = 0; i < VALUES; ++i)
         for (unsigned k = 0; k < 5; ++k)
             *d++ = (uint8_t)((v[i] >> (7 * k)) & 0x7fU);
@@ -513,7 +523,32 @@ static void info_update(void)
         line_show(14, 217, wide, 1, GREY);
     }
 #endif
-#if FM1B_FLASH_PROBE
+#if FM1B_SPLIT
+    {   /* "SPLIT 50% V51% L0 H1 W27 J559": the share of the voices' cost for CPU1 (OFF: 0; NO CPU1: it is not up), its share of the voices
+         * so far, the blocks it did not finish in time, and per split block in us the handshake, CPU0's wait for CPU1 and CPU1's job;
+         * with -SplitCheck " CHK 1234/0": the blocks checked / that differed. ARP: on or off, SEQ: the share 30 to 70 %. */
+        struct fm1b_split_stats ss;
+        struct fm1b_split_times tm;
+        char wide[LINE_CHARS + 1];
+        fm1b_split_stats(&ss);
+        fm1b_split_times(&tm);
+        const unsigned share = fm1b_split_share, k = tm.count ? tm.count : 1U;
+        d = !fm1b_split_up() ? put_text(wide, "SPLIT: CPU1 NOT UP") : share ? put_text(put_number(put_text(wide, "SPLIT "), (int32_t)share, 0), "%") : put_text(wide, "SPLIT OFF");
+        d = put_text(put_number(put_text(d, " V"), ss.voices_all ? (int32_t)(100ULL * ss.voices_other / ss.voices_all) : 0, 0), "%");
+        d = put_number(put_text(d, " L"), (int32_t)ss.late, 0);
+        d = put_number(put_text(d, " H"), (int32_t)(tm.handshake_us / k), 0);
+        d = put_number(put_text(d, " W"), (int32_t)(tm.wait_us / k), 0);
+        d = put_number(put_text(d, " J"), (int32_t)(tm.job_us / k), 0);
+#if FM1B_SPLIT_CHECK
+        d = put_number(put_text(d, " CHK "), (int32_t)ss.checked, 0);
+        d = put_number(put_text(d, "/"), (int32_t)ss.bad, 0);
+#endif
+        *d = 0;
+        wide[LINE_CHARS] = 0;
+        line_show(15, 140, wide, 1, ss.late || ss.bad ? ORANGE : share && fm1b_split_up() ? GREEN : GREY);
+    }
+    line_show(11, 228, "REC BACK  ARP SPLIT ON/OFF  SEQ SHARE", 1, GREY);
+#elif FM1B_FLASH_PROBE
     line_show(11, 228, fm1b_probe() ? "REC BACK  ARP SAMPLES: RAM" : "REC BACK  ARP SAMPLES: FLASH", 1, fm1b_probe() ? ORANGE : GREY);
 #else
     line_show(11, 228, "REC BACK", 1, GREY);
@@ -1019,6 +1054,17 @@ void groove_screen_control(void)
 #if FM1B_FLASH_PROBE
     if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP)))      /* ARP on the info page: the voices' samples from the flash or the SRAM probe */
         fm1b_probe_set(!fm1b_probe());
+#endif
+#if FM1B_SPLIT
+    {   /* ARP on the info page: the split on and off (back to the share it had); SEQ: the share 30, 40 .. 70 % */
+        static uint8_t split_kept = 50;
+        if (page == PAGE_INFO && (pressed & (1U << BUTTON_ARP))) {
+            if (fm1b_split_share) { split_kept = fm1b_split_share; fm1b_split_share = 0; }
+            else fm1b_split_share = split_kept;
+        }
+        if (page == PAGE_INFO && (pressed & (1U << BUTTON_SEQ)))
+            fm1b_split_share = split_kept = (uint8_t)(fm1b_split_share >= 70U || fm1b_split_share < 30U ? 30U : fm1b_split_share + 10U);
+    }
 #endif
     if (channels && (pressed & (1U << BUTTON_ARP))) {             /* ARP: mute or unmute the selected channel, while it plays */
         struct fm1b_channel info;

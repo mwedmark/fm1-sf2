@@ -395,6 +395,11 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
     else if (bytes == 3 && type == 0xb0U) {
         unsigned value = message[2];
         switch (message[1]) {
+#if FM1B_SPLIT
+        case 102:                                              /* a FM1B_SPLIT test build: on channel 16, CPU1's share of the voices in % (0: off) */
+            if (channel == 15U) fm1b_split_share = (uint8_t)(value > 100U ? 100U : value);
+            break;
+#endif
         case 0:   bank_msb[channel] = (uint8_t)value; break;
         case 32:  bank_lsb[channel] = (uint8_t)value; break;
         case 91:                                               /* reverb and chorus sends: per channel (the knobs set the master levels) */

@@ -74,7 +74,7 @@
   // cut so that a waiting note's sound got room).
   const NAMES = ['ms', 'hits', 'misses', 'evictions', 'noRoom', 'frames', 'requested', 'lost', 'waiting', 'pinned',
                  'busyMs', 'cycles', 'cycleMs', 'cycleMax', 'cpu', 'cpuPeak', 'voices', 'held', 'tail', 'guard', 'stepMax', 'screenMax', 'squeezed', 'probe'];
-  const COUNT = { 1: 20, 2: 22, 3: 23, 4: 24 };   // 4: a FM1B_FLASH_PROBE build, 'probe' 1 while the voices read the SRAM (RUNNING.md, 2g)
+  const COUNT = { 1: 20, 2: 22, 3: 23, 4: 24, 5: 24 };   // 5: a FM1B_SPLIT_CHECK build: the blocks checked and how many differed in place of 'squeezed' and 'probe'   // 4: 'probe' is 1 while a FM1B_FLASH_PROBE build's voices read the SRAM (RUNNING.md, 2g), or a FM1B_SPLIT build's share for CPU1 in % (0: off)
   const $ = id => document.getElementById(id);
   let base = null, last = null, count = 0;
 

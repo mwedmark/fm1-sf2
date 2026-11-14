@@ -134,9 +134,11 @@ void sf2_upload_poll(void)
         if (size >= 48 && size <= FM1B_FLASH_BYTES) {
             upload_stop_playing();
             status = 0;
+            fm1b_split_hold(1);                                  /* no voices shared with the other core while the flash is written */
             for (uint32_t at = 0; at < size && !status; at += FM1_FLASH_SECTOR_BYTES)
                 if (fm1_flash_erase(FM1B_FLASH_OFFSET + at) != FM1_FLASH_OK)
                     status = 3;
+            fm1b_split_hold(0);
             upload_size = status ? 0 : size;
             upload_active = !status;
         }
@@ -149,8 +151,10 @@ void sf2_upload_poll(void)
         if (!status && (!count || offset > upload_size || count > upload_size - offset))
             status = 2;
         upload_stage = 10;
+        fm1b_split_hold(1);
         if (!status && fm1_flash_write(FM1B_FLASH_OFFSET + offset, data, count) != FM1_FLASH_OK)
             status = 3;
+        fm1b_split_hold(0);
         upload_stage = 11;
     } else if (cmd == 9 && n == 17) {                            /* F0 7D S F 02 09 size*5 crc*5 F7 */
         uint32_t size = read35(m + 6);

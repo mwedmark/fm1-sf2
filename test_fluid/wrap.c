@@ -24,6 +24,16 @@ EXPORT unsigned cf_rate(void) { return FM1B_RATE; }
 EXPORT unsigned cf_voice_max(void) { return FM1B_VOICES; }
 EXPORT unsigned cf_sounding(void) { return fm1b_voices_sounding(); }
 EXPORT unsigned cf_limited(void) { return sf2out_limited(); }
+#if FM1B_SPLIT
+/* test_split.js: the share of the voices' cost for the other core, and what the split did */
+EXPORT void cf_split_share(unsigned percent) { fm1b_split_share = (uint8_t)percent; }
+static struct fm1b_split_stats split_read(void) { struct fm1b_split_stats s; fm1b_split_stats(&s); return s; }
+EXPORT unsigned cf_split_blocks(void) { return split_read().blocks; }
+EXPORT unsigned cf_split_other(void) { return split_read().voices_other; }
+EXPORT unsigned cf_split_all(void) { return split_read().voices_all; }
+EXPORT unsigned cf_split_checked(void) { return split_read().checked; }
+EXPORT unsigned cf_split_bad(void) { return split_read().bad; }
+#endif
 EXPORT unsigned cf_cut(void)
 {
     struct fm1b_status st;
