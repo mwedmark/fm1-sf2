@@ -146,7 +146,7 @@ for (const [program, note] of [[73, 69], [0, 60], [0, 84], [40, 55]]) {
   check(before === 4 && w.rt_status(1) === 5, `86 blocks (0.25 s) under 60 %: one voice back (${before} -> ${w.rt_status(1)})`);
   for (let i = 0; i < 86 * 30; ++i) w.rt_load(70, 100);
   check(w.rt_status(1) === 5, 'between 60 and 80 % the limit stays');
-  for (let i = 0; i < 86 * 30; ++i) w.rt_load(10, 100);
+  for (let i = 0; i < 86 * w.rt_voice_max(); ++i) w.rt_load(10, 100);        // one voice back every 0.25 s from 5: voice_max steps are enough (30 were for 32 voices)
   check(w.rt_status(1) === w.rt_voice_max(), `a calm interrupt gets every voice back (${w.rt_status(1)})`);
 }
 console.log(failed ? `${failed} of ${checks} checks FAILED` : `${checks}/${checks} checks passed`);
