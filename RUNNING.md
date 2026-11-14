@@ -499,7 +499,9 @@ and reports per 93 ms frame the octave-band distance, frames where the unit is 6
 Sample-by-sample correlation is low by nature (reverb/chorus, timing of MIDI over USB); the figures are similarity to the host render, not quality.
 
 44.1 kHz, linear, 40 s (30 s for Under the Sea), one core -> both cores: frames 6 dB quieter than host / mean band distance: Dancing Queen 3 (0.8 %) / 2.6 dB -> 0 / 2.0 dB;
-Africa 0 / 1.95 -> 0 / 2.0; Under the Sea 2 / 3.5 -> 0 / 3.1. No clicks or zero runs on the unit in any run. Not known: how it sounds (listen to the four files of the excerpt).
+Africa 0 / 1.95 -> 0 / 2.0; Under the Sea 2 / 3.5 -> 0 / 3.1. No clicks or zero runs on the unit in any run. Four-point (sf2player_44k_i4, compared with the host's four-point render), one core -> both cores: Dancing Queen 8 frames 6 dB quiet / 3.1 dB, CPU guard took 58 voices -> 0 frames / 1.8 dB (guard 3);
+Africa 0 / 1.9 -> 0 / 2.0. No clicks or zero runs. So four-point on one core drops notes in the densest passage (more than linear), and with the split it is as clean as linear.
+Not known: how it sounds (listen to the six files of the Dancing Queen excerpt: FluidSynth, host, linear one/two cores, four-point one/two cores).
 
 ## 3. The converter and browser simulator (verified)
 
