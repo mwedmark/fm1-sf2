@@ -386,11 +386,10 @@ void fm1_app_midi_received(unsigned source, const uint8_t *message, size_t bytes
         unsigned velocity = type == 0x90U ? message[2] : 0U;
         sf2player_midi_note(channel, message[1], velocity);   /* channel 10 is the percussion kit; armed rows layer on top (sf2player.c) */
     }
-    else if (bytes == 2 && type == 0xc0U) {                   /* program change; the kit of channel 10 is the bank's first */
+    else if (bytes == 2 && type == 0xc0U) {                   /* program change; channel 10's picks the percussion kit */
         /* 120 (General MIDI 2) or the 14-bit bank 128 is the percussion bank; any other bank is the melodic one. */
         unsigned drum_bank = bank_msb[channel] == 120U || (bank_msb[channel] == 1U && !bank_lsb[channel]);
-        if (channel != 9U)
-            sf2player_channel_program(channel, drum_bank ? 128U : 0U, message[1]);
+        sf2player_channel_program(channel, drum_bank ? 128U : 0U, message[1]);   /* channel 10: fm1b.c picks the kit */
     }
     else if (bytes == 3 && type == 0xb0U) {
         unsigned value = message[2];

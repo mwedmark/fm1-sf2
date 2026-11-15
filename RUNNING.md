@@ -86,6 +86,7 @@ Each one compiles the real C source to WebAssembly with the WASI SDK on the firs
 
 ```bash
 cd D:/git/fm1-sf2
+node test_drum_kits.js         # the kit chosen by a program change on channel 10 (needs soundfonts/Roland SC-55 Presets.sf2; skips without it)
 node test_multitimbral.js     # 93 checks: channels, program change, volume, CC120/121/123, channel 10, pitch bend and its
                               # RPN range, modulation wheel, sustain pedal, what the channel page reads, the effect sends, pan,
                               # mute and solo. Uses dist/gm_32k.fm1b
@@ -106,7 +107,7 @@ node test_sound_cache.js [font] [mid]  # the live cache's decoder and cache (fm1
 ```
 
 `test_multitimbral.js` runs the real `fm1b.c` with 16 voices, as the device has. It does **not** cover
-`transfer.c` (MIDI routing: bank select, channel 10 skipping program change, the controllers per channel) or the panel (the `MULTI` line, the channel page).
+`transfer.c` (MIDI routing: bank select, channel 10's program change choosing the kit, the controllers per channel) or the panel (the `MULTI` line, the channel page).
 Those are only compiled, so test them in the emulator or on the device.
 
 ### 2b. Against FluidSynth, the reference (2026-11-04)
@@ -762,7 +763,7 @@ did arrive in every run on 2026-11-01 (they are played shortly after boot). Meas
 | Message | Effect |
 |---|---|
 | Note on/off, channels 1-9, 11-16 | Plays the channel's preset. A channel that never had a program change plays the panel's preset (SELECT) |
-| Note on/off, channel 10 | The percussion kit (the first kit in the bank), same as the SCL button |
+| Note on/off, channel 10 | The percussion kit (the first kit in the bank until a program change on channel 10 chooses another), same as the SCL button |
 | Program change | Per channel. Bank select first (CC0/CC32): CC0=120, or CC0=1 and CC32=0, is the percussion bank, anything else melodic. A preset the bank lacks is ignored. Ignored on channel 10 |
 | CC7 volume, CC11 expression | Per channel, General MIDI curve, live on sounding notes. 127/127 is unity |
 | Pitch bend | Per channel, on sounding notes too. Range 2 semitones until RPN 0 sets it (CC101=0, CC100=0, CC6 semitones up to 24, CC38 cents) |

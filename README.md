@@ -210,7 +210,7 @@ install page cannot replace it: use the Workbench's Force flash, or `rescue_tool
 | Control | Program page | Channel page |
 | --- | --- | --- |
 | **MASTER** | Output volume | Output volume |
-| **SELECT** | The panel's program (skips numbers the bank does not have) | The selected channel's program; turning below the first one makes the channel follow the panel's program again (channel 10 always plays the kit) |
+| **SELECT** | The panel's program (skips numbers the bank does not have) | The selected channel's program; turning below the first one makes the channel follow the panel's program again (channel 10 always plays the kit; a program change on it chooses which) |
 | **ALGORITHM** | – | The selected channel's volume (CC 7), 4 steps a click |
 | **KNOB1** | – | Moves the cursor (the selected channel) |
 | **KNOB2** | Master pan | The selected channel's pan (CC 10) |
@@ -413,7 +413,7 @@ The FM-1 takes MIDI from USB, the DIN input and Bluetooth MIDI, on all 16 channe
 | Message | What it does |
 | --- | --- |
 | Note on / off | Plays the channel's program. Channel 10 plays the drum kit. Also plays on armed rows listening on the channel. |
-| Program change | Gives the channel its own program from the bank (a program the bank does not have is ignored). Not on channel 10. |
+| Program change | Gives the channel its own program from the bank (a program the bank does not have is ignored). On channel 10 it chooses the percussion kit: the kit at that program, else the nearest one below it (General MIDI: 9 is the Room kit at 8, 25 the TR-808 at 25), and the bank select does not matter. The SCL drum mode plays the same kit. |
 | CC 0 / 32 bank select | Bank 120, or MSB 1 with LSB 0, makes the next program change pick a drum kit; any other bank is the melodic one. |
 | CC 1 modulation | Vibrato, 5.5 Hz, up to ±50 cents |
 | CC 7 volume, CC 11 expression | The channel's level, on the General MIDI curve |

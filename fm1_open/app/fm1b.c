@@ -1381,6 +1381,18 @@ static FM1_DSP_CODE void program_apply(unsigned channel, unsigned program_bank, 
         channel_program[channel] = 0;
         return;
     }
+    if (channel == 9U) {
+        /* Channel 10 plays the percussion kit; a program change picks the kit: the one at that program, else the nearest below
+         * it (General MIDI: 1..7 the Standard kit at 0, 9..15 the Room kit at 8). No kit that low: the kit stays. */
+        for (int32_t k = (int32_t)program; k >= 0; --k) {
+            int32_t kit = preset_of(128U, (unsigned)k, 1);
+            if (kit >= 0) {
+                bank.drum_preset = kit;
+                break;
+            }
+        }
+        return;
+    }
     int32_t p = preset_of(program_bank ? 128U : 0U, program, 0);
     if (p < 0)
         return;

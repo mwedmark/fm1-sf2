@@ -215,7 +215,7 @@ check(Math.abs(ratio - (64 / 127) ** 2) < 0.01, `volume of channel 10 scales the
 fresh(0);
 w.mt_channel_program(9, 0, program);
 w.mt_drum(9, 38, 100);
-check(same(render(LONG), kit), 'a program change on a drum channel does not change the kit');
+check(same(render(LONG), kit), 'a program change on a drum channel keeps the kit of a bank that has one kit');
 
 // 10. Many voices at once: more notes than voices must steal, not crash.
 fresh(0);

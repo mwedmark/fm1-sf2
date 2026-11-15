@@ -504,9 +504,9 @@ notes start, in fm1-emu at 240 MHz; SEA6 is 84 to 98 %, 111 % as they start) and
 | Modulators | a modulator table and its evaluation | small, at block rate | none |
 
 **1. Several percussion kits.** The format already has them: a kit is a preset of bank 128, the bank map index is `128 + program`, and
-`fm1b.h` lets a kit play on any channel by program change. The converter writes every preset of bank 128. What is missing is the player:
-`fm1b.c` takes the first percussion preset the bank has (`drum_preset`) and channel 10 and the SCL drum mode always play that one. Make
-a program change on channel 10 choose the kit, and give the panel a way to choose one (the drum mode's page). A bank with kits that
+`fm1b.h` lets a kit play on any channel by program change. The converter writes every preset of bank 128. What was missing was the player:
+`fm1b.c` takes the first percussion preset the bank has (`drum_preset`) and channel 10 and the SCL drum mode play that one until a program
+change on channel 10 chooses another kit (done: the kit at that program, else the nearest below; `test_drum_kits.js`). Left: a way for the panel to choose one (the drum mode's page). A bank with kits that
 share samples costs only the zones.
 
 **2. Velocity layers.** A zone gets a velocity range. The zone levels record (8 bytes, its size is in the header, offset 52) grows to 12:
